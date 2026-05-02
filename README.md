@@ -1,406 +1,118 @@
-# Keenetic Router Pro - Home Assistant Integration
-![Downloads](https://img.shields.io/github/downloads/abovsh/Keenetic-Router-Pro/total?color=41BDF5&logo=home-assistant&label=Downloads&suffix=%20downloads&style=for-the-badge)
-[![hacs\_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![version](https://img.shields.io/badge/version-1.3.0-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
+# Keenetic Router Pro
 
-<a href="https://www.buymeacoffee.com/cataseven" target="_blank">
-  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 60px !important; width: 217px !important;" >
-</a> 
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
+[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
 
-An advanced Home Assistant integration for Keenetic routers. Provides mesh network management, VPN control, device tracking, traffic monitoring, firmware updates, and more.
+Home Assistant custom integration for Keenetic routers. It focuses on local polling, router diagnostics, mesh monitoring, presence tracking, WAN status, traffic counters, firmware updates, and selected client controls.
 
-## 🌟 Features
+## Features
 
-### 📡 Real Time Device Tracking
+- Local polling through the Keenetic RCI API.
+- Basic Auth and NDW2 challenge authentication.
+- Config flow, reauthentication, and reconfigure support.
+- Main router sensors for CPU, memory, uptime, firmware, WAN state, IP, PPPoE uptime, active connections, ports, Wi-Fi radio temperature, and traffic.
+- Mesh node sensors for state, CPU, memory, uptime, firmware, clients, local IP, ports, and traffic.
+- Optional ping-based device tracking for selected clients.
+- Wi-Fi, VPN, and client policy controls where supported by the router firmware.
+- Firmware update entities for the controller and mesh nodes.
+- WireGuard and IPsec diagnostic sensors.
 
-* Real-time device status via **ICMP Ping**. You don't need to wait Keenetic's update time for device tracking. This integration pings the devices you selected every 5 seconds by default.
-* Selectable client list
-* Configurable ping interval from 5 to 300 seconds
-* Automatic updates on IP address changes
-> [!IMPORTANT]
-> ⚠️ **If Apple iOS devices are registered with client name including 'apple', 'iphone' or 'ipad' then they will NOT be pinged directly. Instead, they will sync with the status on the Router's interface. This is because they go into Deep Sleep mode and disable WiFi connection even when they are connected to WiFi.**
+Removed from this fork: QR image entities, USB polling, bundled non-English translations, and ZIP-release mode for HACS.
 
-### 🔗 Mesh Network Management
+## Install With HACS
 
-* Status of all extenders/repeaters (binary sensors)
-* Separate **reboot button** for each mesh node
-* CPU, RAM, and uptime information per node
-* Firmware version sensor for each node
-* **Firmware update entity** with update-available detection
-* Number of connected clients (associations) per node
-* **Traffic monitoring** per node (WiFi 2.4GHz/5GHz, LAN, WAN RX/TX)
-* **WiFi radio temperature** per node (2.4GHz / 5GHz)
+1. In HACS, add this repository as a custom integration repository:
+   `https://github.com/abovsh/Keenetic-Router-Pro`
+2. Install **Keenetic Router Pro**.
+3. Restart Home Assistant.
+4. Go to **Settings > Devices & services > Add integration**.
+5. Search for **Keenetic Router Pro**.
 
-### 🔄 Firmware Updates
+This repository uses standard HACS source downloads and does not require release assets.
 
-* **Update entity** for the main router (with install + progress support)
-* **Update entity** for each mesh node (with install support)
-* Firmware version sensor (current version, channel, architecture details)
-* Binary sensor for update availability
+## Configuration
 
-### 🔐 VPN Management
+Required fields:
 
-* Enable/disable WireGuard profiles (switch)
-* OpenVPN, IPsec, L2TP, PPTP support
-* VPN uptime, RX/TX sensors
+| Field | Description | Example |
+| --- | --- | --- |
+| Host | Router IP address or host name | `192.168.1.1` |
+| Port | Router web/API port | `100` |
+| Username | Router admin username | `admin` |
+| Password | Router admin password | `********` |
+| SSL | Use HTTPS for router API calls | `off` |
+| Use Challenge Auth | Enable NDW2 challenge auth for newer models | `off` |
 
-### 📶 WiFi Control
+Use **Challenge Auth** for models/firmware that reject Basic Auth, such as newer Keenetic Hero devices. Older devices usually keep it disabled.
 
-* Enable/disable switch for each SSID
-* Guest WiFi control
+## Polling
 
-### 🌐 WAN Status
+- Main coordinator: every `10s`.
+- Slow data: every `60s` after startup.
+- Very slow data: every `300s` after startup.
+- Ping presence tracking: default `5s`, configurable from `5` to `300s`.
 
-* Real **WAN IP address** (PPPoE supported)
-* **3-state connection status**:
-  * `connected` — link up and IP address assigned (internet working)
-  * `link_up` — link up but no IP address (ISP issue / DHCP waiting)
-  * `down` — interface down or not found
-* PPPoE uptime sensor
+Slow and very slow data is cached between refreshes to reduce router load.
 
-### 📊 Traffic & Diagnostics
+## Security Notes
 
-* **WiFi 2.4GHz / 5GHz** RX/TX traffic (GB)
-* **LAN / WAN** RX/TX traffic (GB)
-* **WiFi radio temperature** (2.4GHz / 5GHz)
-* Active connections count
+- Keep the router management API reachable only from Home Assistant.
+- Prefer LAN-only access.
+- If you expose a custom management port, restrict it with firewall rules to the Home Assistant IP.
+- Do not expose router management to WAN without strict firewall rules.
 
-### 🔌 Port Monitoring
+## Entities
 
-* **Physical port status** for the main router and all mesh nodes
-* Link state (up/down), speed (100/1000 Mbps), and duplex mode per port
-* Includes LAN ports, WAN/ISP port, and SFP port
+Common entity groups:
 
-### 👥 Client Management
+- Sensors: router health, WAN state, traffic, ports, Wi-Fi radio temperature, mesh diagnostics, VPN diagnostics, client details.
+- Binary sensors: firmware/update availability, mesh/client/connectivity status.
+- Switches: Wi-Fi networks, VPN profiles, client blocks where supported.
+- Selects: client connection policy where supported.
+- Buttons: router and mesh node reboot.
+- Update entities: controller and mesh firmware updates.
+- Device trackers: selected client presence via ICMP ping.
 
-* Number of connected / disconnected devices
-* **Connection Policy selection** (per client)
-  * Default, VPN, No VPN, Smart Home, Roblox, etc.
-  * Deny (block internet access)
-* **Event trigger** when a new device connects
+Exact entity availability depends on router model, firmware version, enabled Keenetic components, and selected tracked clients.
 
-### 🔘 Buttons
+## Troubleshooting
 
-* Router reboot
-* Mesh node reboot (separate for each node)
+If setup fails:
 
----
+1. Verify host, port, username, and password.
+2. Confirm the router web management API is enabled.
+3. Try enabling **Use Challenge Auth** for newer Keenetic models.
+4. Check that Home Assistant can reach the router over the configured port.
 
-![image4](images/1.png)  ![image5](images/2.png)
+If HACS download fails:
 
-![image4](images/3.png)  ![image5](images/4.png)
+1. Make sure HACS has this repository as a custom integration repository.
+2. Remove the repository from HACS and add it again after updating this fork.
+3. Clear any failed pending download and retry.
+4. Confirm `hacs.json` only contains the integration name and `render_readme`.
 
-![image4](images/5.png)
-
-## 📦 Installation
-
-### Via HACS
-
-1. Search for "Keenetic Router Pro" and install
-2. Restart Home Assistant
-
----
-
-## ⚙️ Configuration
-
-### 1. Web management interface must be enabled on the router
-
-### 2. 🔒 Security, Firewall & Port Forwarding
-
-To use this integration **securely**, it is strongly recommended to configure **Firewall rules** and **Port Forwarding** properly on your Keenetic router. This section explains *why* it matters and *how* to do it.
-
-### 3. ⚠️ Why Firewall Configuration Is Important
-
-* Home Assistant communicates with the router via its **web management API**
-* Exposing router services directly to the internet **without restrictions** is a security risk
-* Proper firewall rules ensure:
-  * Only trusted devices (Home Assistant) can access the router
-  * No unintended WAN access to router management services
-
-Think of the firewall as a bouncer with a clipboard. Only invited guests get in.
-
----
-
-### 4. 🔌 Port Forwarding
-
-#### How to Configure Port Forwarding
-1. Enable UPnP if it is not
-2. Go to **Internet > Port forwarding**
-3. Add a new rule:
-
-| Setting       | Value                              |
-| ------------- | ---------------------------------- |
-| Service       | Home Assistant Router API          |
-| Protocol      | TCP                                |
-| External Port | `100`                              |
-| Internal IP   | Router LAN IP (e.g. `192.168.1.1`) |
-| Internal Port | `79`                               |
-
-![image1](images/pp.png)
-
-🚫 **Never expose port 80/443 to WAN without firewall rules**
-
----
-
-### 5. 🛡️ Firewall Rules (Recommended & Safe)
-
-Use **Firewall rules** to restrict access.
-
-#### Recommended Firewall Setup
-
-1. Go to **Network Rules > Firewall**
-2. Create a new rule for your **PPPoE** connection:
-
-| Option      | Value                                   |
-| ----------- | --------------------------------------- |
-| Direction   | Input                                   |
-| Source      | Home Assistant IP (e.g. `192.168.1.50`) |
-| Destination | Router                                  |
-| Service     | Custom port                             |
-| Action      | Allow                                   |
-
-3. Create a second rule:
-
-| Option      | Value        |
-| ----------- | ------------ |
-| Direction   | Input        |
-| Source      | Any          |
-| Destination | Router       |
-| Service     | Custom port  |
-| Action      | Deny         |
-
-✅ Ensure **only Home Assistant** can talk to the router API.
-
-![image2](images/firewall.png)
-
----
-
-### 6. Add the Integration
-
-Settings > Devices & Services > Add Integration > **Keenetic Router Pro**
-
-### 7. Connection Details
-
-| Field              | Description                                                      | Example       |
-| ------------------ | ---------------------------------------------------------------- | ------------- |
-| Host               | Router IP address                                                | `192.168.1.1` |
-| Port               | Web interface port                                               | `100`         |
-| Username           | Admin username                                                   | `admin`       |
-| Password           | Admin password                                                   | `********`    |
-| Use Challenge Auth | Enable for newer models (e.g. Hero) that use NDW2 authentication | `off`         |
-
-> [!NOTE]
-> **Use Challenge Auth** is required for newer Keenetic models such as the **Hero** series that use NDW2 challenge-response authentication instead of Basic Auth. If the integration fails to connect on a newer model, try enabling this option. Older models should leave it disabled.
-
-### 8. Select Devices for Tracking and Other Device based managements
-
-During setup, you can choose which devices should be monitored via ping.
-
----
-
-## 📊 Created Entities
-
-### Main Router
-
-#### Sensors
-
-| Entity | Description | Category |
-| ------ | ----------- | -------- |
-| CPU Load | CPU usage percentage | — |
-| Memory Usage | RAM usage percentage | — |
-| Uptime | System uptime in seconds | — |
-| WAN Status | Connection state: `connected`, `link_up`, or `down` | — |
-| WAN IP | External IP address (PPPoE supported) | — |
-| PPPoE Uptime | PPPoE session uptime | — |
-| Connected Clients | Number of active clients | — |
-| Disconnected Clients | Number of inactive clients | — |
-| Extender Count | Number of detected mesh nodes | — |
-| Active Connections | NAT connection tracking (conntotal - connfree) | — |
-| Firmware Version | Current firmware with release, channel, architecture details | Diagnostic |
-| WiFi 2.4GHz Temperature | Radio module temperature | Diagnostic |
-| WiFi 5GHz Temperature | Radio module temperature | Diagnostic |
-| WiFi 2.4GHz RX / TX | Cumulative traffic in GB | Diagnostic |
-| WiFi 5GHz RX / TX | Cumulative traffic in GB | Diagnostic |
-| LAN RX / TX | Cumulative traffic in GB | Diagnostic |
-| WAN RX / TX | Cumulative traffic in GB | Diagnostic |
-| Port 0–4 | Physical port link state, speed, and duplex | Diagnostic |
-
-#### Binary Sensors
-
-| Entity | Description |
-| ------ | ----------- |
-| Firmware Update Available | `on` when a new stable firmware is available |
-
-#### Update
-
-| Entity | Description |
-| ------ | ----------- |
-| Firmware Update | Shows current/available version, install with progress tracking |
-
-#### Switches
-
-| Entity | Description |
-| ------ | ----------- |
-| WiFi SSID (per network) | Enable/disable each WiFi network |
-| VPN Tunnel (per profile) | Enable/disable WireGuard, OpenVPN, IPsec, L2TP, PPTP |
-
-#### Select
-
-| Entity | Description |
-| ------ | ----------- |
-| Connection Policy (per tracked client) | Choose access policy: Default, VPN, Deny, etc. |
-
-#### Buttons
-
-| Entity | Description |
-| ------ | ----------- |
-| Reboot Router | Reboot the main router |
-
-#### Device Tracker
-
-| Entity | Description |
-| ------ | ----------- |
-| Client Tracker (per tracked client) | ICMP ping-based presence detection (3s interval) |
-
----
-
-### Per Mesh Node (Extender / Repeater)
-
-Each mesh node appears as a separate device in Home Assistant with the following entities:
-
-#### Sensors
-
-| Entity | Description | Category |
-| ------ | ----------- | -------- |
-| Uptime | Node uptime in seconds | — |
-| Clients | Number of associated clients | — |
-| Firmware Version | Current firmware with hardware ID and model details | Diagnostic |
-| Port (per port) | Physical port link state, speed, and duplex | Diagnostic |
-
-> **Note:** Traffic and temperature sensors are only created for interfaces that exist on the node. Not all extenders have all interfaces.
-
-#### Binary Sensors
-
-| Entity | Description |
-| ------ | ----------- |
-| Mesh Node Status | `on` when the node is connected |
-| Firmware Update Available | `on` when a new firmware is available |
-
-#### Update
-
-| Entity | Description |
-| ------ | ----------- |
-| Firmware Update | Shows current/available version with install support |
-
-#### Buttons
-
-| Entity | Description |
-| ------ | ----------- |
-| Reboot | Reboot this specific mesh node |
-
----
-
-## 🔔 Events
-
-### `keenetic_router_pro_new_device`
-
-Triggered when a new device connects to the network.
+For debug logs:
 
 ```yaml
-automation:
-  - alias: "New Device Notification"
-    trigger:
-      - platform: event
-        event_type: keenetic_router_pro_new_device
-    action:
-      - service: notify.mobile_app
-        data:
-          title: "🆕 New Device Connected"
-          message: "{{ trigger.event.data.name }} ({{ trigger.event.data.ip }})"
+logger:
+  default: warning
+  logs:
+    custom_components.keenetic_router_pro: debug
 ```
 
-**Event Data:**
+Sensitive values are redacted from integration logs where practical.
 
-* `mac`: MAC address
-* `name`: Device name
-* `ip`: IP address
-* `hostname`: Hostname
-* `interface`: Connected interface
-* `ssid`: WiFi SSID (if applicable)
+## Development
 
----
+Run lightweight checks:
 
-## 🌍 Language Support
+```bash
+python -m compileall -q custom_components/keenetic_router_pro tests
+python -m pytest -q
+```
 
-* 🇬🇧 English
-* 🇹🇷 Turkish
-* 🇷🇺 Russian
+The lightweight tests cover helper behavior without requiring a full Home Assistant runtime or a live router.
 
----
+## License
 
-## 🔧 Requirements
-
-* Home Assistant 2024.1.0 or newer
-* Keenetic router (NDMS 3.x / 4.x / 5.x)
-* Web management interface must be enabled on the router
-
-### Tested Models
-
-| Model | Auth Method |
-| ----- | ----------- |
-| Keenetic Ultra (KN-1810) | Basic Auth |
-| Keenetic Hopper (KN-3810) | Basic Auth |
-| Keenetic Buddy 5 (KN-3311) | Basic Auth |
-| Keenetic Air (KN-1610) | Basic Auth |
-| Keenetic Hero (KN-1012) | Challenge Auth (NDW2) |
-| Keenetic Titan (KN-1812) | Basic Auth |
-
-> [!TIP]
-> Not sure which auth method your router uses? Try **Basic Auth** first (default). If the connection fails, switch to **Challenge Auth**.
-
----
-
-## 🐛 Troubleshooting
-
-### Connection Error
-
-1. Verify router IP address and port
-2. Verify username and password
-3. Ensure the web interface is enabled on the router
-4. If you have a newer model (e.g. **Hero**), enable **Use Challenge Auth** in the integration settings and try again
-
-### Entities Not Appearing
-
-1. Restart Home Assistant
-2. Remove and re-add the integration
-
-### Ping Not Working
-
-* Home Assistant must have permission for ICMP ping
-* Docker installations may require `network_mode: host`
-
-### WAN Status Shows `link_up` Instead of `connected`
-
-* This means the physical link is up but no IP address was assigned
-* Check your ISP connection or PPPoE credentials
-* The sensor will change to `connected` once an IP is obtained
-
-### Mesh Node Sensors Missing
-
-* Mesh diagnostics require direct RCI access to each node's IP
-* Ensure mesh nodes are connected and reachable from Home Assistant
-* Nodes using different credentials than the controller will not report diagnostics
-
----
-
-## 📄 License
-
-MIT License
-
----
-
-<a href="https://www.buymeacoffee.com/cataseven" target="_blank">
-  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 60px !important;width: 217px !important;" >
-</a> 
-
-**⭐ If you like this project, don't forget to give it a star!**
+MIT License.

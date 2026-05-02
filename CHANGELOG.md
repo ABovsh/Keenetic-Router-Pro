@@ -58,6 +58,9 @@ improving diagnostics for Keenetic controller and mesh deployments.
 
 ### Metadata And Packaging
 
+- Disabled HACS ZIP-release mode so HACS downloads the repository archive directly.
+- Removed the ZIP release workflow and release asset expectation.
+- Replaced the README with a lighter install/config/troubleshooting guide and removed donation links.
 - Fixed integration logger metadata to `custom_components.keenetic_router_pro`.
 - Aligned manifest version with the documented `1.3.0` release.
 - Repointed manifest documentation and issue tracker metadata to the fork repository.
