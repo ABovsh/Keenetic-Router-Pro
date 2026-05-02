@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlparse
 
+import logging
 import voluptuous as vol
 
 from homeassistant import config_entries
@@ -15,15 +16,14 @@ from homeassistant.const import (
     CONF_PASSWORD,
     CONF_SSL,
 )
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
+import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.service_info.ssdp import SsdpServiceInfo
 from homeassistant.helpers.device_registry import format_mac
 
-import logging
-
-from .api import KeeneticClient, KeeneticAuthError, KeeneticApiError
+from .api import KeeneticApiError, KeeneticAuthError, KeeneticClient
 from .const import (
     DOMAIN,
     DEFAULT_PORT,
@@ -39,16 +39,67 @@ from .const import (
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.config_flow")
 
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_HOST, default="192.168.1.1"): str,
-        vol.Optional(CONF_PORT, default=DEFAULT_PORT): int,
-        vol.Required(CONF_USERNAME, default="admin"): str,
-        vol.Required(CONF_PASSWORD): str,
-        vol.Optional(CONF_SSL, default=DEFAULT_SSL): bool,
-        vol.Optional(CONF_USE_CHALLENGE_AUTH, default=False): bool,
+def _clamp_ping_interval(value: Any) -> int:
+    """Return a valid presence ping interval in seconds."""
+    try:
+        interval = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_PING_INTERVAL
+    return max(MIN_PING_INTERVAL, min(MAX_PING_INTERVAL, interval))
+
+
+def _normalize_client(client_info: dict[str, Any]) -> dict[str, str] | None:
+    """Return the compact tracked-client representation used in config data."""
+    mac = str(client_info.get("mac") or "").lower()
+    if not mac:
+        return None
+    return {
+        "mac": mac,
+        "ip": str(client_info.get("ip") or ""),
+        "name": str(client_info.get("name") or client_info.get("hostname") or ""),
     }
-)
+
+
+def _client_label(client: dict[str, Any], *, offline: bool = False) -> str:
+    """Build the display label shown in multi-select client lists."""
+    label = client.get("name") or client.get("ip") or client["mac"].upper()
+    if client.get("ip"):
+        label = f"{label} ({client['ip']})"
+    if offline:
+        label = f"{label} [offline]"
+    return label
+
+
+def _client_options(clients: list[dict[str, Any]]) -> dict[str, str]:
+    """Return sorted MAC -> label options for a client multi-select."""
+    options = {c["mac"]: _client_label(c) for c in clients if c.get("mac")}
+    return dict(sorted(options.items(), key=lambda item: item[1].lower()))
+
+
+def _connection_schema(
+    defaults: dict[str, Any] | None = None,
+    *,
+    validate_port: bool = False,
+) -> vol.Schema:
+    """Build the shared connection schema for setup, reauth and reconfigure."""
+    defaults = defaults or {}
+    fields: dict[Any, Any] = {
+        vol.Required(CONF_HOST, default=defaults.get(CONF_HOST, "192.168.1.1")): str
+    }
+    port_validator: Any = int
+    if validate_port:
+        port_validator = vol.All(vol.Coerce(int), vol.Range(min=1, max=65535))
+    fields[vol.Optional(CONF_PORT, default=defaults.get(CONF_PORT, DEFAULT_PORT))] = port_validator
+    fields[vol.Required(CONF_USERNAME, default=defaults.get(CONF_USERNAME, "admin"))] = str
+    fields[vol.Required(CONF_PASSWORD)] = str
+    fields[vol.Optional(CONF_SSL, default=defaults.get(CONF_SSL, DEFAULT_SSL))] = bool
+    fields[
+        vol.Optional(
+            CONF_USE_CHALLENGE_AUTH,
+            default=defaults.get(CONF_USE_CHALLENGE_AUTH, False),
+        )
+    ] = bool
+    return vol.Schema(fields)
 
 
 class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -63,7 +114,81 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._available_clients: list[dict[str, Any]] = []
         self._user_input: dict[str, Any] = {}
         self._title: str = ""
-        self._client: KeeneticClient | None = None
+
+    async def _async_connect(
+        self, data: dict[str, Any]
+    ) -> tuple[KeeneticClient, dict[str, Any], dict[str, Any]]:
+        """Connect to the router and return client plus core identity data."""
+        session = async_get_clientsession(self.hass)
+        client = KeeneticClient(
+            host=data[CONF_HOST],
+            username=data[CONF_USERNAME],
+            password=data[CONF_PASSWORD],
+            port=data[CONF_PORT],
+            ssl=data[CONF_SSL],
+            use_challenge_auth=data.get(CONF_USE_CHALLENGE_AUTH, False),
+        )
+        await client.async_start(session)
+        system_info = await client.async_get_system_info()
+        interfaces = await client.async_get_interfaces()
+        return client, system_info, interfaces
+
+    async def _async_test_connection(self, data: dict[str, Any]) -> None:
+        """Validate connection details against the router."""
+        await self._async_connect(data)
+
+    async def _async_update_existing_entry(
+        self,
+        entry: config_entries.ConfigEntry,
+        new_data: dict[str, Any],
+        success_reason: str,
+        log_context: str,
+    ) -> FlowResult | dict[str, str]:
+        """Validate new entry data and update the entry or return form errors."""
+        try:
+            await self._async_test_connection(new_data)
+        except KeeneticAuthError:
+            return {"base": "invalid_auth"}
+        except KeeneticApiError:
+            return {"base": "cannot_connect"}
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Unexpected error during %s", log_context)
+            return {"base": "unknown"}
+
+        self.hass.config_entries.async_update_entry(entry, data=new_data)
+        return self.async_abort(reason=success_reason)
+
+    @staticmethod
+    def _unique_id_from_router(
+        system_info: dict[str, Any],
+        interfaces: dict[str, Any],
+        host: str,
+    ) -> tuple[str, str]:
+        """Return the HA unique id and title for a router."""
+        mac = None
+        if isinstance(interfaces, dict):
+            candidates = list(interfaces.items())
+            bridge_candidates = [
+                item for item in candidates
+                if isinstance(item[1], dict)
+                and (item[1].get("type") == "Bridge" or "Bridge0" in item[0])
+            ]
+            for _iface_id, iface_data in bridge_candidates + candidates:
+                if not isinstance(iface_data, dict):
+                    continue
+                mac = iface_data.get("mac")
+                if mac and mac != "00:00:00:00:00:00":
+                    break
+
+        vendor = system_info.get("vendor", "Keenetic")
+        device = system_info.get("device", system_info.get("model", "Router"))
+        if mac:
+            formatted_mac = format_mac(mac).replace(":", "")
+            suffix = formatted_mac[-8:] if len(formatted_mac) >= 8 else formatted_mac
+            return f"{vendor} {device} {suffix}", f"{vendor} {device}"
+
+        hostname = system_info.get("hostname", host)
+        return f"{vendor} {device} {hostname}", f"{vendor} {device}"
 
     async def async_step_ssdp(self, discovery_info: SsdpServiceInfo) -> FlowResult:
         """Handle a discovered Keenetic router via SSDP."""
@@ -101,100 +226,57 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the initial step."""
         errors: dict[str, str] = {}
         
-        _LOGGER.debug("Step user called with input: %s", user_input)
+        _LOGGER.debug("Step user called with input=%s", user_input is not None)
 
         if user_input is not None:
             try:
-                if self._discovered_host and user_input.get(CONF_HOST) == "192.168.1.1":
-                    user_input[CONF_HOST] = self._discovered_host
-                    _LOGGER.debug("Using discovered host: %s", user_input[CONF_HOST])
-
-                session = async_get_clientsession(self.hass)
-                client = KeeneticClient(
-                    host=user_input[CONF_HOST],
-                    username=user_input[CONF_USERNAME],
-                    password=user_input[CONF_PASSWORD],
-                    port=user_input[CONF_PORT],
-                    ssl=user_input[CONF_SSL],
-                    use_challenge_auth=user_input.get(CONF_USE_CHALLENGE_AUTH, False),
-                )
+                data = dict(user_input)
+                if self._discovered_host and data.get(CONF_HOST) == "192.168.1.1":
+                    data[CONF_HOST] = self._discovered_host
+                    _LOGGER.debug("Using discovered host: %s", data[CONF_HOST])
                 
                 _LOGGER.debug("Attempting to connect to router at %s:%s", 
-                             user_input[CONF_HOST], user_input[CONF_PORT])
+                             data[CONF_HOST], data[CONF_PORT])
                 
-                await client.async_start(session)
-                system_info = await client.async_get_system_info()   
-                interfaces = await client.async_get_interfaces()
-                mac = None
-                if isinstance(interfaces, dict):
-                    for iface_id, iface_data in interfaces.items():
-                        if isinstance(iface_data, dict):
-                            if iface_data.get("type") == "Bridge" or "Bridge0" in iface_id:
-                                mac = iface_data.get("mac")
-                                if mac:
-                                    _LOGGER.debug("Found Bridge MAC: %s from %s", mac, iface_id)
-                                    break
-                    
-                    if not mac:
-                        for iface_id, iface_data in interfaces.items():
-                            if isinstance(iface_data, dict):
-                                mac = iface_data.get("mac")
-                                if mac and mac != "00:00:00:00:00:00":
-                                    _LOGGER.debug("Found interface MAC: %s from %s", mac, iface_id)
-                                    break
-
-                vendor = system_info.get("vendor", "Keenetic")
-                device = system_info.get("device", system_info.get("model", "Router"))
-                
-                if mac:
-                    formatted_mac = format_mac(mac).replace(":", "")
-                    unique_suffix = formatted_mac[-8:] if len(formatted_mac) >= 8 else formatted_mac
-                    unique_id = f"{vendor} {device} {unique_suffix}"
-                else:
-                    hostname = system_info.get("hostname", user_input[CONF_HOST])
-                    unique_id = f"{vendor} {device} {hostname}"
+                client, system_info, interfaces = await self._async_connect(data)
+                unique_id, title = self._unique_id_from_router(
+                    system_info, interfaces, data[CONF_HOST]
+                )
                 
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
 
-                self._user_input = user_input
-                self._title = f"{vendor} {device}"
-                self._client = client
+                self._user_input = data
+                self._title = title
                 
                 try:
                     available_clients = await client.async_get_clients()
                     _LOGGER.debug("Found %d clients", len(available_clients) if available_clients else 0)
                     
-                    if available_clients:
-                        self._available_clients = []
-                        for client_info in available_clients:
-                            if client_info.get("mac"):
-                                self._available_clients.append({
-                                    "mac": client_info["mac"].lower(),
-                                    "ip": client_info.get("ip", ""),
-                                    "name": client_info.get("name") or client_info.get("hostname", ""),
-                                })
-                        
+                    self._available_clients = [
+                        client
+                        for client in (_normalize_client(c) for c in available_clients)
+                        if client is not None
+                    ]
+                    if self._available_clients:
                         return await self.async_step_select_clients()
-                    else:
-                        _LOGGER.debug("No clients found, creating entry directly")
-                        return self.async_create_entry(
-                            title=self._title,
-                            data={**user_input, CONF_TRACKED_CLIENTS: []},
-                        )
-                        
-                except Exception as e:
-                    _LOGGER.warning("Could not fetch clients: %s", e)
+
+                    _LOGGER.debug("No clients found, creating entry directly")
                     return self.async_create_entry(
                         title=self._title,
-                        data={**user_input, CONF_TRACKED_CLIENTS: []},
+                        data={**data, CONF_TRACKED_CLIENTS: []},
+                    )
+                        
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.debug("Could not fetch clients: %s", err)
+                    return self.async_create_entry(
+                        title=self._title,
+                        data={**data, CONF_TRACKED_CLIENTS: []},
                     )
 
-            except KeeneticAuthError as err:
-                _LOGGER.error("Authentication failed: %s", err)
+            except KeeneticAuthError:
                 errors["base"] = "invalid_auth"
-            except KeeneticApiError as err:
-                _LOGGER.error("API/connection error: %s", err)
+            except KeeneticApiError:
                 errors["base"] = "cannot_connect"
             except Exception as err:
                 _LOGGER.exception("Unexpected error during setup: %s", err)
@@ -204,16 +286,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_HOST, default=default_host): str,
-                    vol.Optional(CONF_PORT, default=DEFAULT_PORT): int,
-                    vol.Required(CONF_USERNAME, default="admin"): str,
-                    vol.Required(CONF_PASSWORD): str,
-                    vol.Optional(CONF_SSL, default=DEFAULT_SSL): bool,
-                    vol.Optional(CONF_USE_CHALLENGE_AUTH, default=False): bool,
-                }
-            ),
+            data_schema=_connection_schema({CONF_HOST: default_host}),
             errors=errors,
             description_placeholders={
                 "name": self._discovered_name or "Keenetic Router"
@@ -242,16 +315,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data={**self._user_input, CONF_TRACKED_CLIENTS: tracked_clients},
             )
         
-        # Prepare client options
-        client_options = {}
-        for client in self._available_clients:
-            label = client.get("name") or client.get("ip") or client["mac"].upper()
-            if client.get("ip"):
-                label = f"{label} ({client['ip']})"
-            client_options[client["mac"]] = label
-        
-        # Sort alphabetically
-        client_options = dict(sorted(client_options.items(), key=lambda x: x[1].lower()))
+        client_options = _client_options(self._available_clients)
         
         _LOGGER.debug("Showing client selection form with %d options", len(client_options))
         
@@ -267,6 +331,69 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             },
         )
 
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> FlowResult:
+        """Start reauthentication when HA reports rejected credentials."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Let the user update credentials for an existing entry."""
+        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        if entry is None:
+            return self.async_abort(reason="unknown")
+
+        errors: dict[str, str] = {}
+        entry_data = dict(entry.data)
+
+        if user_input is not None:
+            new_data = {**entry_data, **user_input}
+            result = await self._async_update_existing_entry(
+                entry, new_data, "reauth_successful", "reauth"
+            )
+            if not isinstance(result, dict):
+                return result
+            errors = result
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema({
+                vol.Required(CONF_USERNAME, default=entry_data.get(CONF_USERNAME, "admin")): str,
+                vol.Required(CONF_PASSWORD): str,
+                vol.Optional(
+                    CONF_USE_CHALLENGE_AUTH,
+                    default=entry_data.get(CONF_USE_CHALLENGE_AUTH, False),
+                ): bool,
+            }),
+            errors=errors,
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Allow changing router connection settings for an existing entry."""
+        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        if entry is None:
+            return self.async_abort(reason="unknown")
+
+        errors: dict[str, str] = {}
+        entry_data = dict(entry.data)
+
+        if user_input is not None:
+            new_data = {**entry_data, **user_input}
+            result = await self._async_update_existing_entry(
+                entry, new_data, "reconfigure_successful", "reconfigure"
+            )
+            if not isinstance(result, dict):
+                return result
+            errors = result
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=_connection_schema(entry_data, validate_port=True),
+            errors=errors,
+        )
+
     @staticmethod
     @callback
     def async_get_options_flow(
@@ -276,36 +403,25 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return KeeneticOptionsFlow(config_entry)
 
 
-# Import cv for multi_select
-import homeassistant.helpers.config_validation as cv
-
-
 class KeeneticOptionsFlow(config_entries.OptionsFlow):
     """Options flow for Keenetic Router Pro."""
     
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
         self._config_entry = config_entry
-        self._client = None
         self._available_clients = []
     
-    async def async_step_init(self, user_input=None):
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
         """Manage options."""
-        _LOGGER.debug("Options flow init called with input: %s", user_input)
+        _LOGGER.debug("Options flow init called with input=%s", user_input is not None)
         
         if user_input is not None:
             selected_macs = user_input.get("tracked_clients", [])
-
-            # Validate / clamp ping interval
-            ping_interval_raw = user_input.get(CONF_PING_INTERVAL, DEFAULT_PING_INTERVAL)
-            try:
-                ping_interval = int(ping_interval_raw)
-            except (TypeError, ValueError):
-                ping_interval = DEFAULT_PING_INTERVAL
-            if ping_interval < MIN_PING_INTERVAL:
-                ping_interval = MIN_PING_INTERVAL
-            elif ping_interval > MAX_PING_INTERVAL:
-                ping_interval = MAX_PING_INTERVAL
+            ping_interval = _clamp_ping_interval(
+                user_input.get(CONF_PING_INTERVAL, DEFAULT_PING_INTERVAL)
+            )
             
             # Convert selected MAC strings back to dict format
             # First, build a lookup from available clients + previously tracked
@@ -320,14 +436,10 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
                     if mac_lower not in mac_lookup:
                         mac_lookup[mac_lower] = c
             
-            tracked_clients = []
-            for mac in selected_macs:
-                mac_lower = mac.lower()
-                if mac_lower in mac_lookup:
-                    tracked_clients.append(mac_lookup[mac_lower])
-                else:
-                    # Fallback: create a minimal dict
-                    tracked_clients.append({"mac": mac_lower, "ip": "", "name": ""})
+            tracked_clients = [
+                mac_lookup.get(mac.lower(), {"mac": mac.lower(), "ip": "", "name": ""})
+                for mac in selected_macs
+            ]
             
             # Update configuration
             new_data = dict(self._config_entry.data)
@@ -363,42 +475,29 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
             await client.async_start(session)
             available_clients = await client.async_get_clients()
             _LOGGER.debug("Found %d clients from router", len(available_clients) if available_clients else 0)
-            
-            # Prepare client options
-            client_options = {}
-            for client_info in available_clients:
-                if client_info.get("mac"):
-                    mac = client_info["mac"].lower()
-                    label = client_info.get("name") or client_info.get("hostname") or mac.upper()
-                    if client_info.get("ip"):
-                        label = f"{label} ({client_info['ip']})"
-                    client_options[mac] = label
-                    # Store full client info for dict conversion later
-                    self._available_clients.append({
-                        "mac": mac,
-                        "ip": client_info.get("ip", ""),
-                        "name": client_info.get("name") or client_info.get("hostname", ""),
-                    })
+
+            self._available_clients = [
+                client
+                for client in (_normalize_client(c) for c in available_clients)
+                if client is not None
+            ]
+            client_options = _client_options(self._available_clients)
             
             # Add offline clients that were previously tracked
             for tracked in current_tracked:
                 if isinstance(tracked, dict) and tracked.get("mac"):
                     mac = tracked["mac"].lower()
                     if mac not in client_options:
-                        name = tracked.get("name", mac.upper())
-                        ip = tracked.get("ip", "")
-                        label = f"{name} ({ip}) [offline]" if ip else f"{name} [offline]"
-                        client_options[mac] = label
+                        client_options[mac] = _client_label(tracked, offline=True)
             
-            # Sort options
-            client_options = dict(sorted(client_options.items(), key=lambda x: x[1].lower()))
+            client_options = dict(sorted(client_options.items(), key=lambda item: item[1].lower()))
             _LOGGER.debug("Prepared %d client options", len(client_options))
             
-        except Exception as e:
-            _LOGGER.error("Could not fetch clients for options: %s", e)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Could not fetch clients for options: %s", err)
             # Use only previously tracked clients
             client_options = {
-                tracked["mac"]: tracked.get("name", tracked["mac"].upper())
+                tracked["mac"]: _client_label(tracked)
                 for tracked in current_tracked
                 if isinstance(tracked, dict) and tracked.get("mac")
             }

@@ -11,12 +11,20 @@ import asyncio
 import base64
 import hashlib
 import logging
+import re
 
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.api")
 
 RCI_ROOT = "/rci"
+_SENSITIVE_NAMES = frozenset(
+    {"authorization", "cookie", "key", "pass", "password", "psk", "secret"}
+)
+_SENSITIVE_RESPONSE_RE = re.compile(
+    r'(?i)("?(?:authorization|cookie|key|pass|password|psk|secret)"?\s*[:=]\s*)'
+    r'("[^"]*"|\'[^\']*\'|[^,\s;}\]]+)'
+)
 
 
 class KeeneticApiError(Exception):
@@ -25,6 +33,43 @@ class KeeneticApiError(Exception):
 
 class KeeneticAuthError(KeeneticApiError):
     """Authentication failed."""
+
+
+def _validate_cli_arg(value: str, label: str) -> str:
+    """Return a safe Keenetic CLI token or raise for command injection input."""
+    candidate = str(value).strip()
+    if not candidate:
+        raise KeeneticApiError(f"Empty {label}")
+    if any(ch in candidate for ch in ("\r", "\n", ";")):
+        raise KeeneticApiError(f"Unsafe {label}")
+    return candidate
+
+
+def _response_summary(text: str, limit: int = 240) -> str:
+    """Return a short, single-line response excerpt with obvious secrets redacted."""
+    summary = " ".join(str(text).split())
+    if not summary:
+        return "<empty>"
+    summary = _SENSITIVE_RESPONSE_RE.sub(r"\1<redacted>", summary)
+    if len(summary) > limit:
+        return f"{summary[:limit]}..."
+    return summary
+
+
+def _payload_summary(payload: Any) -> Any:
+    """Return a compact, non-secret representation of an outgoing JSON payload."""
+    if payload is None:
+        return None
+    if isinstance(payload, dict):
+        return {
+            str(key): "<redacted>"
+            if str(key).lower() in _SENSITIVE_NAMES
+            else type(value).__name__
+            for key, value in payload.items()
+        }
+    if isinstance(payload, list):
+        return f"list[{len(payload)}]"
+    return type(payload).__name__
 
 
 class KeeneticClient:
@@ -53,6 +98,7 @@ class KeeneticClient:
         self._session: Optional[aiohttp.ClientSession] = None
         self._auth_header: Optional[Dict[str, str]] = None
         self._authenticated: bool = False
+        self._node_auth_headers: dict[tuple[str, int], Dict[str, str]] = {}
 
         # Mesh/Wi-Fi System (MWS) capability cache:
         # None  -> unknown (not checked yet)
@@ -60,6 +106,12 @@ class KeeneticClient:
         # True  -> endpoint works
         self._mws_member_supported: bool | None = None
 
+    def _basic_auth_headers(self) -> Dict[str, str]:
+        """Return Basic auth headers without exposing credentials to logs."""
+        auth_string = base64.b64encode(
+            f"{self._username}:{self._password}".encode()
+        ).decode()
+        return {"Authorization": f"Basic {auth_string}"}
 
     async def async_start(self, session: aiohttp.ClientSession) -> None:
         """Attach an aiohttp session and authenticate."""
@@ -74,10 +126,7 @@ class KeeneticClient:
         if self._session is None:
             raise KeeneticAuthError("ClientSession is not set")
 
-        auth_string = base64.b64encode(
-            f"{self._username}:{self._password}".encode()
-        ).decode()
-        headers = {"Authorization": f"Basic {auth_string}"}
+        headers = self._basic_auth_headers()
         url = f"{self._base}{RCI_ROOT}/"
 
         _LOGGER.debug("Authenticating to Keenetic via %s", url)
@@ -85,14 +134,17 @@ class KeeneticClient:
         try:
             async with async_timeout.timeout(self._request_timeout):
                 resp = await self._session.get(url, headers=headers)
+                async with resp:
+                    if resp.status != 200:
+                        text = await resp.text()
+                        raise KeeneticAuthError(
+                            f"Auth failed (status {resp.status}): "
+                            f"{_response_summary(text)}"
+                        )
+        except asyncio.TimeoutError as err:
+            raise KeeneticAuthError("Auth connection timed out") from err
         except aiohttp.ClientError as err:
             raise KeeneticAuthError(f"Auth connection failed: {err}") from err
-
-        if resp.status != 200:
-            text = await resp.text()
-            raise KeeneticAuthError(
-                f"Auth failed (status {resp.status}): {text}"
-            )
 
         self._auth_header = headers
         self._authenticated = True
@@ -123,19 +175,23 @@ class KeeneticClient:
         try:
             async with async_timeout.timeout(self._request_timeout):
                 get_resp = await self._session.get(auth_url, allow_redirects=False)
+        except asyncio.TimeoutError as err:
+            raise KeeneticAuthError("Challenge GET timed out") from err
         except aiohttp.ClientError as err:
             raise KeeneticAuthError(f"Challenge GET failed: {err}") from err
 
         _LOGGER.debug(
-            "NDW2 challenge GET response: status=%s headers=%s",
+            "NDW2 challenge GET response: status=%s has_challenge=%s has_cookie=%s",
             get_resp.status,
-            dict(get_resp.headers),
+            bool(get_resp.headers.get("X-NDM-Challenge")),
+            bool(get_resp.headers.get("Set-Cookie")),
         )
 
         if get_resp.status not in (200, 401):
             text = await get_resp.text()
             raise KeeneticAuthError(
-                f"Unexpected status during challenge GET ({get_resp.status}): {text}"
+                f"Unexpected status during challenge GET ({get_resp.status}): "
+                f"{_response_summary(text)}"
             )
 
         challenge = get_resp.headers.get("X-NDM-Challenge")
@@ -148,7 +204,7 @@ class KeeneticClient:
                 "try disabling 'Challenge Auth' and use Basic Auth instead."
             )
 
-        _LOGGER.debug("NDW2 challenge=%s realm=%s", challenge, realm)
+        _LOGGER.debug("NDW2 challenge received for realm=%s", realm)
 
         # Extract session cookie from Set-Cookie header
         session_cookie: str | None = None
@@ -160,8 +216,6 @@ class KeeneticClient:
             if "=" in cookie_kv:
                 session_cookie = cookie_kv
 
-        _LOGGER.debug("NDW2 session cookie: %s", session_cookie)
-
         # --- Step 2: Compute NDW2 hashes ---
         # ha1      = md5(username:realm:password)   [hex digest]
         # response = sha256(challenge + ha1)         [hex digest]
@@ -170,17 +224,13 @@ class KeeneticClient:
         ).hexdigest()
         response_hash = hashlib.sha256((challenge + ha1).encode()).hexdigest()
 
-        _LOGGER.debug(
-            "NDW2 hash: ha1(md5)=%s response(sha256)=%s", ha1, response_hash
-        )
-
         # --- Step 3: POST /auth with credentials + explicit Cookie header ---
         payload = {"login": self._username, "password": response_hash}
         post_headers: Dict[str, str] = {}
         if session_cookie:
             post_headers["Cookie"] = session_cookie
 
-        _LOGGER.debug("NDW2 challenge: POST %s payload_login=%s", auth_url, self._username)
+        _LOGGER.debug("NDW2 challenge: POST %s payload_login_set=%s", auth_url, bool(self._username))
 
         try:
             async with async_timeout.timeout(self._request_timeout):
@@ -189,23 +239,27 @@ class KeeneticClient:
                     json=payload,
                     headers=post_headers,
                 )
+        except asyncio.TimeoutError as err:
+            raise KeeneticAuthError("Challenge POST timed out") from err
         except aiohttp.ClientError as err:
             raise KeeneticAuthError(f"Challenge POST failed: {err}") from err
 
         post_text = await post_resp.text()
         _LOGGER.debug(
-            "NDW2 challenge POST response: status=%s body=%s",
+            "NDW2 challenge POST response: status=%s body_length=%s",
             post_resp.status,
-            post_text[:200],
+            len(post_text),
         )
 
         if post_resp.status == 401:
             raise KeeneticAuthError(
-                f"Challenge auth rejected — wrong credentials? (body={post_text!r})"
+                "Challenge auth rejected. Check the username, password and "
+                "challenge-auth setting."
             )
         if post_resp.status not in (200, 204):
             raise KeeneticAuthError(
-                f"Challenge auth failed (status={post_resp.status}, body={post_text!r})"
+                "Challenge auth failed "
+                f"(status={post_resp.status}, body={_response_summary(post_text)!r})"
             )
 
         # Store cookie in _auth_header so every subsequent RCI request includes it.
@@ -249,7 +303,7 @@ class KeeneticClient:
             method,
             url,
             params,
-            json,
+            _payload_summary(json),
         )
 
         try:
@@ -261,20 +315,53 @@ class KeeneticClient:
                     json=json,
                     headers=headers,
                 )
+                async with resp:
+                    # Auth cookies can expire. Retry once after a fresh
+                    # handshake before surfacing a real auth failure to HA.
+                    if resp.status == 401:
+                        await resp.read()
+                        self._authenticated = False
+                        await self._ensure_auth()
+                        retry_headers: Dict[str, str] = dict(self._auth_header or {})
+                        resp = await self._session.request(
+                            method,
+                            url,
+                            params=params,
+                            json=json,
+                            headers=retry_headers,
+                        )
+                        async with resp:
+                            return await self._handle_response(
+                                resp, path, allow_text=allow_text
+                            )
+
+                    return await self._handle_response(
+                        resp, path, allow_text=allow_text
+                    )
+        except asyncio.TimeoutError as err:
+            raise KeeneticApiError(f"Timeout for {path}") from err
         except aiohttp.ClientError as err:
             raise KeeneticApiError(f"Connection error: {err}") from err
 
-        # Basic auth hatalıysa yine 401 alırız
+    async def _handle_response(
+        self,
+        resp: aiohttp.ClientResponse,
+        path: str,
+        *,
+        allow_text: bool = False,
+    ) -> Any:
+        """Normalize an aiohttp response into JSON/text or a domain error."""
         if resp.status == 401:
             text = await resp.text()
-            _LOGGER.error("Keenetic Basic auth rejected: %s", text)
             self._authenticated = False
-            raise KeeneticAuthError(f"Basic auth rejected: {text}")
+            raise KeeneticAuthError(
+                f"Authentication rejected for {path}: {_response_summary(text)}"
+            )
 
         if resp.status >= 400:
             text = await resp.text()
             raise KeeneticApiError(
-                f"HTTP error {resp.status} for {path}: {text}"
+                f"HTTP error {resp.status} for {path}: {_response_summary(text)}"
             )
 
         if allow_text:
@@ -338,6 +425,7 @@ class KeeneticClient:
         Returns True if the host is reachable, False otherwise.
         """
         try:
+            ip_address = _validate_cli_arg(ip_address, "IP address")
 
             result = await self._rci_parse(f"ip ping {ip_address} count 1")
 
@@ -505,131 +593,6 @@ class KeeneticClient:
         data = await self._rci_get("show/interface")
         return data or {}
 
-    async def async_get_wifi_password(self, interface_id: str) -> str | None:
-        """Get WiFi password (PSK) for a specific interface.
-        
-        Tries multiple API paths since different firmware versions
-        store the PSK in different locations.
-        """
-        
-        def _extract_psk(data: Any) -> str | None:
-            """Extract PSK from various possible data structures."""
-            if not isinstance(data, dict):
-                return None
-            
-            # Path: authentication.wpa-psk.psk
-            auth = data.get("authentication", {})
-            if isinstance(auth, dict):
-                wpa_psk = auth.get("wpa-psk", {})
-                if isinstance(wpa_psk, dict) and wpa_psk.get("psk"):
-                    return str(wpa_psk["psk"])
-            
-            # Path: security-level.wpa.psk
-            sec = data.get("security-level", {})
-            if isinstance(sec, dict):
-                wpa = sec.get("wpa", {})
-                if isinstance(wpa, dict) and wpa.get("psk"):
-                    return str(wpa["psk"])
-            
-            # Path: wpa.psk
-            wpa = data.get("wpa", {})
-            if isinstance(wpa, dict) and wpa.get("psk"):
-                return str(wpa["psk"])
-            
-            # Direct key
-            if data.get("key"):
-                return str(data["key"])
-            
-            return None
-        
-        # Method 1: GET show/interface/{id} - interface status with details
-        try:
-            data = await self._rci_get(f"show/interface/{interface_id}")
-            _LOGGER.debug("WiFi password Method 1 (show/interface/%s) response keys: %s", 
-                         interface_id, list(data.keys()) if isinstance(data, dict) else type(data))
-            psk = _extract_psk(data)
-            if psk:
-                _LOGGER.debug("WiFi password found via Method 1 for %s", interface_id)
-                return psk
-        except Exception as err:
-            _LOGGER.debug("WiFi password Method 1 failed for %s: %s", interface_id, err)
-
-        # Method 2: GET interface/{id} - running configuration
-        try:
-            data = await self._rci_get(f"interface/{interface_id}")
-            _LOGGER.debug("WiFi password Method 2 (interface/%s) response keys: %s",
-                         interface_id, list(data.keys()) if isinstance(data, dict) else type(data))
-            psk = _extract_psk(data)
-            if psk:
-                _LOGGER.debug("WiFi password found via Method 2 for %s", interface_id)
-                return psk
-        except Exception as err:
-            _LOGGER.debug("WiFi password Method 2 failed for %s: %s", interface_id, err)
-
-        # Method 3: POST show/interface with nested query
-        try:
-            data = await self._rci_post("show/interface", {interface_id: {}})
-            _LOGGER.debug("WiFi password Method 3 (POST show/interface) response keys: %s",
-                         list(data.keys()) if isinstance(data, dict) else type(data))
-            if isinstance(data, dict):
-                # Response might be nested under interface_id or flat
-                iface_data = data.get(interface_id, data)
-                psk = _extract_psk(iface_data)
-                if psk:
-                    _LOGGER.debug("WiFi password found via Method 3 for %s", interface_id)
-                    return psk
-        except Exception as err:
-            _LOGGER.debug("WiFi password Method 3 failed for %s: %s", interface_id, err)
-
-        # Method 4: Look in the already-fetched full interfaces dict
-        try:
-            interfaces = await self.async_get_interfaces()
-            if interface_id in interfaces:
-                iface_data = interfaces[interface_id]
-                _LOGGER.debug("WiFi password Method 4 (full interfaces[%s]) keys: %s",
-                             interface_id, list(iface_data.keys()) if isinstance(iface_data, dict) else type(iface_data))
-                psk = _extract_psk(iface_data)
-                if psk:
-                    _LOGGER.debug("WiFi password found via Method 4 for %s", interface_id)
-                    return psk
-                    
-            # Also try matching by SSID across all interfaces
-            for iface_id, iface in interfaces.items():
-                if not isinstance(iface, dict):
-                    continue
-                psk = _extract_psk(iface)
-                if psk:
-                    _LOGGER.debug("WiFi password found via SSID scan in interface %s", iface_id)
-                    return psk
-        except Exception as err:
-            _LOGGER.debug("WiFi password Method 4 failed for %s: %s", interface_id, err)
-
-        # Method 5: CLI parse
-        try:
-            result = await self._rci_parse(f"more interface {interface_id}")
-            _LOGGER.debug("WiFi password Method 5 (CLI) response: %s", 
-                         str(result)[:500] if result else "None")
-            if result:
-                result_str = str(result)
-                for line in result_str.splitlines():
-                    line_lower = line.strip().lower()
-                    if "psk" in line_lower or "key" in line_lower:
-                        parts = line.strip().split()
-                        if len(parts) >= 2:
-                            candidate = parts[-1].strip('"').strip("'")
-                            if len(candidate) >= 8:
-                                return candidate
-        except Exception as err:
-            _LOGGER.debug("WiFi password Method 5 failed for %s: %s", interface_id, err)
-        
-        _LOGGER.warning(
-            "Could not retrieve WiFi password for interface %s. "
-            "QR code will be generated without password. "
-            "Check debug logs for details.",
-            interface_id,
-        )
-        return None
-
     async def async_get_interface_stat(self, name: str) -> Dict[str, Any]:
         """Return statistics (traffic, speed) for a specific interface."""
         return await self._rci_get("show/interface/stat", params={"name": name}) or {}
@@ -663,7 +626,10 @@ class KeeneticClient:
             if items:
                 return items
 
-        _LOGGER.debug("No clients parsed from hotspot host response: %s", last_data)
+        _LOGGER.debug(
+            "No clients parsed from hotspot host response type=%s",
+            type(last_data).__name__,
+        )
         return []
 
 
@@ -922,6 +888,7 @@ class KeeneticClient:
 
     async def async_set_wifi_enabled(self, interface_name: str, enabled: bool) -> None:
         """Enable or disable a Wi-Fi interface via RCI parse."""
+        interface_name = _validate_cli_arg(interface_name, "interface name")
         cmd = f"interface {interface_name} {'up' if enabled else 'down'}"
         _LOGGER.debug("Set Wi-Fi %s enabled=%s via: %s", interface_name, enabled, cmd)
         await self._rci_parse(cmd)
@@ -937,6 +904,7 @@ class KeeneticClient:
 
     async def async_set_interface_enabled(self, interface_name: str, enabled: bool) -> None:
         """Enable or disable any interface via RCI 'interface X up/down'."""
+        interface_name = _validate_cli_arg(interface_name, "interface name")
         cmd = f"interface {interface_name} {'up' if enabled else 'down'}"
         _LOGGER.debug(
             "Set interface %s enabled=%s via: %s",
@@ -1777,6 +1745,7 @@ class KeeneticClient:
         survives a reboot — matching the user's expectation that a
         Home Assistant switch toggle is permanent.
         """
+        name = _validate_cli_arg(name, "crypto map name")
         verb = "enable" if enabled else "no enable"
         cmd = f"crypto map {name}\n{verb}"
         _LOGGER.debug(
@@ -1939,118 +1908,11 @@ class KeeneticClient:
         
         Command format: mws member {cid} reboot
         """
+        cid = _validate_cli_arg(cid, "mesh node cid")
         _LOGGER.warning("Sending reboot command to mesh node cid=%s", cid)
 
         cmd = f"mws member {cid} reboot"
         await self._rci_parse(cmd)
-
-    async def async_get_mesh_node_usb(
-        self, node_ip: str, node_name: str = "", node_cid: str = ""
-    ) -> List[Dict[str, Any]]:
-        """Get USB storage info directly from a mesh/extender node.
-        
-        Mesh member'lar kendi RCI API'larına sahip ve controller ile
-        aynı credentials'ı paylaşır. Doğrudan member IP'sine bağlanıp
-        POST /rci/system/usb ile USB bilgisini alırız.
-        """
-        devices: List[Dict[str, Any]] = []
-
-        if not self._session or not self._auth_header or not node_ip:
-            return devices
-
-        scheme = "https" if self._ssl else "http"
-        url = f"{scheme}://{node_ip}:{self._port}{RCI_ROOT}/system/usb"
-
-        try:
-            async with async_timeout.timeout(self._request_timeout):
-                resp = await self._session.post(
-                    url,
-                    json={},
-                    headers=self._auth_header,
-                )
-
-            if resp.status == 401:
-                _LOGGER.debug(
-                    "Auth rejected by mesh node %s (%s), "
-                    "member may use different credentials",
-                    node_name, node_ip,
-                )
-                return devices
-
-            if resp.status >= 400:
-                _LOGGER.debug(
-                    "Mesh node %s (%s) USB endpoint returned %s",
-                    node_name, node_ip, resp.status,
-                )
-                return devices
-
-            ctype = resp.headers.get("Content-Type", "")
-            if "application/json" not in ctype:
-                # JSON değilse (text/html vb.) geçersiz yanıt
-                return devices
-
-            data = await resp.json()
-
-            if not data:
-                return devices
-
-            _LOGGER.debug(
-                "Mesh node %s (%s) USB response: %s",
-                node_name, node_ip, data,
-            )
-
-            # Parse - response dict veya list olabilir
-            if isinstance(data, dict):
-                port_list = data.get("port")
-                if isinstance(port_list, list):
-                    for port_info in port_list:
-                        if isinstance(port_info, dict):
-                            dev = self._parse_usb_device(
-                                port_info,
-                                f"mesh_{node_cid or node_ip}_usb",
-                            )
-                            if dev:
-                                dev["mesh_cid"] = node_cid
-                                dev["mesh_node_ip"] = node_ip
-                                devices.append(dev)
-                else:
-                    for usb_id, usb_info in data.items():
-                        if not isinstance(usb_info, dict):
-                            continue
-                        dev = self._parse_usb_device(
-                            usb_info,
-                            f"mesh_{node_cid or node_ip}_{usb_id}",
-                        )
-                        if dev:
-                            dev["mesh_cid"] = node_cid
-                            dev["mesh_node_ip"] = node_ip
-                            devices.append(dev)
-
-            elif isinstance(data, list):
-                for usb_info in data:
-                    if not isinstance(usb_info, dict):
-                        continue
-                    dev = self._parse_usb_device(
-                        usb_info,
-                        f"mesh_{node_cid or node_ip}_usb",
-                    )
-                    if dev:
-                        dev["mesh_cid"] = node_cid
-                        dev["mesh_node_ip"] = node_ip
-                        devices.append(dev)
-
-        except asyncio.TimeoutError:
-            _LOGGER.debug(
-                "Timeout getting USB from mesh node %s (%s)",
-                node_name, node_ip,
-            )
-        except Exception as err:
-            _LOGGER.debug(
-                "Could not get USB from mesh node %s (%s): %s",
-                node_name, node_ip, err,
-            )
-
-        return devices
 
     async def async_get_traffic_stats(
         self, interfaces: Dict[str, Any] | None = None
@@ -2132,12 +1994,15 @@ class KeeneticClient:
 
         return stats
 
-    async def async_get_all_interface_stats(self) -> Dict[str, Dict[str, Any]]:
+    async def async_get_all_interface_stats(
+        self, interfaces: Dict[str, Any] | None = None
+    ) -> Dict[str, Dict[str, Any]]:
         """Get traffic statistics for all interfaces.
         
         Returns dict mapping interface name to stats (rxbytes, txbytes, etc.)
         """
-        interfaces = await self.async_get_interfaces()
+        if interfaces is None:
+            interfaces = await self.async_get_interfaces()
         iface_list = self._normalize_interfaces(interfaces)
 
         all_stats: Dict[str, Dict[str, Any]] = {}
@@ -2166,223 +2031,9 @@ class KeeneticClient:
 
         return all_stats
 
-    async def async_get_usb_storage(self) -> List[Dict[str, Any]]:
-        """Get USB storage devices information.
-
-        Primary: POST /rci/system/usb
-        Fallback: GET /rci/show/media (+ optional GET /rci/show/usb for extra attrs)
-
-        Some Keenetic firmwares do NOT expose useful data via system/usb, while
-        show/media does. This keeps HA entities alive without log spam.
-        """
-        devices: List[Dict[str, Any]] = []
-
-        # 1) Try system/usb first (kept for compatibility)
-        try:
-            data = await self._rci_post("system/usb", {})
-            devices = self._parse_system_usb_response(data)
-        except Exception as err:
-            _LOGGER.debug("system/usb failed: %s", err)
-
-        # 2) If empty, fallback to show/media (+show/usb)
-        if not devices:
-            try:
-                devices = await self._parse_show_media_usb()
-            except Exception as err:
-                _LOGGER.debug("show/media fallback failed: %s", err)
-
-        return devices
-
-    def _parse_system_usb_response(self, data: Any) -> List[Dict[str, Any]]:
-        """Parse /rci/system/usb response into a normalized list."""
-        devices: List[Dict[str, Any]] = []
-        if not data:
-            return devices
-
-        # Yanıt dict ise: {"USB0": {...}, "USB1": {...}} veya {"port": [...]}
-        if isinstance(data, dict):
-            port_list = data.get("port")
-            if isinstance(port_list, list):
-                for port_info in port_list:
-                    if not isinstance(port_info, dict):
-                        continue
-                    device = self._parse_usb_device(port_info, port_info.get("id") or "usb")
-                    if device:
-                        devices.append(device)
-            else:
-                for usb_id, usb_info in data.items():
-                    if not isinstance(usb_info, dict):
-                        continue
-                    device = self._parse_usb_device(usb_info, usb_id)
-                    if device:
-                        devices.append(device)
-
-        elif isinstance(data, list):
-            for usb_info in data:
-                if not isinstance(usb_info, dict):
-                    continue
-                device = self._parse_usb_device(usb_info, usb_info.get("id") or "usb")
-                if device:
-                    devices.append(device)
-
-        return devices
-
-    async def _parse_show_media_usb(self) -> List[Dict[str, Any]]:
-        """Parse USB storage via show/media (and enrich via show/usb when available)."""
-        media_raw = await self._rci_get("show/media")
-        usb_raw = None
-        try:
-            usb_raw = await self._rci_get("show/usb")
-        except Exception:
-            usb_raw = None
-
-        media_map: Dict[str, Dict[str, Any]] = {}
-        if isinstance(media_raw, dict):
-            media_map = {k: v for k, v in media_raw.items() if isinstance(v, dict)}
-
-        usb_map: Dict[str, Dict[str, Any]] = {}
-        if isinstance(usb_raw, dict):
-            device_block = usb_raw.get("device")
-            if isinstance(device_block, dict):
-                usb_map = {k: v for k, v in device_block.items() if isinstance(v, dict)}
-
-        devices: List[Dict[str, Any]] = []
-        for dev_id, info in media_map.items():
-            device = self._parse_show_media_device(dev_id, info, usb_map.get(dev_id))
-            if device:
-                devices.append(device)
-
-        return devices
-
-    def _to_int(self, v: Any, default: int = 0) -> int:
-        """Convert Keenetic numeric fields which may arrive as strings."""
-        if v is None:
-            return default
-        if isinstance(v, bool):
-            return int(v)
-        if isinstance(v, (int, float)):
-            return int(v)
-        try:
-            s = str(v).strip()
-            if s == "":
-                return default
-            # Allow e.g. "30765219840"
-            return int(float(s))
-        except Exception:
-            return default
-
-    def _parse_show_media_device(
-        self,
-        dev_id: str,
-        media_info: Dict[str, Any],
-        usb_info: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any] | None:
-        """Normalize show/media (+show/usb) device into our usb_storage schema."""
-        if not media_info:
-            return None
-
-        # Partitions are usually the best source of size/free
-        partitions = media_info.get("partition") or []
-        part0: Dict[str, Any] | None = None
-        if isinstance(partitions, list) and partitions:
-            p = partitions[0]
-            if isinstance(p, dict):
-                part0 = p
-
-        total = self._to_int((part0 or {}).get("total")) or self._to_int(media_info.get("size"))
-        free = self._to_int((part0 or {}).get("free"))
-        used = max(total - free, 0) if (total and free is not None) else self._to_int((part0 or {}).get("used"))
-
-        filesystem = (part0 or {}).get("fstype") or media_info.get("fstype") or media_info.get("filesystem")
-        label = (part0 or {}).get("label") or media_info.get("label") or media_info.get("product") or dev_id
-
-        # Enrich from show/usb (port, power-control, etc.)
-        port = None
-        power_control = None
-        usb_version = None
-        if isinstance(usb_info, dict):
-            port = usb_info.get("port")
-            power_control = usb_info.get("power-control")
-            usb_version = usb_info.get("usb-version")
-
-        # Media block also has usb {port, version}
-        usb_block = media_info.get("usb")
-        if isinstance(usb_block, dict):
-            port = port or usb_block.get("port")
-            usb_version = usb_version or usb_block.get("version")
-
-        return {
-            "id": dev_id,
-            "label": label,
-            "vendor": media_info.get("manufacturer") or (usb_info or {}).get("manufacturer"),
-            "model": media_info.get("product") or (usb_info or {}).get("product"),
-            "serial": media_info.get("serial") or (usb_info or {}).get("serial"),
-            "total": total,
-            "used": used,
-            "free": free,
-            "filesystem": filesystem,
-            "state": (part0 or {}).get("state") or media_info.get("state"),
-            "type": media_info.get("bus") or "usb",
-            # Extras (kept as attrs, harmless for existing UI)
-            "port": port,
-            "usb_version": usb_version,
-            "ejectable": media_info.get("ejectable"),
-            "power_control": power_control,
-            "uuid": (part0 or {}).get("uuid"),
-        }
-
-    def _parse_usb_device(self, info: Dict[str, Any], fallback_id: str) -> Dict[str, Any] | None:
-        """Parse a single USB device entry from /rci/system/usb response."""
-        if not info:
-            return None
-
-        # Partition bilgileri
-        partitions = info.get("partition") or info.get("partitions") or {}
-        total_size = 0
-        used_size = 0
-        free_size = 0
-
-        part_items: list = []
-        if isinstance(partitions, dict):
-            part_items = [v for v in partitions.values() if isinstance(v, dict)]
-        elif isinstance(partitions, list):
-            part_items = [v for v in partitions if isinstance(v, dict)]
-
-        for p in part_items:
-            total_size += p.get("size", 0)
-            used_size += p.get("used", 0)
-            free_size += p.get("free", p.get("available", 0))
-
-        # Partition yoksa üst seviye bilgileri kullan
-        if total_size == 0:
-            total_size = info.get("size", 0)
-            used_size = info.get("used", 0)
-            free_size = info.get("free", info.get("available", 0))
-
-        device_id = info.get("id") or info.get("name") or fallback_id
-
-        return {
-            "id": device_id,
-            "label": info.get("label") or info.get("description") or info.get("model") or device_id,
-            "vendor": info.get("vendor") or info.get("manufacturer"),
-            "model": info.get("model") or info.get("product"),
-            "serial": info.get("serial"),
-            "total": total_size,
-            "used": used_size,
-            "free": free_size,
-            "filesystem": info.get("filesystem") or info.get("fs"),
-            "state": info.get("state") or info.get("status"),
-            "type": info.get("type"),
-        }
-
-
-    async def async_get_client_stats(self) -> Dict[str, Any]:
-        """Get connected/disconnected client counts and per-AP stats.
-        
-        Extender/repeater cihazları client sayısından çıkarılır.
-        """
-        clients = await self.async_get_clients()
-
+    @staticmethod
+    def summarize_client_stats(clients: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Summarize a pre-fetched Keenetic client list."""
         connected = 0
         disconnected = 0
         per_ap: Dict[str, int] = {}
@@ -2442,6 +2093,13 @@ class KeeneticClient:
             "extenders": extenders,
             "extender_count": len(extenders),
         }
+
+    async def async_get_client_stats(self) -> Dict[str, Any]:
+        """Get connected/disconnected client counts and per-AP stats.
+        
+        Extender/repeater cihazları client sayısından çıkarılır.
+        """
+        return self.summarize_client_stats(await self.async_get_clients())
 
     async def async_get_policies(self) -> Dict[str, str]:
         """Get available connection policies.
@@ -2512,7 +2170,8 @@ class KeeneticClient:
             mac: Client MAC address
             policy: Policy ID (e.g. "Policy0", "Policy1") or "deny"/"default"
         """
-        mac_clean = mac.lower().replace("-", ":")
+        mac_clean = _validate_cli_arg(mac.lower().replace("-", ":"), "MAC address")
+        policy = _validate_cli_arg(policy, "policy")
 
         if policy.lower() == "deny":
             cmd = f"ip hotspot host {mac_clean} deny"
@@ -2706,7 +2365,7 @@ class KeeneticClient:
                             text = await resp.text()
                             _LOGGER.warning(
                                 "Node %s component staging returned %s: %s",
-                                label, resp.status, text,
+                                label, resp.status, _response_summary(text),
                             )
 
                         # Step 3: Commit
@@ -2731,7 +2390,7 @@ class KeeneticClient:
                         text = await resp.text()
                         _LOGGER.warning(
                             "Node %s commit returned %s: %s",
-                            label, resp.status, text,
+                            label, resp.status, _response_summary(text),
                         )
                     else:
                         _LOGGER.debug(
@@ -2768,7 +2427,7 @@ class KeeneticClient:
                     text = await resp.text()
                     _LOGGER.debug(
                         "Node %s system/update returned %s: %s",
-                        label, resp.status, text,
+                        label, resp.status, _response_summary(text),
                     )
             except asyncio.TimeoutError:
                 _LOGGER.debug("Timeout on system/update for node %s", label)
@@ -2792,6 +2451,10 @@ class KeeneticClient:
         if port is None:
             port = self._port
 
+        cached = self._node_auth_headers.get((node_ip, port))
+        if cached:
+            return dict(cached)
+
         scheme = "https" if self._ssl else "http"
         auth_url = f"{scheme}://{node_ip}:{port}/auth"
 
@@ -2808,10 +2471,12 @@ class KeeneticClient:
             if not challenge:
                 _LOGGER.debug(
                     "Node %s did not return challenge header, "
-                    "trying basic auth fallback",
+                    "using basic auth fallback",
                     node_ip,
                 )
-                return dict(self._auth_header or {})
+                headers = self._basic_auth_headers()
+                self._node_auth_headers[(node_ip, port)] = headers
+                return dict(headers)
 
             # Step 2: Compute hash
             ha1 = hashlib.md5(
@@ -2845,7 +2510,9 @@ class KeeneticClient:
                 _LOGGER.debug(
                     "Challenge auth to node %s:%s succeeded", node_ip, port
                 )
-                return {"Cookie": session_cookie} if session_cookie else {}
+                headers = {"Cookie": session_cookie} if session_cookie else {}
+                self._node_auth_headers[(node_ip, port)] = headers
+                return dict(headers)
 
             _LOGGER.debug(
                 "Challenge auth to node %s:%s returned status %s",

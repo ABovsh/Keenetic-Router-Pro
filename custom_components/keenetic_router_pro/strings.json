@@ -19,6 +19,27 @@
         "data": {
           "tracked_clients": "Clients to track"
         }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate Keenetic Router Pro",
+        "description": "Update the credentials used to connect to your Keenetic router.",
+        "data": {
+          "username": "Username",
+          "password": "Password",
+          "use_challenge_auth": "Use Challenge Auth (NDW2)"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Keenetic Router Pro",
+        "description": "Update the connection settings for your Keenetic router.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password",
+          "ssl": "Use SSL",
+          "use_challenge_auth": "Use Challenge Auth (NDW2)"
+        }
       }
     },
     "error": {
@@ -30,7 +51,9 @@
       "already_configured": "Device is already configured",
       "already_in_progress": "Configuration flow is already in progress",
       "no_host": "No host found in discovery data",
-      "no_clients": "No clients found on the network"
+      "no_clients": "No clients found on the network",
+      "reauth_successful": "Reauthentication was successful",
+      "reconfigure_successful": "Reconfiguration was successful"
     }
   },
   "options": {
@@ -105,14 +128,6 @@
     "update": {
       "firmware_update": {
         "name": "Firmware Update"
-      }
-    },
-    "image": {
-      "qr_wifi_main": {
-        "name": "Wi-Fi QR Code"
-      },
-      "qr_wifi_guest": {
-        "name": "Guest Wi-Fi QR Code"
       }
     }
   }

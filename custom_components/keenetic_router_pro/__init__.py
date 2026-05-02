@@ -7,9 +7,10 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import KeeneticClient
+from .api import KeeneticApiError, KeeneticAuthError, KeeneticClient
 from .const import (
     DOMAIN,
     DEFAULT_PORT,
@@ -21,13 +22,22 @@ from .const import (
     CONF_USE_CHALLENGE_AUTH,
     CONF_PING_INTERVAL,
     DEFAULT_PING_INTERVAL,
+    MIN_PING_INTERVAL,
     EVENT_NEW_DEVICE,
 )
 from .coordinator import KeeneticCoordinator, KeeneticPingCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[str] = ["sensor", "switch", "device_tracker", "button", "binary_sensor", "select", "update", "image"]
+PLATFORMS: list[str] = [
+    "sensor",
+    "switch",
+    "device_tracker",
+    "button",
+    "binary_sensor",
+    "select",
+    "update",
+]
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -53,10 +63,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ssl=use_ssl,
         use_challenge_auth=bool(data.get(CONF_USE_CHALLENGE_AUTH, False)),
     )
-    await client.async_start(session)
+    try:
+        await client.async_start(session)
+    except KeeneticAuthError as err:
+        raise ConfigEntryAuthFailed("Keenetic credentials were rejected") from err
+    except KeeneticApiError as err:
+        raise ConfigEntryNotReady(f"Could not connect to Keenetic router: {err}") from err
 
     coordinator = KeeneticCoordinator(hass, client)
-    await coordinator.async_config_entry_first_refresh()
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except ConfigEntryAuthFailed:
+        raise
+    except ConfigEntryNotReady:
+        raise
+    except KeeneticAuthError as err:
+        raise ConfigEntryAuthFailed("Keenetic credentials were rejected") from err
+    except KeeneticApiError as err:
+        raise ConfigEntryNotReady(f"Could not refresh Keenetic router: {err}") from err
 
     tracked_clients = data.get(CONF_TRACKED_CLIENTS, [])
 
@@ -69,7 +93,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ping_interval = int(ping_interval)
     except (TypeError, ValueError):
         ping_interval = DEFAULT_PING_INTERVAL
-    if ping_interval < 1:
+    if ping_interval < MIN_PING_INTERVAL:
         ping_interval = DEFAULT_PING_INTERVAL
 
     ping_coordinator = KeeneticPingCoordinator(
@@ -84,7 +108,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         try:
             await ping_coordinator.async_refresh()
         except Exception as err:  # noqa: BLE001
-            _LOGGER.warning(
+            _LOGGER.debug(
                 "Initial ping refresh failed (non-fatal), will retry on next cycle: %s", err
             )
 
@@ -147,9 +171,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return False
 
     entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
-    if entry_data:
-        client: KeeneticClient = entry_data.get(DATA_CLIENT)
-
     if not hass.data.get(DOMAIN):
         hass.data.pop(DOMAIN, None)
 

@@ -8,7 +8,7 @@ def get_main_device_info(
         entry_id: str, 
         firmware_version: str, 
         model: str,
-        host: str,
+        host: Optional[str],
         ssl: bool = False,
         ndns_domain: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -19,8 +19,10 @@ def get_main_device_info(
         # Убираем протокол если есть
         clean_domain = ndns_domain.replace("https://", "").replace("http://", "").split("/")[0]
         configuration_url = f"{scheme}://{clean_domain}"
-    else:
+    elif host:
         configuration_url = f"{scheme}://{host}"
+    else:
+        configuration_url = None
 
     return {
         "identifiers": {(DOMAIN, entry_id)},
@@ -66,25 +68,6 @@ def get_mesh_device_info(
     # Fallback к главному устройству
     return get_main_device_info(title, entry_id, None, None, host, ssl)
 
-
-def get_mesh_usb_device_info(
-    title: str,
-    entry_id: str,
-    mesh_node_name: str,
-    mesh_cid: Optional[str] = None,
-    node_ip: Optional[str] = None,
-    ssl: bool = False,
-) -> Dict[str, Any]:
-    """Device info для USB на Mesh-ноде."""
-    if mesh_cid:
-        return {
-            "identifiers": {(DOMAIN, f"mesh_{mesh_cid}")},
-            "name": mesh_node_name,
-            "manufacturer": "Keenetic",
-            "via_device": (DOMAIN, entry_id),
-        }
-    # Fallback к главному устройству
-    return get_main_device_info(title, entry_id, None, None, node_ip, ssl)
 
 def get_wan_device_info(
     title: str,

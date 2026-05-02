@@ -51,7 +51,6 @@ from .wifi import (
     KeeneticWifi5TxSensor,
 )
 from .wireguard import KeeneticWgUptimeSensor, KeeneticWgRxSensor, KeeneticWgTxSensor
-from .usb import KeeneticUsbStorageSensor, KeeneticMeshUsbStorageSensor
 from .mesh import (
     KeeneticMeshSystemStateSensor,
     KeeneticMeshCpuLoadSensor,
@@ -178,24 +177,6 @@ async def async_setup_entry(
         entities.append(KeeneticWgUptimeSensor(coordinator, entry, name))
         entities.append(KeeneticWgRxSensor(coordinator, entry, name))
         entities.append(KeeneticWgTxSensor(coordinator, entry, name))
-
-    # USB depolama sensörleri (ana router)
-    usb_devices = coordinator.data.get("usb_storage", [])
-    for usb_dev in usb_devices:
-        dev_id = usb_dev.get("id")
-        if dev_id:
-            entities.append(KeeneticUsbStorageSensor(coordinator, entry, dev_id))
-
-    # Mesh node USB sensörleri
-    mesh_usb_devices = coordinator.data.get("mesh_usb", [])
-    for musb_dev in mesh_usb_devices:
-        dev_id = musb_dev.get("id")
-        if dev_id:
-            entities.append(KeeneticMeshUsbStorageSensor(
-                coordinator, entry, dev_id,
-                mesh_node_name=musb_dev.get("mesh_node_name"),
-                mesh_cid=musb_dev.get("mesh_cid"),
-            ))
 
     # Клиентские сенсоры для каждого отслеживаемого устройства
     tracked_clients = entry.data.get(CONF_TRACKED_CLIENTS, [])

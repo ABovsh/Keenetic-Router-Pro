@@ -95,11 +95,12 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
             )
         )
         # Ping coordinator'ı da dinle — her ping cycle'da state güncellensin
-        self.async_on_remove(
-            self._ping_coordinator.async_add_listener(
-                self._handle_ping_update
+        if self._ping_coordinator is not None:
+            self.async_on_remove(
+                self._ping_coordinator.async_add_listener(
+                    self._handle_ping_update
+                )
             )
-        )
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -122,7 +123,8 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
         # when some kernels answer ICMP to 0.0.0.0 or when the stale
         # IP happens to be owned by a different device now.
         ip = client.get("ip") if client else ""
-        self._ping_coordinator.update_client_ip(self._mac, str(ip or ""))
+        if self._ping_coordinator is not None:
+            self._ping_coordinator.update_client_ip(self._mac, str(ip or ""))
 
         self.async_write_ha_state()
 
@@ -181,13 +183,13 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
                 return str(client.get("link", "")).lower() == "up"
             return False
         else:
-            ping_results = self._ping_coordinator.data or {}
+            ping_results = self._ping_coordinator.data if self._ping_coordinator else {}
             return ping_results.get(self._mac, False) 
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         client = self._client_from_main
-        ping_results = self._ping_coordinator.data or {}
+        ping_results = self._ping_coordinator.data if self._ping_coordinator else {}
         
         if self._is_apple_device:
             client_link = (self._client_from_main or {}).get("link", "unknown")

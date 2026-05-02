@@ -1,6 +1,7 @@
 """Firmware update platform for Keenetic Router Pro."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -22,6 +23,24 @@ from .entity import ControllerEntity, MeshEntity
 _LOGGER = logging.getLogger(__name__)
 
 KEENETIC_RELEASE_NOTES_URL = "https://help.keenetic.com/hc/en-us/categories/360000400920-KeeneticOS-Release-Notes"
+
+
+def _reported_latest_version(available: str | None, current: str | None) -> str | None:
+    """Return the version HA should treat as latest."""
+    if not available or not current or available == current:
+        return current
+
+    # HA's UpdateEntity uses AwesomeVersion comparison (latest > installed).
+    # When switching channels (e.g. dev→stable), the available version may be
+    # numerically lower. Append a suffix to bypass version comparison.
+    try:
+        from awesomeversion import AwesomeVersion
+
+        if AwesomeVersion(available) < AwesomeVersion(current):
+            return f"{available} (channel switch)"
+    except Exception:  # noqa: BLE001
+        pass
+    return available
 
 
 async def async_setup_entry(
@@ -89,23 +108,8 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
         available = system.get("fw-available") or system.get("release-available")
         current = system.get("title") or system.get("release")
 
-        # Show update if router reports one available, regardless of channel
-        if (
-            available
-            and current
-            and available != current
-            and system.get("fw-update-available", True)
-        ):
-            # HA's UpdateEntity uses AwesomeVersion comparison (latest > installed).
-            # When switching channels (e.g. dev→stable), the available version
-            # may be numerically lower. Append a suffix to bypass version comparison.
-            try:
-                from awesomeversion import AwesomeVersion
-                if AwesomeVersion(available) < AwesomeVersion(current):
-                    return f"{available} (channel switch)"
-            except Exception:
-                pass
-            return available
+        if system.get("fw-update-available", True):
+            return _reported_latest_version(available, current)
 
         # No update available → return current so HA shows "up to date"
         return current
@@ -165,8 +169,6 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
                 self._update_progress = None
                 self.async_write_ha_state()
                 raise HomeAssistantError("Router did not accept the update command")
-
-            import asyncio
 
             # Try to get initial progress to detect if endpoint is available
             progress_supported = False
@@ -268,22 +270,10 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
         node = self._node
         if not node:
             return None
-        available = node.get("firmware_available")
-        current = node.get("firmware")
-
-        if available and current and available != current:
-            # HA's UpdateEntity uses AwesomeVersion comparison (latest > installed).
-            # When switching channels (e.g. dev→stable), the available version
-            # may be numerically lower. Append a suffix to bypass version comparison
-            # and fall back to HA's != check.
-            try:
-                from awesomeversion import AwesomeVersion
-                if AwesomeVersion(available) < AwesomeVersion(current):
-                    return f"{available} (channel switch)"
-            except Exception:
-                pass
-            return available
-        return current
+        return _reported_latest_version(
+            node.get("firmware_available"),
+            node.get("firmware"),
+        )
 
     @property
     def release_url(self) -> str | None:
@@ -341,8 +331,6 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
                 raise HomeAssistantError(
                     f"Node {node_name} did not accept the update command"
                 )
-
-            import asyncio
 
             _LOGGER.info(
                 "Update started on %s, waiting for node to reboot", node_name

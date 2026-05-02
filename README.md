@@ -1,7 +1,7 @@
 # Keenetic Router Pro - Home Assistant Integration
-![Downloads](https://img.shields.io/github/downloads/cataseven/Keenetic-Router-Pro/total?color=41BDF5&logo=home-assistant&label=Downloads&suffix=%20downloads&style=for-the-badge)
+![Downloads](https://img.shields.io/github/downloads/abovsh/Keenetic-Router-Pro/total?color=41BDF5&logo=home-assistant&label=Downloads&suffix=%20downloads&style=for-the-badge)
 [![hacs\_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![version](https://img.shields.io/badge/version-1.3.0-blue.svg)](https://github.com/)
+[![version](https://img.shields.io/badge/version-1.3.0-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
 
 <a href="https://www.buymeacoffee.com/cataseven" target="_blank">
   <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 60px !important; width: 217px !important;" >
@@ -13,12 +13,12 @@ An advanced Home Assistant integration for Keenetic routers. Provides mesh netwo
 
 ### 📡 Real Time Device Tracking
 
-* Real-time device status via **ICMP Ping**. You don't need to wait Keenetic's update time for device tracking. This integration pings the devices you selected every 3 seconds.
+* Real-time device status via **ICMP Ping**. You don't need to wait Keenetic's update time for device tracking. This integration pings the devices you selected every 5 seconds by default.
 * Selectable client list
-* 3-second update interval
+* Configurable ping interval from 5 to 300 seconds
 * Automatic updates on IP address changes
 > [!IMPORTANT]
-> ⚠️ **If Apple iOS devices are registered with client name including 'apple', 'iphone' or 'ipad' then they will NOT be pinged every 3 seconds. Instead, they will sync with the status on the Router's interface. This is because they go into Deep Sleep mode and disable WiFi connection even when they are connected to WiFi.**
+> ⚠️ **If Apple iOS devices are registered with client name including 'apple', 'iphone' or 'ipad' then they will NOT be pinged directly. Instead, they will sync with the status on the Router's interface. This is because they go into Deep Sleep mode and disable WiFi connection even when they are connected to WiFi.**
 
 ### 🔗 Mesh Network Management
 
@@ -30,7 +30,6 @@ An advanced Home Assistant integration for Keenetic routers. Provides mesh netwo
 * Number of connected clients (associations) per node
 * **Traffic monitoring** per node (WiFi 2.4GHz/5GHz, LAN, WAN RX/TX)
 * **WiFi radio temperature** per node (2.4GHz / 5GHz)
-* **USB storage** detection on mesh nodes
 
 ### 🔄 Firmware Updates
 
@@ -65,20 +64,12 @@ An advanced Home Assistant integration for Keenetic routers. Provides mesh netwo
 * **LAN / WAN** RX/TX traffic (GB)
 * **WiFi radio temperature** (2.4GHz / 5GHz)
 * Active connections count
-* USB storage detection
 
 ### 🔌 Port Monitoring
 
 * **Physical port status** for the main router and all mesh nodes
 * Link state (up/down), speed (100/1000 Mbps), and duplex mode per port
 * Includes LAN ports, WAN/ISP port, and SFP port
-
-### 📱 Wi-Fi QR Code
-
-* **Scannable QR code** image entity for your main Wi-Fi network
-* Scan with any phone camera to **connect automatically** — no manual password entry needed
-* Guest Wi-Fi QR code (if guest network is configured)
-* QR code updates automatically when SSID or password changes
 
 ### 👥 Client Management
 
@@ -232,15 +223,7 @@ During setup, you can choose which devices should be monitored via ping.
 | WiFi 5GHz RX / TX | Cumulative traffic in GB | Diagnostic |
 | LAN RX / TX | Cumulative traffic in GB | Diagnostic |
 | WAN RX / TX | Cumulative traffic in GB | Diagnostic |
-| USB Storage | USB device info (if connected) | Diagnostic |
 | Port 0–4 | Physical port link state, speed, and duplex | Diagnostic |
-
-#### Images
-
-| Entity | Description |
-| ------ | ----------- |
-| Wi-Fi QR Code | Scannable QR code to connect to main Wi-Fi network |
-| Guest Wi-Fi QR Code | Scannable QR code to connect to guest network (if configured) |
 
 #### Binary Sensors
 

@@ -86,8 +86,8 @@ class ControllerEntity(CoordinatorEntity):
             self._entry_id,
             self._firmware_version,
             self._model_name,
-            host=self.coordinator._client._host if hasattr(self.coordinator, '_client') else None,
-            ssl=self.coordinator._client._ssl if hasattr(self.coordinator, '_client') else False,
+            host=getattr(self.coordinator.client, "_host", None),
+            ssl=bool(getattr(self.coordinator.client, "_ssl", False)),
             ndns_domain=ndns_domain,
         )
 
@@ -127,7 +127,7 @@ class MeshEntity(CoordinatorEntity):
             self._node,
             self._node_cid,
             host=node_ip,
-            ssl=self.coordinator._client._ssl if hasattr(self.coordinator, '_client') else False,
+            ssl=bool(getattr(self.coordinator.client, "_ssl", False)),
             fqdn=node.get("fqdn")
         )
     

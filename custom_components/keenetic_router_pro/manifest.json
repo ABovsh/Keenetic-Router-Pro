@@ -1,14 +1,14 @@
 {
   "domain": "keenetic_router_pro",
   "name": "Keenetic Router Pro",
-  "codeowners": ["@cataseven"],
+  "codeowners": ["@abovsh"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/cataseven/Keenetic-Router-Pro",
+  "documentation": "https://github.com/abovsh/Keenetic-Router-Pro",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/cataseven/Keenetic-Router-Pro/issues",
-  "loggers": ["custom_components.keenetic_api"],
-  "requirements": ["icmplib>=3.0", "pyqrcode>=1.2.1", "pypng>=0.0.20"],
+  "issue_tracker": "https://github.com/abovsh/Keenetic-Router-Pro/issues",
+  "loggers": ["custom_components.keenetic_router_pro"],
+  "requirements": ["icmplib>=3.0"],
   "ssdp": [
     {
       "st": "urn:schemas-upnp-org:device:InternetGatewayDevice:1",
@@ -19,5 +19,5 @@
       "manufacturer": "ZyXEL Communications Corp."
     }
   ],
-  "version": "1.2.0"
+  "version": "1.3.0"
 }

@@ -7,14 +7,30 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import KeeneticClient
-from .const import DOMAIN, FAST_SCAN_INTERVAL, PING_SCAN_INTERVAL, DEFAULT_PING_INTERVAL
+from .api import KeeneticAuthError, KeeneticClient
+from .const import DOMAIN, FAST_SCAN_INTERVAL, DEFAULT_PING_INTERVAL
 
 import logging
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.coordinator")
+
+_VERSION_CACHE_KEYS = (
+    "title",
+    "release",
+    "sandbox",
+    "arch",
+    "description",
+    "model",
+    "device",
+    "hw_id",
+    "ndw",
+    "ndw4",
+    "ndm",
+    "bsp",
+)
 
 # ICMP ping için icmplib kullanıyoruz (Home Assistant Ping entegrasyonu gibi)
 try:
@@ -37,6 +53,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             update_interval=timedelta(seconds=FAST_SCAN_INTERVAL),
         )
         self.client = client
+        self._refresh_count = 0
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch all router data with bounded, staged parallelism.
@@ -47,8 +64,8 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
  
           * Stage 1 has no dependencies and runs first.
           * Stage 2 needs ``interfaces`` from stage 1.
-          * Stage 3 needs results from stages 1 and 2 (WiFi passwords
-            per SSID, USB devices per connected mesh node).
+          * Stage 3 performs CPU-only WAN enrichment from already fetched
+            interface statistics.
  
         Within each stage we use ``asyncio.gather`` with
         ``return_exceptions=True`` so a single failing endpoint can no
@@ -61,6 +78,23 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         async def _bounded(coro):
             async with sem:
                 return await coro
+
+        async def _cached(key: str, default: Any) -> Any:
+            if self.data is None:
+                return default
+            return self.data.get(key, default)
+
+        async def _cached_update_info() -> dict[str, Any]:
+            system = await _cached("system", {})
+            return {
+                "title": system.get("release-available"),
+                "sandbox": system.get("fw-update-sandbox"),
+                "update-available": system.get("fw-update-available", False),
+            }
+
+        async def _cached_version_info() -> dict[str, Any]:
+            system = await _cached("system", {})
+            return {key: system.get(key) for key in _VERSION_CACHE_KEYS if key in system}
  
         # Collected per-tick so we can emit a single warning instead of
         # silently defaulting every failing fetch at debug level.
@@ -86,6 +120,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 return default
             return value
  
+        first_refresh = self.data is None
+        slow_refresh = first_refresh or self._refresh_count % 6 == 0
+        very_slow_refresh = first_refresh or self._refresh_count % 30 == 0
+
         # ---------- Stage 1: independent fetches ----------
         (
             system,
@@ -94,27 +132,21 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             interfaces,
             clients,
             mesh_nodes,
-            client_stats,
             host_policies,
             ndns_info,
-            usb_storage,
-            interface_stats,
             ping_check_status,
             crypto_maps,
         ) = await asyncio.gather(
             _bounded(self.client.async_get_system_info()),
-            _bounded(self.client.async_get_current_version_info()),
-            _bounded(self.client.async_get_available_version_info()),
+            _bounded(self.client.async_get_current_version_info()) if slow_refresh else _cached_version_info(),
+            _bounded(self.client.async_get_available_version_info()) if very_slow_refresh else _cached_update_info(),
             _bounded(self.client.async_get_interfaces()),
             _bounded(self.client.async_get_clients()),
-            _bounded(self.client.async_get_mesh_nodes()),
-            _bounded(self.client.async_get_client_stats()),
-            _bounded(self.client.async_get_host_policies()),
-            _bounded(self.client.async_get_ndns_info()),
-            _bounded(self.client.async_get_usb_storage()),
-            _bounded(self.client.async_get_all_interface_stats()),
+            _bounded(self.client.async_get_mesh_nodes()) if slow_refresh else _cached("mesh_nodes", []),
+            _bounded(self.client.async_get_host_policies()) if slow_refresh else _cached("host_policies", {}),
+            _bounded(self.client.async_get_ndns_info()) if very_slow_refresh else _cached("ndns", {}),
             _bounded(self.client.async_get_ping_check_status()),
-            _bounded(self.client.async_get_crypto_maps()),
+            _bounded(self.client.async_get_crypto_maps()) if slow_refresh else _cached("crypto_maps", {}),
             return_exceptions=True,
         )
  
@@ -124,11 +156,8 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         interfaces = _ok("interfaces", interfaces, [])
         clients = _ok("clients", clients, [])
         mesh_nodes = _ok("mesh_nodes", mesh_nodes, [])
-        client_stats = _ok("client_stats", client_stats, {})
         host_policies = _ok("host_policies", host_policies, {})
         ndns_info = _ok("ndns_info", ndns_info, {})
-        usb_storage = _ok("usb_storage", usb_storage, [])
-        interface_stats = _ok("interface_stats", interface_stats, {})
         ping_check_status = _ok("ping_check_status", ping_check_status, {})
         # Crypto maps: not every router/firmware has the IPsec component,
         # so this endpoint may be unavailable. Mark the fetch as silent
@@ -151,8 +180,12 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if name in ("system_info", "interfaces")
         ]
         if critical_failures:
+            if any(isinstance(err, KeeneticAuthError) for _, err in critical_failures):
+                raise ConfigEntryAuthFailed("Keenetic credentials were rejected")
             details = ", ".join(f"{n}: {e!r}" for n, e in critical_failures)
             raise UpdateFailed(f"Critical router fetch failed ({details})")
+
+        client_stats = self.client.summarize_client_stats(clients)
  
         merged_system = {**system, **version}
         merged_system["release-available"] = (
@@ -174,6 +207,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             wan_interfaces,
             traffic_stats,
             port_info,
+            interface_stats,
         ) = await asyncio.gather(
             _bounded(self.client.async_get_wifi_networks(interfaces=interfaces)),
             _bounded(self.client.async_get_wireguard_status(interfaces=interfaces)),
@@ -182,6 +216,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _bounded(self.client.async_get_wan_interfaces(interfaces=interfaces)),
             _bounded(self.client.async_get_traffic_stats(interfaces=interfaces)),
             _bounded(self.client.async_get_port_info(interfaces=interfaces)),
+            _bounded(self.client.async_get_all_interface_stats(interfaces=interfaces)),
             return_exceptions=True,
         )
  
@@ -192,6 +227,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         wan_interfaces = _ok("wan_interfaces", wan_interfaces, [])
         traffic_stats = _ok("traffic_stats", traffic_stats, {})
         port_info = _ok("port_info", port_info, {})
+        interface_stats = _ok("interface_stats", interface_stats, {})
 
         # Emit a single aggregated warning per tick for any non-critical
         # fetches that fell back to defaults. Keeping this above debug
@@ -206,73 +242,6 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ", ".join(name for name, _ in failed_fetches),
             )
  
-        # ---------- Stage 3a: WiFi passwords (parallel, cached) ----------
-        # We only fetch a password once per SSID/interface and cache it
-        # in coordinator data so subsequent ticks skip these calls
-        # entirely. The first tick after a fresh start does N parallel
-        # fetches; every tick after that does zero.
-        wifi_passwords: dict[str, str] = {}
-        if self.data:
-            wifi_passwords = dict(self.data.get("wifi_passwords", {}))
- 
-        missing_pw_targets = [
-            (net.get("id"), net.get("ssid"))
-            for net in wifi
-            if net.get("id")
-            and net.get("ssid")
-            and net.get("id") not in wifi_passwords
-        ]
-        if missing_pw_targets:
-            pw_results = await asyncio.gather(
-                *(
-                    _bounded(self.client.async_get_wifi_password(iface_id))
-                    for iface_id, _ssid in missing_pw_targets
-                ),
-                return_exceptions=True,
-            )
-            for (iface_id, _ssid), pw in zip(missing_pw_targets, pw_results):
-                if isinstance(pw, BaseException):
-                    continue
-                if pw:
-                    wifi_passwords[iface_id] = pw
- 
-        # ---------- Stage 3b: Mesh USB (parallel per node) ----------
-        # Each connected mesh node is queried directly at its own IP
-        # for its USB storage. These calls are independent of each
-        # other and of the main router, so they fan out cleanly.
-        connected_nodes = [
-            n for n in mesh_nodes if n.get("ip") and n.get("connected", False)
-        ]
- 
-        async def _fetch_node_usb(node: dict[str, Any]) -> list[dict[str, Any]]:
-            # Exceptions propagate out and are caught by the outer
-            # ``gather(..., return_exceptions=True)``; one error handler
-            # is clearer than two nested ones.
-            node_ip = node.get("ip")
-            cid = node.get("cid")
-            node_name = node.get("name") or node.get("mac") or cid or node_ip
-            node_usb = await self.client.async_get_mesh_node_usb(
-                node_ip=node_ip,
-                node_name=node_name,
-                node_cid=cid or "",
-            )
-            if not node_usb:
-                return []
-            for dev in node_usb:
-                dev["mesh_node_name"] = node_name
-            return node_usb
- 
-        mesh_usb: list[dict[str, Any]] = []
-        if connected_nodes:
-            node_usb_results = await asyncio.gather(
-                *(_bounded(_fetch_node_usb(n)) for n in connected_nodes),
-                return_exceptions=True,
-            )
-            for res in node_usb_results:
-                if isinstance(res, BaseException):
-                    continue
-                mesh_usb.extend(res)
- 
         # ---------- WAN enrichment (CPU-only, runs on already-fetched
         # data — logic unchanged from the sequential implementation) ----------
         #
@@ -285,7 +254,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 pid = prev.get("id")
                 if pid:
                     prev_wan_by_id[pid] = prev
-        now_ts = asyncio.get_event_loop().time()
+        now_ts = asyncio.get_running_loop().time()
  
         def _to_int(v: Any) -> int:
             try:
@@ -432,12 +401,12 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         }
         new_macs = current_macs - previous_macs
  
+        self._refresh_count += 1
         return {
             "system": merged_system,
             "traffic_stats": traffic_stats,
             "interfaces": interfaces,
             "wifi": wifi,
-            "wifi_passwords": wifi_passwords,
             "wireguard": wireguard,
             "vpn_tunnels": vpn_tunnels,
             "clients": clients,
@@ -448,9 +417,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "client_stats": client_stats,
             "ndns": ndns_info,
             "host_policies": host_policies,
-            "usb_storage": usb_storage,
             "port_info": port_info,
-            "mesh_usb": mesh_usb,
             "crypto_maps": crypto_maps,
             "new_clients": new_macs,
         }
