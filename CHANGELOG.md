@@ -1,5 +1,55 @@
 # Changelog
 
+## 1.4.0 - Bug fixes, throughput units, and code cleanup
+
+### Bug Fixes
+
+- **Reauth/reconfigure flow never completed** — `_async_update_existing_entry`
+  returned a `dict` on success and the caller checked `not isinstance(result, dict)`
+  to detect completion. `FlowResult` is always a `dict` in Home Assistant, so the
+  branch was unreachable: re-auth and reconfigure flows never called `async_abort` and
+  instead rendered a form with the abort payload treated as error strings. Fixed by
+  changing the helper to return `None` on success and `dict[str, str]` on failure; callers
+  now call `async_abort` explicitly.
+- **Stale mesh node auth cache** — `_node_auth_headers[(ip, port)]` was populated on
+  successful authentication but never evicted on HTTP 401. A credential rotation or
+  node session reset left the coordinator locked out with a cached bad token until
+  HA restarted. The 401 branch now evicts the cache entry before retrying.
+- **Private attribute access in sensor setup** — `KeeneticLocalIpSensor` was
+  constructed with `client._host` (private), which bypasses encapsulation and
+  breaks if the attribute is renamed. Changed to read `entry.data.get("host") or
+  entry.data.get("ip")` directly from the config entry.
+
+### Throughput Units
+
+- WAN and IPsec tunnel throughput sensors now use `UnitOfDataRate.MEGABITS_PER_SECOND`
+  instead of `BYTES_PER_SECOND`. The coordinator stores throughput as bytes/s (delta /
+  elapsed); the sensor layer multiplies by 8 and divides by 1 000 000 to produce Mbit/s.
+  With `SensorDeviceClass.DATA_RATE`, Home Assistant automatically offers unit conversion
+  (kbit/s ↔ Mbit/s ↔ Gbit/s) in the entity customisation dialog — no dashboard template
+  workarounds needed. Display precision raised to 2 decimal places.
+
+### Performance
+
+- Replaced three async inner functions (`_cached`, `_cached_update_info`,
+  `_cached_version_info`) that did zero I/O with a single sync precomputation
+  (`_prev` / `_prev_sys`) before the gather call and a trivial `async def _resolve`
+  wrapper. Eliminates unnecessary coroutine objects on every 10 s tick.
+
+### Code Quality
+
+- `entity.py`: added `from __future__ import annotations`; replaced all `Dict[str, Any]`
+  and `Optional[X]` annotations with built-in `dict[str, Any]` and `X | None`;
+  removed Russian/Turkish docstrings.
+- `device_tracker.py`: removed four redundant `__init__` assignments already set by
+  `ClientEntity.__init__`; fixed `extra_state_attributes` to reuse the already-fetched
+  `client` local variable instead of calling `_client_from_main` a second time;
+  translated Turkish/Russian inline comments to English.
+- `binary_sensor.py`: removed two useless f-strings (`f"Connected"`, `f"Update Available"`).
+- `coordinator.py`: translated Turkish class docstring and inline comments to English.
+
+---
+
 ## 1.3.0 - Fork hardening and performance update
 
 This release keeps the Home Assistant integration domain as `keenetic_router_pro`

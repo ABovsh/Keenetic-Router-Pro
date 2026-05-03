@@ -1,9 +1,22 @@
 # Keenetic Router Pro
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
+[![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
 
 Home Assistant custom integration for Keenetic routers. It focuses on local polling, router diagnostics, mesh monitoring, presence tracking, WAN status, traffic counters, firmware updates, and selected client controls.
+
+## Why this fork
+
+The upstream integration had a handful of issues that affected real-world use:
+
+- **Reauth flow broken** — the `_async_update_existing_entry` helper returned a `dict` on both success and failure, but the caller checked `not isinstance(result, dict)` to detect success. `FlowResult` is always a `dict`, so the check was always `False`: re-auth and reconfigure flows never completed the `async_abort` step and instead showed a form filled with the abort dict as "errors".
+- **Throughput shown in B/s** — WAN and IPsec tunnel throughput sensors used `BYTES_PER_SECOND`. Network speeds are conventionally shown in bits per second; this fork converts to Mbit/s with `SensorDeviceClass.DATA_RATE` so HA can auto-convert between kbit/s, Mbit/s, and Gbit/s in the entity UI.
+- **Stale mesh auth cache** — mesh node auth headers were cached per (ip, port) but never evicted on a 401 response. Rotating credentials or a session reset would leave the coordinator locked out until HA restarted.
+- **Dead weight** — QR image platform (449 lines), USB polling module (175 lines), and several unused constants added noise without providing any working feature.
+- **Coordinator helper overhead** — three async inner functions (`_cached`, `_cached_update_info`, `_cached_version_info`) that did zero I/O were called inside every `asyncio.gather`, creating unnecessary coroutine objects every 10 s.
+- **Private attribute access** — sensor setup accessed `client._host` instead of reading the value from `entry.data`.
+
+This fork keeps the integration domain unchanged (`keenetic_router_pro`) so existing HA configurations and entity histories are preserved.
 
 ## Features
 
@@ -16,6 +29,7 @@ Home Assistant custom integration for Keenetic routers. It focuses on local poll
 - Wi-Fi, VPN, and client policy controls where supported by the router firmware.
 - Firmware update entities for the controller and mesh nodes.
 - WireGuard and IPsec diagnostic sensors.
+- WAN and IPsec throughput shown in Mbit/s with automatic unit conversion (kbit/s ↔ Mbit/s ↔ Gbit/s) in the HA entity UI.
 
 Removed from this fork: QR image entities, USB polling, bundled non-English translations, and ZIP-release mode for HACS.
 

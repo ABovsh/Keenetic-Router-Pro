@@ -478,8 +478,8 @@ class KeeneticWanTxBytesSensor(_WanBytesBase):
 class _WanThroughputBase(_WanSensorBase):
     _attr_device_class = SensorDeviceClass.DATA_RATE
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = UnitOfDataRate.BYTES_PER_SECOND
-    _attr_suggested_display_precision = 0
+    _attr_native_unit_of_measurement = UnitOfDataRate.MEGABITS_PER_SECOND
+    _attr_suggested_display_precision = 2
     _field = "rx_throughput"
 
     @property
@@ -491,7 +491,8 @@ class _WanThroughputBase(_WanSensorBase):
         if v is None:
             return None
         try:
-            return float(v)
+            # Coordinator stores bytes/s; convert to Mbit/s (network convention).
+            return round(float(v) * 8 / 1_000_000, 3)
         except (TypeError, ValueError):
             return None
 
