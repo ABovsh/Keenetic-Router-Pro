@@ -57,7 +57,8 @@ async def async_setup_entry(
 
 class KeeneticClientTracker(ClientEntity, ScannerEntity):
     """Device tracker entity representing a tracked client."""
-    _attr_should_poll = False
+    # _attr_should_poll is already False on CoordinatorEntity (parent of
+    # ClientEntity), so re-declaring it here adds nothing.
     _attr_entity_category = None  # Show as standalone tracker, not under Diagnostic
 
     def __init__(

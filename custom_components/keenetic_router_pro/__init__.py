@@ -47,7 +47,16 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     data: dict[str, Any] = dict(entry.data)
 
-    host: str = data.get("host") or data.get("ip") 
+    host: str | None = data.get("host") or data.get("ip")
+    if not host:
+        # A config entry with no host is unrecoverable without user
+        # intervention — fail fast with a clear error rather than
+        # passing None into the API client and getting an opaque
+        # crash later. ConfigEntryNotReady triggers HA's normal
+        # retry-with-backoff and surfaces the issue to the user.
+        raise ConfigEntryNotReady(
+            "Keenetic config entry is missing 'host'; please reconfigure the integration"
+        )
     username: str = data["username"]
     password: str = data["password"]
     port: int = int(data.get("port", DEFAULT_PORT))
@@ -141,7 +150,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     },
                 )
 
-    coordinator.async_add_listener(_async_handle_new_device)
+    # async_add_listener returns an unsubscribe callable. Without
+    # registering it via entry.async_on_unload, every reload of the
+    # integration leaks a listener bound to the previous coordinator
+    # and the closure-captured hass/_LOGGER, slowly growing memory.
+    entry.async_on_unload(coordinator.async_add_listener(_async_handle_new_device))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 

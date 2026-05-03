@@ -113,6 +113,22 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         slow_refresh = first_refresh or self._refresh_count % 6 == 0
         very_slow_refresh = first_refresh or self._refresh_count % 30 == 0
 
+        # Precompute the cached fallbacks for skipped slow-tick fetches
+        # outside the gather() call so the fast tick doesn't rebuild
+        # these dicts every time. On a non-slow tick the previous
+        # version info is reused verbatim; on a slow tick these are
+        # discarded and the live RCI fetch result is used instead.
+        if not slow_refresh:
+            _cached_version = {
+                k: _prev_sys.get(k) for k in _VERSION_CACHE_KEYS if k in _prev_sys
+            }
+        if not very_slow_refresh:
+            _cached_version_available = {
+                "title": _prev_sys.get("release-available"),
+                "sandbox": _prev_sys.get("fw-update-sandbox"),
+                "update-available": _prev_sys.get("fw-update-available", False),
+            }
+
         # ---------- Stage 1: independent fetches ----------
         (
             system,
@@ -127,8 +143,8 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             crypto_maps,
         ) = await asyncio.gather(
             _bounded(self.client.async_get_system_info()),
-            _bounded(self.client.async_get_current_version_info()) if slow_refresh else _resolve({k: _prev_sys.get(k) for k in _VERSION_CACHE_KEYS if k in _prev_sys}),
-            _bounded(self.client.async_get_available_version_info()) if very_slow_refresh else _resolve({"title": _prev_sys.get("release-available"), "sandbox": _prev_sys.get("fw-update-sandbox"), "update-available": _prev_sys.get("fw-update-available", False)}),
+            _bounded(self.client.async_get_current_version_info()) if slow_refresh else _resolve(_cached_version),
+            _bounded(self.client.async_get_available_version_info()) if very_slow_refresh else _resolve(_cached_version_available),
             _bounded(self.client.async_get_interfaces()),
             _bounded(self.client.async_get_clients()),
             _bounded(self.client.async_get_mesh_nodes()) if slow_refresh else _resolve(_prev.get("mesh_nodes", [])),
@@ -493,20 +509,6 @@ class KeeneticPingCoordinator(DataUpdateCoordinator[dict[str, bool]]):
             if mac and self._is_valid_ip(ip):
                 self._mac_to_ip[mac] = ip
 
-    def update_tracked_clients(self, tracked_clients: list[dict[str, str]]) -> None:
-        """Update the list of tracked clients."""
-        self._tracked_clients = tracked_clients
-        self._mac_to_ip = {}
-        for c in tracked_clients:
-            if isinstance(c, dict):
-                mac = str(c.get("mac") or "").lower()
-                ip = str(c.get("ip") or "")
-            else:
-                mac = str(c).lower()
-                ip = ""
-            if mac and self._is_valid_ip(ip):
-                self._mac_to_ip[mac] = ip
-
     def update_client_ip(self, mac: str, ip: str) -> None:
         """Update IP address for a specific client (dynamic IP support).
 
@@ -611,12 +613,12 @@ class KeeneticPingCoordinator(DataUpdateCoordinator[dict[str, bool]]):
             )
             return False
 
-        except BaseException as err:
-            # asyncio.CancelledError Python 3.8+'da BaseException'dan türer,
-            # bu yüzden normal Exception bloğu onu yakalamaz.
-            if isinstance(err, asyncio.CancelledError):
-                _LOGGER.debug("Ping to %s was cancelled", ip)
-                return False
+        except asyncio.CancelledError:
+            # CancelledError must be re-raised so HA can shut down the
+            # ping loop cleanly when the coordinator is being torn down.
+            _LOGGER.debug("Ping to %s was cancelled", ip)
+            raise
+        except Exception as err:  # noqa: BLE001
             _LOGGER.debug("Ping to %s failed: %s", ip, err)
             return False
 

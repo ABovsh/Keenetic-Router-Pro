@@ -280,8 +280,8 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_auth"
             except KeeneticApiError:
                 errors["base"] = "cannot_connect"
-            except Exception as err:
-                _LOGGER.exception("Unexpected error during setup: %s", err)
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("Unexpected error during setup")
                 errors["base"] = "unknown"
 
         default_host = self._discovered_host or "192.168.1.1"
