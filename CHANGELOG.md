@@ -1,169 +1,179 @@
 # Changelog
 
+All notable changes to this integration are documented here.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Entries are written for end users (HACS installs); each release is grouped by
+what you actually notice on your dashboard. For per-commit detail, see the
+git log.
+
+## 1.5.1 - Stability and reload hygiene
+
+### Bug fixes
+
+- **Memory leak when reloading the integration** — every "Reload" action (or
+  options-flow change, which reloads under the hood) used to leave behind an
+  invisible event listener bound to the previous coordinator. Over enough
+  reloads this could grow Home Assistant's memory footprint and cause
+  duplicate "new device" events. The listener is now properly unregistered
+  on unload.
+- **Cleaner shutdown when Home Assistant is stopping** — the ICMP ping loop
+  now correctly propagates cancellation during HA shutdown instead of
+  swallowing it. Stopping HA mid-tick no longer logs spurious "ping failed"
+  noise.
+- **Friendlier error if the router host is missing from the config entry** —
+  if a config entry somehow ends up without a `host` value (e.g. after a
+  migration glitch), setup now fails fast with a clear "please reconfigure"
+  message instead of crashing later with an opaque `NoneType` error.
+
+### Improvements
+
+- **Slightly faster fast-tick** — the 10-second coordinator tick no longer
+  rebuilds two intermediate cache dicts on every iteration. Negligible by
+  itself, but Home Assistant runs this loop ~8 600 times per day.
+- **Cleaner setup-error logs** — fixed a duplicated error message when an
+  unexpected exception happens during initial config-flow setup. The
+  traceback was already included; the duplicate string is gone.
+
+### Internal
+
+- Removed dead code paths and a redundant attribute declaration on the
+  device-tracker entity. No behaviour change.
+
 ## 1.5.0 - Security hardening
-
-### Added
-
-- **`diagnostics.py`** — config-entry diagnostics dump now goes through
-  `async_redact_data` and strips credentials, MACs, SSIDs, BSSIDs, PSKs,
-  session cookies, `Authorization` headers and NDM challenge headers
-  before HA writes the JSON file. Users can attach the dump to bug
-  reports without leaking secrets.
-- **`SECURITY.md`** — documents where HA stores the password
-  (`/config/.storage/core.config_entries`, plain text by HA design),
-  recommended file permissions, password rotation procedure, and what
-  the integration redacts in logs and diagnostics.
-- **Diagnostics tests** (`tests/test_diagnostics.py`) — assert that
-  TO_REDACT covers every credential key the integration uses, that a
-  representative payload comes out fully redacted, and that
-  `repr(KeeneticClient)` cannot leak credentials.
-
-### Changed
-
-- **Masked password input** — `CONF_PASSWORD` in user setup, reauth and
-  reconfigure flows now uses `selector.TextSelector` with
-  `TextSelectorType.PASSWORD`, so the password field is masked in the
-  HA UI instead of rendering as a plain text input.
-- **`KeeneticClient.__repr__` redacted** — defense in depth against any
-  stray `_LOGGER.debug("client=%s", client)` or traceback that includes
-  the client object. Username and password are replaced with
-  `<redacted>` while host/port/ssl/auth-mode remain visible for
-  troubleshooting.
-
-### Notes
-
-- No config-entry schema change → no migration required.
-- The router password is still stored in plaintext in
-  `/config/.storage/core.config_entries`. That is a Home Assistant
-  architecture choice and cannot be changed by an integration; see
-  `SECURITY.md` for mitigations.
-
-## 1.4.0 - Bug fixes, throughput units, and code cleanup
-
-### Bug Fixes
-
-- **Reauth/reconfigure flow never completed** — `_async_update_existing_entry`
-  returned a `dict` on success and the caller checked `not isinstance(result, dict)`
-  to detect completion. `FlowResult` is always a `dict` in Home Assistant, so the
-  branch was unreachable: re-auth and reconfigure flows never called `async_abort` and
-  instead rendered a form with the abort payload treated as error strings. Fixed by
-  changing the helper to return `None` on success and `dict[str, str]` on failure; callers
-  now call `async_abort` explicitly.
-- **Stale mesh node auth cache** — `_node_auth_headers[(ip, port)]` was populated on
-  successful authentication but never evicted on HTTP 401. A credential rotation or
-  node session reset left the coordinator locked out with a cached bad token until
-  HA restarted. The 401 branch now evicts the cache entry before retrying.
-- **Private attribute access in sensor setup** — `KeeneticLocalIpSensor` was
-  constructed with `client._host` (private), which bypasses encapsulation and
-  breaks if the attribute is renamed. Changed to read `entry.data.get("host") or
-  entry.data.get("ip")` directly from the config entry.
-
-### Throughput Units
-
-- WAN and IPsec tunnel throughput sensors now use `UnitOfDataRate.MEGABITS_PER_SECOND`
-  instead of `BYTES_PER_SECOND`. The coordinator stores throughput as bytes/s (delta /
-  elapsed); the sensor layer multiplies by 8 and divides by 1 000 000 to produce Mbit/s.
-  With `SensorDeviceClass.DATA_RATE`, Home Assistant automatically offers unit conversion
-  (kbit/s ↔ Mbit/s ↔ Gbit/s) in the entity customisation dialog — no dashboard template
-  workarounds needed. Display precision raised to 2 decimal places.
-
-### Performance
-
-- Replaced three async inner functions (`_cached`, `_cached_update_info`,
-  `_cached_version_info`) that did zero I/O with a single sync precomputation
-  (`_prev` / `_prev_sys`) before the gather call and a trivial `async def _resolve`
-  wrapper. Eliminates unnecessary coroutine objects on every 10 s tick.
-
-### Code Quality
-
-- `entity.py`: added `from __future__ import annotations`; replaced all `Dict[str, Any]`
-  and `Optional[X]` annotations with built-in `dict[str, Any]` and `X | None`;
-  removed Russian/Turkish docstrings.
-- `device_tracker.py`: removed four redundant `__init__` assignments already set by
-  `ClientEntity.__init__`; fixed `extra_state_attributes` to reuse the already-fetched
-  `client` local variable instead of calling `_client_from_main` a second time;
-  translated Turkish/Russian inline comments to English.
-- `binary_sensor.py`: removed two useless f-strings (`f"Connected"`, `f"Update Available"`).
-- `coordinator.py`: translated Turkish class docstring and inline comments to English.
-
----
-
-## 1.3.0 - Fork hardening and performance update
-
-This release keeps the Home Assistant integration domain as `keenetic_router_pro`
-for compatibility, while hardening authentication, reducing router load, and
-improving diagnostics for Keenetic controller and mesh deployments.
 
 ### Security
 
-- Added safer Basic Auth header construction without exposing credentials to logs.
-- Added NDW2 challenge-auth handling for newer Keenetic models, including session-cookie reuse.
-- Added one-shot reauthentication after expired auth cookies before surfacing failures to Home Assistant.
-- Redacted sensitive values from API error excerpts and debug logs, including passwords, PSKs, cookies, authorization headers, keys, and secrets.
-- Removed raw config-flow form input logging so entered passwords are not written to debug logs.
-- Removed raw hotspot host payload logging when client parsing fails.
-- Validated CLI arguments before sending `/rci/parse` commands to prevent command-injection style input.
-- Avoided storing existing passwords as defaults in reconfigure forms.
+- **Diagnostics downloads no longer leak your router password.** Before this
+  release, the "Download diagnostics" button on the integration card produced
+  a JSON file that could include your Keenetic credentials, session cookies,
+  Wi-Fi PSKs, MAC addresses and SSIDs in plain text. If you attached that
+  file to a GitHub issue or shared it for support, you were leaking secrets.
+  The diagnostics dump is now passed through Home Assistant's redaction
+  helper and all of those fields are replaced with `**REDACTED**` before the
+  file is written.
+- **Password input is now masked in the UI.** The router password field in
+  the initial setup, re-auth and reconfigure dialogs is now a proper
+  password input — characters render as dots instead of plain text. Prevents
+  shoulder-surfing and accidental screenshot leaks during setup.
+- **Internal client object can no longer leak credentials in logs.** A
+  defensive change so that any stray debug-log line or traceback that
+  includes the API client object now shows `<redacted>` for username and
+  password (host/port/SSL stay visible for troubleshooting).
 
-### Home Assistant Setup And Recovery
+### Documentation
 
-- Added proper reauthentication and reconfigure flows.
-- Mapped authentication failures to `ConfigEntryAuthFailed` so Home Assistant can trigger reauth.
-- Mapped setup-time API failures to `ConfigEntryNotReady` where appropriate.
-- Normalized setup and options-flow client selection handling.
-- Clamped configurable ping intervals to the supported range.
-- Preserved offline tracked clients in the options flow.
-- Added missing config strings and English translations for reauth and reconfigure.
+- New [`SECURITY.md`](SECURITY.md) explaining where Home Assistant stores
+  the router password (`/config/.storage/core.config_entries`, plain text by
+  HA design — this is not specific to this integration), recommended file
+  permissions, password-rotation procedure, and what the integration
+  redacts in logs and diagnostics.
 
-### Performance And Router Load
+### Notes
 
-- Reduced repeated polling of slow router endpoints by caching slower-changing data.
-- Reused fetched client data to derive connected/disconnected/extender counts instead of issuing extra calls.
-- Limited interface-stat polling to interfaces that back enabled sensors.
-- Cached version/update data without overwriting fresh system data.
-- Removed the Wi-Fi QR image platform entirely.
-- Removed `pyqrcode` and `pypng` dependencies.
-- Removed USB polling for controller and mesh nodes.
-- Switched coordinator timing to the running event loop.
+- No config-entry schema change → no migration required, just upgrade and
+  restart.
+- These changes are part of an ongoing security audit of the fork. If you
+  previously shared a diagnostics dump publicly, consider rotating your
+  router password as a precaution.
 
-### API And Mesh Behavior
+## 1.4.0 - Bug fixes, throughput units, and code cleanup
 
-- Added safer mesh-node authentication with NDW2-first behavior and Basic Auth fallback when no challenge is provided.
-- Cached mesh-node auth headers per node and port.
-- Improved firmware update endpoint fallbacks for controller and mesh nodes.
-- Redacted node firmware-update response excerpts before logging.
-- Added helper summaries for client statistics.
-- Improved parsing and normalization of interface payloads.
+### Bug fixes
 
-### Entities
+- **Re-auth and reconfigure flows finally work.** Previously, when Home
+  Assistant prompted you to re-enter the router password (after a
+  credential change or session expiry), submitting the form silently did
+  nothing — the dialog re-rendered with cryptic error strings instead of
+  completing. Both flows now correctly close on success.
+- **Mesh nodes no longer get stuck after a password change.** If you
+  rotated the password on a mesh node, the integration kept using the old
+  cached auth token until you restarted Home Assistant. The bad token is
+  now evicted automatically on the first `401 Unauthorized` response.
+- **Local-IP sensor is more robust to internal refactors.** A small
+  encapsulation fix that prevents the sensor from breaking if an internal
+  attribute on the API client is ever renamed.
 
-- Fixed entity helpers that accidentally referenced `coordinator._client`.
-- Fixed device URLs that could become `http://None`.
-- Made device-tracker ping coordination null-safe.
-- Preserved existing traffic sensor unique IDs while consolidating duplicated RX/TX sensor code.
-- Made traffic sensors resilient to non-numeric router counters.
-- Reduced duplicated firmware update version-comparison logic.
+### Improvements
 
-### Metadata And Packaging
+- **WAN and IPsec throughput shown in Mbit/s, not bytes/s.** All
+  networking equipment and ISP plans are quoted in megabits per second,
+  so the previous `B/s` reading required mental math. Sensors now report
+  in Mbit/s with two decimal places, and Home Assistant offers automatic
+  unit conversion (kbit/s ↔ Mbit/s ↔ Gbit/s) directly in the entity
+  customisation dialog — no template tricks needed.
 
-- Disabled HACS ZIP-release mode so HACS downloads the repository archive directly.
-- Removed the ZIP release workflow and release asset expectation.
-- Replaced the README with a lighter install/config/troubleshooting guide and removed donation links.
-- Fixed integration logger metadata to `custom_components.keenetic_router_pro`.
-- Aligned manifest version with the documented `1.3.0` release.
-- Repointed manifest documentation and issue tracker metadata to the fork repository.
-- Repointed README download badge to the fork repository.
-- Updated README presence-tracking interval documentation to match the configurable 5-300 second option.
-- Removed an unused legacy ping-interval import from the coordinator.
-- Removed non-English translation files so only English translations are shipped.
-- Removed USB sensor setup and USB parser code after disabling USB polling.
+### Internal
 
-### Tests And Tooling
+- Removed redundant initialisations in the device-tracker entity; cleaned
+  up a few useless f-strings; replaced legacy `Dict[...]` / `Optional[...]`
+  type annotations with the modern built-in syntax; translated leftover
+  Russian/Turkish comments to English. Coordinator fast-tick made cheaper
+  by collapsing three no-op async wrappers into one sync precomputation.
 
-- Added lightweight pytest configuration.
-- Added helper tests for CLI argument validation, Basic Auth header generation, interface normalization, client-stat summaries, response redaction, and payload redaction.
-- Added repository checkout to HACS validation workflow.
-- Added GitHub Actions test job for `compileall` and the lightweight pytest suite.
-- Updated hassfest workflow checkout action to `actions/checkout@v4`.
-- Verified Python syntax with `compileall`.
-- Verified JSON metadata and translations with `json.tool`.
+---
+
+## 1.3.0 - Fork hardening and performance
+
+This is the first release of the maintained fork. The Home Assistant domain
+stays `keenetic_router_pro` so existing dashboards, automations, and entity
+history carry over unchanged from the upstream version.
+
+### Security
+
+- Safer Basic Auth header construction that no longer risks leaking
+  credentials into debug logs.
+- Support for the newer NDW2 challenge-auth scheme used by recent Keenetic
+  firmwares, including session-cookie reuse so we don't re-authenticate on
+  every call.
+- Automatic one-shot re-authentication after expired session cookies before
+  surfacing failure to Home Assistant.
+- Sensitive values (passwords, PSKs, cookies, `Authorization` headers, keys,
+  secrets) are now redacted from API error excerpts and debug logs.
+- Raw config-flow form input is no longer logged at debug level — your
+  password is no longer written to `home-assistant.log` if debug logging
+  is enabled.
+- CLI arguments sent to `/rci/parse` are now validated against an allow-list
+  to prevent command-injection style input.
+- The reconfigure form no longer pre-fills the existing password as a
+  default value.
+
+### Improvements
+
+- **Proper re-auth and reconfigure flows.** When your router password
+  changes, HA now correctly prompts you to re-enter it instead of marking
+  the integration as permanently failed.
+- **Lower router CPU load.** Slow-changing data (firmware version, mesh
+  topology, NDNS info) is now polled on a much longer cycle. Interface
+  statistics are only fetched for interfaces that back enabled sensors.
+- Connected/disconnected/extender counts are now derived from already-
+  fetched client data instead of issuing extra API calls.
+- Fixed a class of bugs where device URLs could appear as `http://None` in
+  the device registry.
+- Wi-Fi presence-tracking interval is configurable from 5 to 300 seconds
+  via the integration's options.
+- The integration no longer requires the `pyqrcode` and `pypng`
+  dependencies — the Wi-Fi QR-image platform was removed.
+
+### Removed
+
+- USB device polling (controller and mesh nodes) — produced more noise
+  than value and added load to slower routers.
+- Wi-Fi QR-code image platform.
+- Non-English translation files (English only is shipped — translations
+  can be contributed back via PR if there is demand).
+
+### Documentation
+
+- Lighter, more practical README focused on install / config /
+  troubleshooting.
+- Manifest documentation and issue-tracker links repointed to the fork.
+
+### Tests and tooling
+
+- Added a lightweight pytest suite covering CLI argument validation,
+  Basic Auth header generation, interface normalisation, client-stat
+  summaries, and log/payload redaction.
+- GitHub Actions workflow now runs `compileall` and the pytest suite on
+  every push.
