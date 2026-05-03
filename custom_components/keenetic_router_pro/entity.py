@@ -1,5 +1,7 @@
 """Base entity classes for Keenetic Router Pro."""
-from typing import Any, Dict, Optional
+from __future__ import annotations
+
+from typing import Any
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
 from .const import DOMAIN
@@ -14,8 +16,8 @@ from .utils import (
 
 
 class ControllerEntity(CoordinatorEntity):
-    """Базовый класс для сущностей главного роутера."""
-    
+    """Base class for main-router entities."""
+
     def __init__(
         self,
         coordinator: KeeneticCoordinator,
@@ -25,38 +27,28 @@ class ControllerEntity(CoordinatorEntity):
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._title = title
-    
+
     @property
-    def _version_data(self) -> Dict[str, Any]:
-        """Получить данные версии из /rci/show/version."""
-        # Данные из coordinator.data["system"] — это ответ от /rci/show/version
+    def _version_data(self) -> dict[str, Any]:
         return self.coordinator.data.get("system", {}) or {}
-    
+
     @property
-    def _firmware_version(self) -> Optional[str]:
-        """Получить версию прошивки.
-        
-        Данные приходят из merged system+version в coordinator.data["system"]
-        """
+    def _firmware_version(self) -> str | None:
         version = self.coordinator.data.get("system", {}) or {}
-        
+
         if version.get("title"):
             return str(version["title"])
         if version.get("release"):
             return str(version["release"])
-        
+
         ndw4 = version.get("ndw4", {})
         if isinstance(ndw4, dict) and ndw4.get("version"):
             return str(ndw4["version"])
-        
+
         return None
 
     @property
-    def _model_name(self) -> Optional[str]:
-        """Получить модель роутера.
-        
-        Приоритет: model > description > device > hw_id
-        """
+    def _model_name(self) -> str | None:
         version = self.coordinator.data.get("system", {}) or {}
         
         if version.get("model"):
@@ -93,8 +85,8 @@ class ControllerEntity(CoordinatorEntity):
 
 
 class MeshEntity(CoordinatorEntity):
-    """Базовый класс для сущностей Mesh-ноды."""
-    
+    """Base class for Mesh node entities."""
+
     def __init__(
         self,
         coordinator: KeeneticCoordinator,
@@ -106,10 +98,9 @@ class MeshEntity(CoordinatorEntity):
         self._entry_id = entry_id
         self._title = title
         self._node_cid = node_cid
-    
+
     @property
-    def _node(self) -> Optional[Dict[str, Any]]:
-        """Получить данные ноды из coordinator."""
+    def _node(self) -> dict[str, Any] | None:
         nodes = self.coordinator.data.get("mesh_nodes", [])
         for node in nodes:
             if (node.get("cid") or node.get("id")) == self._node_cid:
@@ -152,7 +143,7 @@ class WanEntity(CoordinatorEntity):
         self._wan_id = wan_id
 
     @property
-    def _wan(self) -> Optional[Dict[str, Any]]:
+    def _wan(self) -> dict[str, Any] | None:
         for w in self.coordinator.data.get("wan_interfaces", []) or []:
             if w.get("id") == self._wan_id:
                 return w
@@ -191,7 +182,7 @@ class CryptoMapEntity(CoordinatorEntity):
         self._cmap_name = cmap_name
 
     @property
-    def _cmap(self) -> Optional[Dict[str, Any]]:
+    def _cmap(self) -> dict[str, Any] | None:
         """Return the current dict for this crypto map, or None if it
         has been removed from the router config since we were created."""
         cmaps = self.coordinator.data.get("crypto_maps") or {}
@@ -220,8 +211,8 @@ class CryptoMapEntity(CoordinatorEntity):
 
 
 class ClientEntity(CoordinatorEntity):
-    """Базовый класс для сущностей отслеживаемых клиентов как отдельных устройств."""
-    
+    """Base class for tracked-client entities exposed as their own HA device."""
+
     def __init__(
         self,
         coordinator: KeeneticCoordinator,
@@ -229,8 +220,8 @@ class ClientEntity(CoordinatorEntity):
         title: str,
         mac: str,
         label: str,
-        initial_ip: Optional[str] = None,
-        ping_coordinator = None,  # Optional, for ping tracking
+        initial_ip: str | None = None,
+        ping_coordinator=None,
     ) -> None:
         super().__init__(coordinator)
         self._entry_id = entry_id
@@ -238,20 +229,18 @@ class ClientEntity(CoordinatorEntity):
         self._mac = mac.lower()
         self._label = label
         self._initial_ip = initial_ip
-        self._ping_coordinator = ping_coordinator  # Это должен быть объект, не строка
-    
+        self._ping_coordinator = ping_coordinator
+
     @property
-    def _client(self) -> Optional[Dict[str, Any]]:
-        """Получить данные клиента из coordinator."""
+    def _client(self) -> dict[str, Any] | None:
         clients = self.coordinator.data.get("clients", []) or []
         for client in clients:
             if str(client.get("mac") or "").lower() == self._mac:
                 return client
         return None
-    
+
     @property
     def device_info(self) -> DeviceInfo:
-        """Device info для отслеживаемого клиента как отдельного устройства."""
         client = self._client
         return get_client_device_info(
             entry_id=self._entry_id,
@@ -260,24 +249,22 @@ class ClientEntity(CoordinatorEntity):
             client=client,
             initial_ip=self._initial_ip,
         )
-    
+
     @property
-    def ip_address(self) -> Optional[str]:
-        """Get current IP address of the client."""
+    def ip_address(self) -> str | None:
         client = self._client
         if client:
             ip = client.get("ip")
             if ip:
                 return str(ip)
         return self._initial_ip
-    
+
     @property
-    def hostname(self) -> Optional[str]:
-        """Get hostname of the client."""
+    def hostname(self) -> str | None:
         client = self._client
         if not client:
             return self._label
-        
+
         name = client.get("name")
         if isinstance(name, str) and name.strip():
             return name.strip()
@@ -285,18 +272,15 @@ class ClientEntity(CoordinatorEntity):
         if isinstance(h, str) and h.strip():
             return h.strip()
         return self._label
-    
+
     @property
     def _is_apple_device(self) -> bool:
-        """Check if this is likely an Apple device."""
         name = self._label or ""
         name_lower = name.lower()
         return any(kw in name_lower for kw in ("apple", "iphone", "ipad", "macbook", "imac"))
-    
+
     @property
     def is_connected(self) -> bool:
-        """Determine if device is connected."""
-        # Проверяем, что ping_coordinator - это объект, а не строка
         if self._ping_coordinator and hasattr(self._ping_coordinator, 'data') and not self._is_apple_device:
             ping_results = self._ping_coordinator.data or {}
             return ping_results.get(self._mac, False)

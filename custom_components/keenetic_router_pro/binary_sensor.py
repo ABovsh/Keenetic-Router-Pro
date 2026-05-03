@@ -307,7 +307,7 @@ class KeeneticMeshNodeSensor(MeshEntity, BinarySensorEntity):
 
     @property
     def name(self) -> str:
-        return f"Connected"
+        return "Connected"
 
     @property
     def is_on(self) -> bool:
@@ -434,7 +434,7 @@ class KeeneticMeshUpdateSensor(MeshEntity, BinarySensorEntity):
 
     @property
     def name(self) -> str:
-        return f"Update Available"
+        return "Update Available"
 
     @property
     def is_on(self) -> bool:

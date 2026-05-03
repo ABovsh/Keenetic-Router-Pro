@@ -58,7 +58,7 @@ async def async_setup_entry(
 class KeeneticClientTracker(ClientEntity, ScannerEntity):
     """Device tracker entity representing a tracked client."""
     _attr_should_poll = False
-    _attr_entity_category = None  # Diagnostic altında değil, ayrı göster
+    _attr_entity_category = None  # Show as standalone tracker, not under Diagnostic
 
     def __init__(
         self,
@@ -80,11 +80,6 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
             ping_coordinator
         )
         self._main_coordinator = coordinator
-        self._ping_coordinator = ping_coordinator
-        self._mac = mac.lower()
-        self._label = label
-        self._initial_ip = initial_ip
-        self._attr_name = label
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -94,7 +89,7 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
                 self._handle_coordinator_update
             )
         )
-        # Ping coordinator'ı da dinle — her ping cycle'da state güncellensin
+        # Subscribe to ping updates so the state refreshes on every ping cycle.
         if self._ping_coordinator is not None:
             self.async_on_remove(
                 self._ping_coordinator.async_add_listener(
@@ -130,7 +125,7 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
 
     @callback
     def _handle_ping_update(self) -> None:
-        """Ping coordinator güncellendiğinde state'i yaz."""
+        """Write state on every ping cycle update."""
         self.async_write_ha_state()
 
     @property
@@ -192,7 +187,7 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
         ping_results = self._ping_coordinator.data if self._ping_coordinator else {}
         
         if self._is_apple_device:
-            client_link = (self._client_from_main or {}).get("link", "unknown")
+            client_link = (client or {}).get("link", "unknown")
             tracking_info: dict[str, Any] = {
                 "tracking_method": "link_state",
                 "link_status": client_link,

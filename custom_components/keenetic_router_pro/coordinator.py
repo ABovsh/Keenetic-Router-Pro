@@ -32,7 +32,7 @@ _VERSION_CACHE_KEYS = (
     "bsp",
 )
 
-# ICMP ping için icmplib kullanıyoruz (Home Assistant Ping entegrasyonu gibi)
+# ICMP ping via icmplib (mirrors the Home Assistant Ping integration).
 try:
     from icmplib import async_ping, SocketPermissionError
     ICMPLIB_AVAILABLE = True
@@ -42,7 +42,7 @@ except ImportError:
 
 
 class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
-    """Tek yerden tüm router verisini toplayan coordinator."""
+    """Fetches all router data on each tick."""
 
     def __init__(self, hass: HomeAssistant, client: KeeneticClient) -> None:
         """Initialize the coordinator."""
@@ -79,23 +79,12 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             async with sem:
                 return await coro
 
-        async def _cached(key: str, default: Any) -> Any:
-            if self.data is None:
-                return default
-            return self.data.get(key, default)
+        _prev = self.data or {}
+        _prev_sys = _prev.get("system") or {}
 
-        async def _cached_update_info() -> dict[str, Any]:
-            system = await _cached("system", {})
-            return {
-                "title": system.get("release-available"),
-                "sandbox": system.get("fw-update-sandbox"),
-                "update-available": system.get("fw-update-available", False),
-            }
+        async def _resolve(value: Any) -> Any:
+            return value
 
-        async def _cached_version_info() -> dict[str, Any]:
-            system = await _cached("system", {})
-            return {key: system.get(key) for key in _VERSION_CACHE_KEYS if key in system}
- 
         # Collected per-tick so we can emit a single warning instead of
         # silently defaulting every failing fetch at debug level.
         failed_fetches: list[tuple[str, BaseException]] = []
@@ -138,15 +127,15 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             crypto_maps,
         ) = await asyncio.gather(
             _bounded(self.client.async_get_system_info()),
-            _bounded(self.client.async_get_current_version_info()) if slow_refresh else _cached_version_info(),
-            _bounded(self.client.async_get_available_version_info()) if very_slow_refresh else _cached_update_info(),
+            _bounded(self.client.async_get_current_version_info()) if slow_refresh else _resolve({k: _prev_sys.get(k) for k in _VERSION_CACHE_KEYS if k in _prev_sys}),
+            _bounded(self.client.async_get_available_version_info()) if very_slow_refresh else _resolve({"title": _prev_sys.get("release-available"), "sandbox": _prev_sys.get("fw-update-sandbox"), "update-available": _prev_sys.get("fw-update-available", False)}),
             _bounded(self.client.async_get_interfaces()),
             _bounded(self.client.async_get_clients()),
-            _bounded(self.client.async_get_mesh_nodes()) if slow_refresh else _cached("mesh_nodes", []),
-            _bounded(self.client.async_get_host_policies()) if slow_refresh else _cached("host_policies", {}),
-            _bounded(self.client.async_get_ndns_info()) if very_slow_refresh else _cached("ndns", {}),
+            _bounded(self.client.async_get_mesh_nodes()) if slow_refresh else _resolve(_prev.get("mesh_nodes", [])),
+            _bounded(self.client.async_get_host_policies()) if slow_refresh else _resolve(_prev.get("host_policies", {})),
+            _bounded(self.client.async_get_ndns_info()) if very_slow_refresh else _resolve(_prev.get("ndns", {})),
             _bounded(self.client.async_get_ping_check_status()),
-            _bounded(self.client.async_get_crypto_maps()) if slow_refresh else _cached("crypto_maps", {}),
+            _bounded(self.client.async_get_crypto_maps()) if slow_refresh else _resolve(_prev.get("crypto_maps", {})),
             return_exceptions=True,
         )
  
@@ -431,9 +420,9 @@ class KeeneticPingCoordinator(DataUpdateCoordinator[dict[str, bool]]):
     """
 
     # Ping configuration
-    PING_COUNT = 1          # Gönderilecek ping sayısı (hızlı döngü için 1 yeterli)
-    PING_TIMEOUT = 1        # Her ping için timeout (saniye)
-    PING_PRIVILEGED = False # Unprivileged mode (root gerektirmez)
+    PING_COUNT = 1          # One packet per cycle — sufficient for fast loops.
+    PING_TIMEOUT = 1        # Seconds per ping.
+    PING_PRIVILEGED = False # Unprivileged mode — no root required.
 
     @staticmethod
     def _is_valid_ip(ip: Any) -> bool:
@@ -491,7 +480,7 @@ class KeeneticPingCoordinator(DataUpdateCoordinator[dict[str, bool]]):
         self._tracked_clients = tracked_clients
         self._privileged: bool | None = None  # Will be determined on first ping
 
-        # MAC -> IP mapping (güncellenebilir)
+        # MAC → IP mapping, updated by the main coordinator on each tick.
         self._mac_to_ip: dict[str, str] = {}
         for c in tracked_clients:
             # Defensive: handle both dict and plain string (MAC) formats

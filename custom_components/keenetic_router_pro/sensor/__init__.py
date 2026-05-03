@@ -135,12 +135,8 @@ async def async_setup_entry(
     entities.append(KeeneticWanRxSensor(coordinator, entry))
     entities.append(KeeneticWanTxSensor(coordinator, entry))
 
-    # IP сенсоры
-    if client:
-        entities.append(KeeneticLocalIpSensor(coordinator, entry, client._host))
-    else:
-        host = entry.data.get("host", "unknown")
-        entities.append(KeeneticLocalIpSensor(coordinator, entry, host))
+    host = entry.data.get("host") or entry.data.get("ip", "unknown")
+    entities.append(KeeneticLocalIpSensor(coordinator, entry, host))
 
     # Ana router port sensörleri
     main_ports = coordinator.data.get("port_info", [])

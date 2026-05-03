@@ -2399,6 +2399,7 @@ class KeeneticClient:
                         )
                 elif resp.status == 401:
                     _LOGGER.debug("Auth rejected on node %s port %s", label, port)
+                    self._node_auth_headers.pop((node_ip, port), None)
                     continue
             except asyncio.TimeoutError:
                 _LOGGER.debug("Timeout connecting to node %s port %s", label, port)
