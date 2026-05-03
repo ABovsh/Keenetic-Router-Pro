@@ -15,7 +15,7 @@ A maintained, hardened fork of the original Keenetic Router Pro integration. It 
 
 **Mesh nodes could lock up until HA restarted.** Auth headers for each mesh node were cached but never cleared on a 401 response. A credential rotation or a node session reset left the coordinator permanently locked out with a stale token. The cache is now evicted on 401 so the next poll re-authenticates automatically.
 
-**Throughput displayed in bytes instead of bits.** The upstream reported WAN and IPsec throughput in B/s. All networking equipment and ISP plans use Mbit/s. Sensors now report in Mbit/s and HA offers automatic unit conversion to kbit/s or Gbit/s from the entity settings — no dashboard template tricks needed.
+**Throughput displayed in bits instead of bytes.** The upstream reported WAN and IPsec throughput in B/s. All networking equipment and ISP plans use Mbit/s. Sensors now report in bits/s and HA offers automatic unit conversion to kbit/s or Gbit/s from the entity settings — no dashboard template tricks needed.
 
 **Device URLs could render as `http://None`.** Fixed. Configuration URLs are only set when a valid address is available.
 
