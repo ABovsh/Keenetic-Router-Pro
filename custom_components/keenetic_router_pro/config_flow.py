@@ -19,6 +19,7 @@ from homeassistant.const import (
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.service_info.ssdp import SsdpServiceInfo
 from homeassistant.helpers.device_registry import format_mac
@@ -37,6 +38,12 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.config_flow")
+
+# Reusable masked password input — keeps the password hidden in the HA UI
+# during setup, reauth and reconfigure flows.
+_PASSWORD_SELECTOR = selector.TextSelector(
+    selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+)
 
 
 def _clamp_ping_interval(value: Any) -> int:
@@ -91,7 +98,7 @@ def _connection_schema(
         port_validator = vol.All(vol.Coerce(int), vol.Range(min=1, max=65535))
     fields[vol.Optional(CONF_PORT, default=defaults.get(CONF_PORT, DEFAULT_PORT))] = port_validator
     fields[vol.Required(CONF_USERNAME, default=defaults.get(CONF_USERNAME, "admin"))] = str
-    fields[vol.Required(CONF_PASSWORD)] = str
+    fields[vol.Required(CONF_PASSWORD)] = _PASSWORD_SELECTOR
     fields[vol.Optional(CONF_SSL, default=defaults.get(CONF_SSL, DEFAULT_SSL))] = bool
     fields[
         vol.Optional(
@@ -351,7 +358,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="reauth_confirm",
             data_schema=vol.Schema({
                 vol.Required(CONF_USERNAME, default=entry_data.get(CONF_USERNAME, "admin")): str,
-                vol.Required(CONF_PASSWORD): str,
+                vol.Required(CONF_PASSWORD): _PASSWORD_SELECTOR,
                 vol.Optional(
                     CONF_USE_CHALLENGE_AUTH,
                     default=entry_data.get(CONF_USE_CHALLENGE_AUTH, False),

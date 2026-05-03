@@ -1,7 +1,7 @@
 # Keenetic Router Pro
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![Version](https://img.shields.io/badge/version-1.4.0-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
+[![Version](https://img.shields.io/badge/version-1.5.0-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
 
 Home Assistant custom integration for Keenetic routers. It focuses on local polling, router diagnostics, mesh monitoring, presence tracking, WAN status, traffic counters, firmware updates, and selected client controls.
 
@@ -97,6 +97,30 @@ Slow and very slow data is cached between refreshes to reduce router load.
 - Prefer LAN-only access.
 - If you expose a custom management port, restrict it with firewall rules to the Home Assistant IP.
 - Do not expose router management to WAN without strict firewall rules.
+
+### Credential handling
+
+Home Assistant stores integration credentials in plain text at
+`/config/.storage/core.config_entries`. That is an HA-wide design choice
+and is not specific to this integration. What this integration does on
+top of that:
+
+- The password input in the config flow (setup, reauth, reconfigure) is
+  rendered as a masked field (`TextSelectorType.PASSWORD`).
+- The API client overrides `__repr__` so accidental log statements that
+  include the client object cannot leak the password.
+- Request-payload summaries and HTTP response excerpts in debug logs
+  are redacted for known sensitive keys (`password`, `cookie`,
+  `authorization`, `psk`, `secret`, `key`).
+- The HA *Download diagnostics* button on the config entry produces a
+  JSON dump that runs through `async_redact_data`, stripping
+  credentials, MACs, SSIDs, BSSIDs, PSKs, session cookies and
+  authorization headers. Safe to attach to bug reports.
+- Nothing is written into `custom_components/keenetic_router_pro/` at
+  runtime — no credential cache, no state file.
+
+See [`SECURITY.md`](SECURITY.md) for recommended file permissions on
+`/config/.storage/` and the password rotation procedure.
 
 ## Entities
 

@@ -100,11 +100,24 @@ class KeeneticClient:
         self._authenticated: bool = False
         self._node_auth_headers: dict[tuple[str, int], Dict[str, str]] = {}
 
+        # NOTE: __repr__ is overridden below so that any accidental log of
+        # repr(client) / f"{client}" never exposes the password or username.
+
         # Mesh/Wi-Fi System (MWS) capability cache:
         # None  -> unknown (not checked yet)
         # False -> endpoint missing on this device/firmware (avoid router log spam)
         # True  -> endpoint works
         self._mws_member_supported: bool | None = None
+
+    def __repr__(self) -> str:
+        """Redacted repr — never expose username/password in logs or tracebacks."""
+        return (
+            f"KeeneticClient(host={self._host!r}, port={self._port}, "
+            f"ssl={self._ssl}, username='<redacted>', password='<redacted>', "
+            f"challenge_auth={self._use_challenge_auth})"
+        )
+
+    __str__ = __repr__
 
     def _basic_auth_headers(self) -> Dict[str, str]:
         """Return Basic auth headers without exposing credentials to logs."""

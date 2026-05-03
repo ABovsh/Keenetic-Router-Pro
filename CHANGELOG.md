@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.5.0 - Security hardening
+
+### Added
+
+- **`diagnostics.py`** — config-entry diagnostics dump now goes through
+  `async_redact_data` and strips credentials, MACs, SSIDs, BSSIDs, PSKs,
+  session cookies, `Authorization` headers and NDM challenge headers
+  before HA writes the JSON file. Users can attach the dump to bug
+  reports without leaking secrets.
+- **`SECURITY.md`** — documents where HA stores the password
+  (`/config/.storage/core.config_entries`, plain text by HA design),
+  recommended file permissions, password rotation procedure, and what
+  the integration redacts in logs and diagnostics.
+- **Diagnostics tests** (`tests/test_diagnostics.py`) — assert that
+  TO_REDACT covers every credential key the integration uses, that a
+  representative payload comes out fully redacted, and that
+  `repr(KeeneticClient)` cannot leak credentials.
+
+### Changed
+
+- **Masked password input** — `CONF_PASSWORD` in user setup, reauth and
+  reconfigure flows now uses `selector.TextSelector` with
+  `TextSelectorType.PASSWORD`, so the password field is masked in the
+  HA UI instead of rendering as a plain text input.
+- **`KeeneticClient.__repr__` redacted** — defense in depth against any
+  stray `_LOGGER.debug("client=%s", client)` or traceback that includes
+  the client object. Username and password are replaced with
+  `<redacted>` while host/port/ssl/auth-mode remain visible for
+  troubleshooting.
+
+### Notes
+
+- No config-entry schema change → no migration required.
+- The router password is still stored in plaintext in
+  `/config/.storage/core.config_entries`. That is a Home Assistant
+  architecture choice and cannot be changed by an integration; see
+  `SECURITY.md` for mitigations.
+
 ## 1.4.0 - Bug fixes, throughput units, and code cleanup
 
 ### Bug Fixes

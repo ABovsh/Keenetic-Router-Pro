@@ -17,7 +17,76 @@ class HomeAssistantError(Exception):
 homeassistant = types.ModuleType("homeassistant")
 exceptions = types.ModuleType("homeassistant.exceptions")
 exceptions.HomeAssistantError = HomeAssistantError
+
+
+class _ConfigEntryAuthFailed(HomeAssistantError):
+    """Stub for homeassistant.exceptions.ConfigEntryAuthFailed."""
+
+
+class _ConfigEntryNotReady(HomeAssistantError):
+    """Stub for homeassistant.exceptions.ConfigEntryNotReady."""
+
+
+exceptions.ConfigEntryAuthFailed = _ConfigEntryAuthFailed
+exceptions.ConfigEntryNotReady = _ConfigEntryNotReady
+
+config_entries = types.ModuleType("homeassistant.config_entries")
+config_entries.ConfigEntry = object
+
+core = types.ModuleType("homeassistant.core")
+core.HomeAssistant = object
+
+
+def _callback(func):  # mimic homeassistant.core.callback
+    return func
+
+
+core.callback = _callback
+
+helpers = types.ModuleType("homeassistant.helpers")
+helpers.__path__ = []  # mark as package so submodule imports resolve
+aiohttp_client = types.ModuleType("homeassistant.helpers.aiohttp_client")
+aiohttp_client.async_get_clientsession = lambda hass: None
+helpers.aiohttp_client = aiohttp_client
+
+
+class _DataUpdateCoordinator:
+    def __class_getitem__(cls, item):  # support Generic subscript
+        return cls
+
+    def __init__(self, *args, **kwargs):
+        self.data = None
+
+    def async_add_listener(self, *_a, **_kw):
+        return lambda: None
+
+    async def async_config_entry_first_refresh(self):
+        return None
+
+    async def async_refresh(self):
+        return None
+
+
+class _UpdateFailed(Exception):
+    pass
+
+
+update_coordinator = types.ModuleType("homeassistant.helpers.update_coordinator")
+update_coordinator.DataUpdateCoordinator = _DataUpdateCoordinator
+update_coordinator.UpdateFailed = _UpdateFailed
+helpers.update_coordinator = update_coordinator
+
+homeassistant.__path__ = []  # treat as package
+
 homeassistant.exceptions = exceptions
+homeassistant.config_entries = config_entries
+homeassistant.core = core
+homeassistant.helpers = helpers
 
 sys.modules.setdefault("homeassistant", homeassistant)
 sys.modules.setdefault("homeassistant.exceptions", exceptions)
+sys.modules.setdefault("homeassistant.config_entries", config_entries)
+sys.modules.setdefault("homeassistant.core", core)
+sys.modules.setdefault("homeassistant.helpers", helpers)
+sys.modules.setdefault("homeassistant.helpers.aiohttp_client", aiohttp_client)
+sys.modules.setdefault("homeassistant.helpers.update_coordinator", update_coordinator)
