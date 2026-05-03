@@ -133,20 +133,15 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         interfaces = await client.async_get_interfaces()
         return client, system_info, interfaces
 
-    async def _async_test_connection(self, data: dict[str, Any]) -> None:
-        """Validate connection details against the router."""
-        await self._async_connect(data)
-
-    async def _async_update_existing_entry(
+    async def _async_validate_and_update(
         self,
         entry: config_entries.ConfigEntry,
         new_data: dict[str, Any],
-        success_reason: str,
         log_context: str,
-    ) -> FlowResult | dict[str, str]:
-        """Validate new entry data and update the entry or return form errors."""
+    ) -> dict[str, str] | None:
+        """Validate new data against the router. Returns error dict or None on success."""
         try:
-            await self._async_test_connection(new_data)
+            await self._async_connect(new_data)
         except KeeneticAuthError:
             return {"base": "invalid_auth"}
         except KeeneticApiError:
@@ -156,7 +151,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return {"base": "unknown"}
 
         self.hass.config_entries.async_update_entry(entry, data=new_data)
-        return self.async_abort(reason=success_reason)
+        return None
 
     @staticmethod
     def _unique_id_from_router(
@@ -348,12 +343,9 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             new_data = {**entry_data, **user_input}
-            result = await self._async_update_existing_entry(
-                entry, new_data, "reauth_successful", "reauth"
-            )
-            if not isinstance(result, dict):
-                return result
-            errors = result
+            errors = await self._async_validate_and_update(entry, new_data, "reauth") or {}
+            if not errors:
+                return self.async_abort(reason="reauth_successful")
 
         return self.async_show_form(
             step_id="reauth_confirm",
@@ -381,12 +373,9 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             new_data = {**entry_data, **user_input}
-            result = await self._async_update_existing_entry(
-                entry, new_data, "reconfigure_successful", "reconfigure"
-            )
-            if not isinstance(result, dict):
-                return result
-            errors = result
+            errors = await self._async_validate_and_update(entry, new_data, "reconfigure") or {}
+            if not errors:
+                return self.async_abort(reason="reconfigure_successful")
 
         return self.async_show_form(
             step_id="reconfigure",

@@ -71,16 +71,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(f"Could not connect to Keenetic router: {err}") from err
 
     coordinator = KeeneticCoordinator(hass, client)
-    try:
-        await coordinator.async_config_entry_first_refresh()
-    except ConfigEntryAuthFailed:
-        raise
-    except ConfigEntryNotReady:
-        raise
-    except KeeneticAuthError as err:
-        raise ConfigEntryAuthFailed("Keenetic credentials were rejected") from err
-    except KeeneticApiError as err:
-        raise ConfigEntryNotReady(f"Could not refresh Keenetic router: {err}") from err
+    await coordinator.async_config_entry_first_refresh()
 
     tracked_clients = data.get(CONF_TRACKED_CLIENTS, [])
 
