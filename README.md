@@ -7,22 +7,39 @@ Home Assistant custom integration for Keenetic routers. It focuses on local poll
 
 ## Why this fork
 
-This is a personal fork maintained for two Keenetic Titan routers (KN-1812) running as a Mesh system with an IPsec site-to-site tunnel between two properties. It exists for three reasons.
+A maintained, hardened fork of the original Keenetic Router Pro integration. It keeps the domain name (`keenetic_router_pro`) so your existing dashboards, automations, and entity history carry over without changes.
 
-**Trimmed to what's actually used.** The upstream integration ships a QR-code image platform (449 lines, requires `pyqrcode`/`pypng`) and USB storage polling that are not useful for most router monitoring setups. Both are removed. The result is a smaller codebase that is easier to reason about.
+### Bugs fixed
 
-**English only.** The upstream included non-English translations and mixed-language source comments. This fork ships only English strings and keeps the source code in English throughout.
+**Re-authentication and reconfigure never completed.** After changing router credentials in HA, the flow showed a broken form instead of finishing. The helper function returned the same type on both success and failure, making the success branch unreachable. This is fixed — credential updates now work correctly.
 
-**Bugs fixed during review.**
+**Mesh nodes could lock up until HA restarted.** Auth headers for each mesh node were cached but never cleared on a 401 response. A credential rotation or a node session reset left the coordinator permanently locked out with a stale token. The cache is now evicted on 401 so the next poll re-authenticates automatically.
 
-| Bug | Impact |
-|---|---|
-| Reauth/reconfigure flow never completed | After a credential change HA showed a broken form instead of completing re-auth |
-| Stale mesh node auth cache | A 401 from a node left the coordinator locked out with a bad cached token until HA restarted |
-| Throughput reported in B/s | Network speeds are measured in bits/s; sensors now report Mbit/s with automatic kbit/s ↔ Mbit/s ↔ Gbit/s conversion in the HA entity UI |
-| Private `client._host` access in sensor setup | Bypassed encapsulation; replaced with `entry.data` lookup |
+**Throughput displayed in bytes instead of bits.** The upstream reported WAN and IPsec throughput in B/s. All networking equipment and ISP plans use Mbit/s. Sensors now report in Mbit/s and HA offers automatic unit conversion to kbit/s or Gbit/s from the entity settings — no dashboard template tricks needed.
 
-The integration domain stays `keenetic_router_pro` so existing HA configurations, dashboards, and entity history are preserved.
+**Device URLs could render as `http://None`.** Fixed. Configuration URLs are only set when a valid address is available.
+
+### Reliability and security improvements
+
+- Credentials and session tokens are **redacted from all log output** — passwords, PSKs, cookies, and authorization headers never appear in debug logs.
+- Authentication failures are correctly mapped to **`ConfigEntryAuthFailed`** so HA prompts for re-authentication instead of marking the entry as unavailable indefinitely.
+- Mesh node authentication uses **NDW2-first with Basic Auth fallback**, matching actual Keenetic firmware behavior.
+- **One-shot re-authentication** on expired session cookies before surfacing errors to HA.
+- CLI arguments sent to `/rci/parse` are **validated** to prevent injection-style inputs.
+- Existing passwords are **not pre-filled** in reconfigure forms.
+
+### Reduced router load
+
+- Slow-changing data (mesh topology, firmware info, host policies, NDNS) is **cached across ticks** — fetched every 60 s or 300 s instead of every 10 s.
+- Client connection, disconnection, and extender counts are **derived from already-fetched client data** instead of separate API calls.
+- Interface stats are **only polled for interfaces** that back enabled sensors.
+
+### Leaner footprint
+
+- **QR-code image platform removed** (449 lines, `pyqrcode`/`pypng` dependencies dropped) — generating Wi-Fi QR codes from HA is rarely useful when the router already shows them.
+- **USB storage polling removed** — this required frequent polling of optional components that may not be present, adding load and noise.
+- **English only** — the upstream shipped mixed-language source comments and non-English translations. Everything here is English.
+- **HACS source download** — no release ZIP assets required; installs directly from the repository archive.
 
 ## Features
 
