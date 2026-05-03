@@ -478,8 +478,12 @@ class KeeneticWanTxBytesSensor(_WanBytesBase):
 class _WanThroughputBase(_WanSensorBase):
     _attr_device_class = SensorDeviceClass.DATA_RATE
     _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = UnitOfDataRate.MEGABITS_PER_SECOND
-    _attr_suggested_display_precision = 2
+    # Store in bit/s so low-traffic links (e.g. a few kbit/s) are never
+    # rounded to zero. HA displays in Mbit/s by default and allows the
+    # user to switch to kbit/s or Gbit/s per entity in the settings UI.
+    _attr_native_unit_of_measurement = UnitOfDataRate.BITS_PER_SECOND
+    _attr_suggested_unit_of_measurement = UnitOfDataRate.MEGABITS_PER_SECOND
+    _attr_suggested_display_precision = 3
     _field = "rx_throughput"
 
     @property
@@ -491,8 +495,7 @@ class _WanThroughputBase(_WanSensorBase):
         if v is None:
             return None
         try:
-            # Coordinator stores bytes/s; convert to Mbit/s (network convention).
-            return round(float(v) * 8 / 1_000_000, 3)
+            return float(v) * 8  # bytes/s → bit/s; HA converts to display unit
         except (TypeError, ValueError):
             return None
 
