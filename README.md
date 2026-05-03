@@ -7,16 +7,22 @@ Home Assistant custom integration for Keenetic routers. It focuses on local poll
 
 ## Why this fork
 
-The upstream integration had a handful of issues that affected real-world use:
+This is a personal fork maintained for two Keenetic Titan routers (KN-1812) running as a Mesh system with an IPsec site-to-site tunnel between two properties. It exists for three reasons.
 
-- **Reauth flow broken** — the `_async_update_existing_entry` helper returned a `dict` on both success and failure, but the caller checked `not isinstance(result, dict)` to detect success. `FlowResult` is always a `dict`, so the check was always `False`: re-auth and reconfigure flows never completed the `async_abort` step and instead showed a form filled with the abort dict as "errors".
-- **Throughput shown in B/s** — WAN and IPsec tunnel throughput sensors used `BYTES_PER_SECOND`. Network speeds are conventionally shown in bits per second; this fork converts to Mbit/s with `SensorDeviceClass.DATA_RATE` so HA can auto-convert between kbit/s, Mbit/s, and Gbit/s in the entity UI.
-- **Stale mesh auth cache** — mesh node auth headers were cached per (ip, port) but never evicted on a 401 response. Rotating credentials or a session reset would leave the coordinator locked out until HA restarted.
-- **Dead weight** — QR image platform (449 lines), USB polling module (175 lines), and several unused constants added noise without providing any working feature.
-- **Coordinator helper overhead** — three async inner functions (`_cached`, `_cached_update_info`, `_cached_version_info`) that did zero I/O were called inside every `asyncio.gather`, creating unnecessary coroutine objects every 10 s.
-- **Private attribute access** — sensor setup accessed `client._host` instead of reading the value from `entry.data`.
+**Trimmed to what's actually used.** The upstream integration ships a QR-code image platform (449 lines, requires `pyqrcode`/`pypng`) and USB storage polling that are not useful for most router monitoring setups. Both are removed. The result is a smaller codebase that is easier to reason about.
 
-This fork keeps the integration domain unchanged (`keenetic_router_pro`) so existing HA configurations and entity histories are preserved.
+**English only.** The upstream included non-English translations and mixed-language source comments. This fork ships only English strings and keeps the source code in English throughout.
+
+**Bugs fixed during review.**
+
+| Bug | Impact |
+|---|---|
+| Reauth/reconfigure flow never completed | After a credential change HA showed a broken form instead of completing re-auth |
+| Stale mesh node auth cache | A 401 from a node left the coordinator locked out with a bad cached token until HA restarted |
+| Throughput reported in B/s | Network speeds are measured in bits/s; sensors now report Mbit/s with automatic kbit/s ↔ Mbit/s ↔ Gbit/s conversion in the HA entity UI |
+| Private `client._host` access in sensor setup | Bypassed encapsulation; replaced with `entry.data` lookup |
+
+The integration domain stays `keenetic_router_pro` so existing HA configurations, dashboards, and entity history are preserved.
 
 ## Features
 

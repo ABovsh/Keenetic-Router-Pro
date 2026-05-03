@@ -121,7 +121,7 @@ async def async_setup_entry(
     entities.append(KeeneticDisconnectedClientsSensor(coordinator, entry))
     entities.append(KeeneticExtenderCountSensor(coordinator, entry))
 
-    # WiFi сенсоры
+    # WiFi radio sensors
     entities.append(KeeneticWifi24TemperatureSensor(coordinator, entry))
     entities.append(KeeneticWifi5TemperatureSensor(coordinator, entry))
     entities.append(KeeneticWifi24RxSensor(coordinator, entry))
@@ -129,7 +129,7 @@ async def async_setup_entry(
     entities.append(KeeneticWifi5RxSensor(coordinator, entry))
     entities.append(KeeneticWifi5TxSensor(coordinator, entry))
 
-    # Трафик сенсоры
+    # Traffic counters
     entities.append(KeeneticLanRxSensor(coordinator, entry))
     entities.append(KeeneticLanTxSensor(coordinator, entry))
     entities.append(KeeneticWanRxSensor(coordinator, entry))
@@ -138,17 +138,16 @@ async def async_setup_entry(
     host = entry.data.get("host") or entry.data.get("ip", "unknown")
     entities.append(KeeneticLocalIpSensor(coordinator, entry, host))
 
-    # Ana router port sensörleri
+    # Main router port sensors
     main_ports = coordinator.data.get("port_info", [])
     for port in main_ports:
         port_label = port.get("label")
         if port_label is not None:
             entities.append(KeeneticMainPortSensor(coordinator, entry, port_label))
 
-    # Mesh система
     entities.append(KeeneticMeshSystemStateSensor(coordinator, entry))
 
-    # Mesh ноды
+    # Mesh node sensors
     mesh_nodes = coordinator.data.get("mesh_nodes", [])
     for node in mesh_nodes:
         node_cid = node.get("cid") or node.get("id")
@@ -167,14 +166,14 @@ async def async_setup_entry(
                 if port_label is not None:
                     entities.append(KeeneticMeshPortSensor(coordinator, entry, node_cid, port_label))
 
-    # WireGuard profilleri için sensörler
+    # WireGuard tunnel sensors
     wg_profiles = coordinator.data.get("wireguard", {}).get("profiles", {})
     for name in wg_profiles:
         entities.append(KeeneticWgUptimeSensor(coordinator, entry, name))
         entities.append(KeeneticWgRxSensor(coordinator, entry, name))
         entities.append(KeeneticWgTxSensor(coordinator, entry, name))
 
-    # Клиентские сенсоры для каждого отслеживаемого устройства
+    # Per-tracked-client sensors
     tracked_clients = entry.data.get(CONF_TRACKED_CLIENTS, [])
     seen_macs: set[str] = set()
 
@@ -190,7 +189,6 @@ async def async_setup_entry(
         label = client_info.get("name") or mac.upper()
         initial_ip = client_info.get("ip")
 
-        # Добавляем все сенсоры для клиента
         entities.append(KeeneticClientIpSensor(coordinator, entry, mac, label, initial_ip))
         entities.append(KeeneticClientRegisteredSensor(coordinator, entry, mac, label))
         entities.append(KeeneticClientLinkSensor(coordinator, entry, mac, label))

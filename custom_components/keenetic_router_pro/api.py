@@ -2012,7 +2012,7 @@ class KeeneticClient:
             if not iface_name:
                 continue
 
-            # Пропускаем внутренние интерфейсы (Bridge, Vlan, AccessPoint)
+            # Skip internal virtual interfaces.
             iface_type = iface.get("type", "").lower()
             if iface_type in ("bridge", "vlan", "accesspoint"):
                 continue
@@ -2020,7 +2020,6 @@ class KeeneticClient:
             try:
                 stats = await self.async_get_interface_stat(iface_name)
                 if stats:
-                    # Добавляем информацию об интерфейсе
                     stats["interface_name"] = iface_name
                     stats["interface_type"] = iface_type
                     stats["link"] = iface.get("link")
@@ -2214,7 +2213,6 @@ class KeeneticClient:
             current = data.get("title") or data.get("release")
             available = data.get("fw-available") or data.get("release-available")
 
-            # Проверяем, есть ли обновление (только stable канал)
             has_update = (
                 current and available and 
                 current != available and

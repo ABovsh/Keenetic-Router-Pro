@@ -1,22 +1,24 @@
 """Utilities for Keenetic Router Pro integration."""
-from typing import Any, Dict, Optional
+from __future__ import annotations
+
+from typing import Any
 from .const import DOMAIN
 
 
 def get_main_device_info(
-        title: str, 
-        entry_id: str, 
-        firmware_version: str, 
-        model: str,
-        host: Optional[str],
+        title: str,
+        entry_id: str,
+        firmware_version: str | None,
+        model: str | None,
+        host: str | None,
         ssl: bool = False,
-        ndns_domain: Optional[str] = None,
-    ) -> Dict[str, Any]:
-    """Device info для главного роутера."""
+        ndns_domain: str | None = None,
+    ) -> dict[str, Any]:
+    """Build DeviceInfo for the main router."""
     scheme = "https" if ssl else "http"
 
     if ndns_domain and ndns_domain.strip():
-        # Убираем протокол если есть
+        # Strip protocol prefix if present.
         clean_domain = ndns_domain.replace("https://", "").replace("http://", "").split("/")[0]
         configuration_url = f"{scheme}://{clean_domain}"
     elif host:
@@ -37,13 +39,13 @@ def get_main_device_info(
 def get_mesh_device_info(
     title: str,
     entry_id: str,
-    node: Optional[Dict[str, Any]] = None,
-    node_cid: Optional[str] = None,
-    host: Optional[str] = None,
+    node: dict[str, Any] | None = None,
+    node_cid: str | None = None,
+    host: str | None = None,
     ssl: bool = False,
-    fqdn: str = None
-) -> Dict[str, Any]:
-    """Device info для Mesh-ноды (связано с главным роутером)."""
+    fqdn: str | None = None,
+) -> dict[str, Any]:
+    """Build DeviceInfo for a Mesh extender node."""
     if node and node_cid:
         node_name = node.get("name") or node.get("mac") or node_cid
         node_ip = node.get("ip") or host
@@ -64,8 +66,8 @@ def get_mesh_device_info(
             "via_device": (DOMAIN, entry_id),
             "configuration_url": configuration_url,
         }
-    
-    # Fallback к главному устройству
+
+    # Fallback to the main router device.
     return get_main_device_info(title, entry_id, None, None, host, ssl)
 
 
@@ -73,10 +75,10 @@ def get_wan_device_info(
     title: str,
     entry_id: str,
     wan_id: str,
-    description: Optional[str] = None,
-    iface_type: Optional[str] = None,
-    role_label: Optional[str] = None,
-) -> Dict[str, Any]:
+    description: str | None = None,
+    iface_type: str | None = None,
+    role_label: str | None = None,
+) -> dict[str, Any]:
     """Device info for a single WAN interface.
 
     Each WAN appears in HA as its own sub-device under the main router,
@@ -104,8 +106,8 @@ def get_crypto_map_device_info(
     title: str,
     entry_id: str,
     cmap_name: str,
-    remote_peer: Optional[str] = None,
-) -> Dict[str, Any]:
+    remote_peer: str | None = None,
+) -> dict[str, Any]:
     """Device info for a single site-to-site IPsec `crypto map` tunnel.
 
     Each configured tunnel appears in HA as its own sub-device under
@@ -137,11 +139,10 @@ def get_client_device_info(
     entry_id: str,
     mac: str,
     label: str,
-    client: Optional[Dict[str, Any]] = None,
-    initial_ip: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Device info для отслеживаемого клиента как отдельного устройства."""
-    
+    client: dict[str, Any] | None = None,
+    initial_ip: str | None = None,
+) -> dict[str, Any]:
+    """Build DeviceInfo for a tracked client exposed as its own HA device."""
     device_name = label
     manufacturer = None
     model = None
@@ -158,11 +159,11 @@ def get_client_device_info(
 
             if ssdp.get("model"):
                 model = ssdp.get("model")
-    
+
     ip_address = initial_ip
     if client and client.get("ip"):
         ip_address = client.get("ip")
-    
+
     return {
         "identifiers": {(DOMAIN, f"client_{mac.replace(':', '_')}")},
         "name": device_name,
