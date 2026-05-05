@@ -2435,22 +2435,48 @@ class KeeneticClient:
         raise HomeAssistantError(msg)
 
     async def async_start_node_firmware_update(
-        self, node_ip: str, node_name: str = ""
+        self, node_ip: str, node_name: str = "", node_cid: str | None = None
     ) -> bool:
         """Start firmware update on a specific mesh node by connecting directly.
 
-        Connects to the node's own RCI API and triggers its local update.
-        Always uses challenge auth since mesh nodes may not accept Basic Auth
-        even when the controller does.
+        Prefer the controller-side MWS command because KeeneticOS manages
+        extender updates from the controller:
+
+            mws member <member> update start
+
+        If that path is unavailable, fall back to connecting to the node's own
+        RCI API and triggering a local update.
 
         Args:
             node_ip: IP address of the mesh node.
             node_name: Display name for logging.
+            node_cid: Mesh member CID/MAC used by the controller.
         """
         if not self._session or not node_ip:
             raise HomeAssistantError("Cannot connect to mesh node")
 
         label = node_name or node_ip
+
+        if node_cid:
+            try:
+                member = _validate_cli_arg(node_cid, "mesh node cid")
+                _LOGGER.info(
+                    "Starting firmware update for mesh node %s via controller "
+                    "MWS member %s",
+                    label,
+                    member,
+                )
+                await self._rci_parse(f"mws member {member} update start")
+                return True
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.warning(
+                    "Controller MWS update command failed for node %s (%s): %s. "
+                    "Trying direct node update fallback.",
+                    label,
+                    node_cid,
+                    err,
+                )
+
         scheme = "https" if self._ssl else "http"
 
         # Try controller's port first, then default port 80
