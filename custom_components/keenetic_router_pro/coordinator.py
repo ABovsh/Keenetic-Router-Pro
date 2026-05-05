@@ -141,6 +141,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ndns_info,
             ping_check_status,
             crypto_maps,
+            dns_proxy,
         ) = await asyncio.gather(
             _bounded(self.client.async_get_system_info()),
             _bounded(self.client.async_get_current_version_info()) if slow_refresh else _resolve(_cached_version),
@@ -152,6 +153,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _bounded(self.client.async_get_ndns_info()) if very_slow_refresh else _resolve(_prev.get("ndns", {})),
             _bounded(self.client.async_get_ping_check_status()),
             _bounded(self.client.async_get_crypto_maps()) if slow_refresh else _resolve(_prev.get("crypto_maps", {})),
+            _bounded(self.client.async_get_dns_proxy_status()) if very_slow_refresh else _resolve(_prev.get("dns_proxy", {})),
             return_exceptions=True,
         )
  
@@ -171,6 +173,9 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         crypto_maps = _ok(
             "crypto_maps", crypto_maps, {}, silent=True
         )
+        # DNS proxy is diagnostic-only and intentionally slow-cadence;
+        # routers without the endpoint should not warn every refresh.
+        dns_proxy = _ok("dns_proxy", dns_proxy, {}, silent=True)
 
         # Fail-fast on critical fetches. If the router is unreachable,
         # auth has expired, or the RCI surface is down, ``system_info``
@@ -424,6 +429,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "host_policies": host_policies,
             "port_info": port_info,
             "crypto_maps": crypto_maps,
+            "dns_proxy": dns_proxy,
             "new_clients": new_macs,
         }
 
