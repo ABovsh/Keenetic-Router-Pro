@@ -92,6 +92,10 @@ from .crypto import (
     KeeneticCryptoMapRxThroughputSensor,
     KeeneticCryptoMapTxThroughputSensor,
 )
+from .dns import (
+    KeeneticDnsProxyStatusSensor,
+    KeeneticDnsProxyFailedRequestsSensor,
+)
 
 
 async def async_setup_entry(
@@ -116,6 +120,8 @@ async def async_setup_entry(
     entities.append(KeeneticWanIpSensor(coordinator, entry))
     entities.append(KeeneticPppoeUptimeSensor(coordinator, entry))
     entities.append(KeeneticActiveConnectionsSensor(coordinator, entry))
+    entities.append(KeeneticDnsProxyStatusSensor(coordinator, entry))
+    entities.append(KeeneticDnsProxyFailedRequestsSensor(coordinator, entry))
     entities.append(KeeneticConnectedClientsSensor(coordinator, entry))
     entities.append(KeeneticRouterClientsSensor(coordinator, entry))
     entities.append(KeeneticDisconnectedClientsSensor(coordinator, entry))
