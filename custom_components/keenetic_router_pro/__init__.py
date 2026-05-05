@@ -1,181 +1,288 @@
-"""Keenetic Router Pro integration root."""
+"""Sensors for Keenetic Router Pro."""
 
 from __future__ import annotations
 
-import logging
-from typing import Any
+from typing import Optional
 
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .api import KeeneticApiError, KeeneticAuthError, KeeneticClient
-from .const import (
-    DOMAIN,
-    DEFAULT_PORT,
-    DEFAULT_SSL,
-    DATA_CLIENT,
-    DATA_COORDINATOR,
-    DATA_PING_COORDINATOR,
-    CONF_TRACKED_CLIENTS,
-    CONF_USE_CHALLENGE_AUTH,
-    CONF_PING_INTERVAL,
-    DEFAULT_PING_INTERVAL,
-    MIN_PING_INTERVAL,
-    EVENT_NEW_DEVICE,
+from ..const import DOMAIN, DATA_COORDINATOR, DATA_CLIENT, CONF_TRACKED_CLIENTS
+from ..coordinator import KeeneticCoordinator
+from .. import KeeneticClient
+
+from .system import (
+    KeeneticCpuLoadSensor,
+    KeeneticMemoryUsageSensor,
+    KeeneticUptimeSensor,
+    KeeneticFirmwareVersionSensor,
 )
-from .coordinator import KeeneticCoordinator, KeeneticPingCoordinator
+from .network import (
+    KeeneticWanStatusSensor,
+    KeeneticWanIpSensor,
+    KeeneticPppoeUptimeSensor,
+    KeeneticActiveConnectionsSensor,
+    KeeneticLocalIpSensor,
+    KeeneticMainPortSensor,
+    KeeneticWanProviderSensor,
+    KeeneticWanRoleSensor,
+    KeeneticWanInterfaceSensor,
+    KeeneticWanPublicIpSensor,
+    KeeneticWanUptimeSensor,
+    KeeneticWanRxBytesSensor,
+    KeeneticWanTxBytesSensor,
+    KeeneticWanRxThroughputSensor,
+    KeeneticWanTxThroughputSensor,
+)
+from .clients import (
+    KeeneticConnectedClientsSensor,
+    KeeneticRouterClientsSensor,
+    KeeneticDisconnectedClientsSensor,
+    KeeneticExtenderCountSensor,
+)
+from .wifi import (
+    KeeneticWifi24TemperatureSensor,
+    KeeneticWifi5TemperatureSensor,
+    KeeneticWifi24RxSensor,
+    KeeneticWifi24TxSensor,
+    KeeneticWifi5RxSensor,
+    KeeneticWifi5TxSensor,
+)
+from .wireguard import KeeneticWgUptimeSensor, KeeneticWgRxSensor, KeeneticWgTxSensor
+from .mesh import (
+    KeeneticMeshSystemStateSensor,
+    KeeneticMeshCpuLoadSensor,
+    KeeneticMeshMemorySensor,
+    KeeneticMeshUptimeSensor,
+    KeeneticMeshClientsSensor,
+    KeeneticMeshFirmwareVersionSensor,
+    KeeneticMeshLocalIpSensor,
+    KeeneticMeshPortSensor
+)
+from .traffic import (
+    KeeneticLanRxSensor,
+    KeeneticLanTxSensor,
+    KeeneticWanRxSensor,
+    KeeneticWanTxSensor,
+)
+from .client import (
+    KeeneticClientIpSensor,
+    KeeneticClientRegisteredSensor,
+    KeeneticClientLinkSensor,
+    KeeneticClientUptimeSensor,
+    KeeneticClientFirstSeenSensor,
+    KeeneticClientLastSeenSensor,
+    KeeneticClientRxSensor,
+    KeeneticClientTxSensor,
+    KeeneticClientSpeedSensor,
+    KeeneticClientPortSensor,
+    KeeneticClientRssiSensor,
+    KeeneticClientTxRateSensor,
+    KeeneticClientConnectionTypeSensor,
+    KeeneticClientWifiBandSensor,
+    KeeneticClientWifiModeSensor,   
+)
+from .crypto import (
+    KeeneticCryptoMapStateSensor,
+    KeeneticCryptoMapIkeStateSensor,
+    KeeneticCryptoMapRxBytesSensor,
+    KeeneticCryptoMapTxBytesSensor,
+    KeeneticCryptoMapRxThroughputSensor,
+    KeeneticCryptoMapTxThroughputSensor,
+)
+from .dns import (
+    KeeneticDnsProxyStatusSensor,
+    KeeneticDnsProxyFailedRequestsSensor,
+)
 
-_LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[str] = [
-    "sensor",
-    "switch",
-    "device_tracker",
-    "button",
-    "binary_sensor",
-    "select",
-    "update",
-]
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up Keenetic Router Pro sensors from a config entry."""
+    data = hass.data[DOMAIN][entry.entry_id]
+    coordinator: KeeneticCoordinator = data[DATA_COORDINATOR]
+    client: Optional[KeeneticClient] = data.get(DATA_CLIENT)
+    entities: list[SensorEntity] = []
 
+    # Temel sistem sensörleri
+    entities.append(KeeneticCpuLoadSensor(coordinator, entry))
+    entities.append(KeeneticMemoryUsageSensor(coordinator, entry))
+    entities.append(KeeneticUptimeSensor(coordinator, entry))
+    entities.append(KeeneticFirmwareVersionSensor(coordinator, entry))
 
-async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    return True
+    # Yeni sensörler
+    entities.append(KeeneticWanStatusSensor(coordinator, entry))
+    entities.append(KeeneticWanIpSensor(coordinator, entry))
+    entities.append(KeeneticPppoeUptimeSensor(coordinator, entry))
+    entities.append(KeeneticActiveConnectionsSensor(coordinator, entry))
+    entities.append(KeeneticDnsProxyStatusSensor(coordinator, entry))
+    entities.append(KeeneticDnsProxyFailedRequestsSensor(coordinator, entry))
+    entities.append(KeeneticConnectedClientsSensor(coordinator, entry))
+    entities.append(KeeneticRouterClientsSensor(coordinator, entry))
+    entities.append(KeeneticDisconnectedClientsSensor(coordinator, entry))
+    entities.append(KeeneticExtenderCountSensor(coordinator, entry))
 
+    # WiFi radio sensors
+    entities.append(KeeneticWifi24TemperatureSensor(coordinator, entry))
+    entities.append(KeeneticWifi5TemperatureSensor(coordinator, entry))
+    entities.append(KeeneticWifi24RxSensor(coordinator, entry))
+    entities.append(KeeneticWifi24TxSensor(coordinator, entry))
+    entities.append(KeeneticWifi5RxSensor(coordinator, entry))
+    entities.append(KeeneticWifi5TxSensor(coordinator, entry))
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    data: dict[str, Any] = dict(entry.data)
+    # Traffic counters
+    entities.append(KeeneticLanRxSensor(coordinator, entry))
+    entities.append(KeeneticLanTxSensor(coordinator, entry))
+    entities.append(KeeneticWanRxSensor(coordinator, entry))
+    entities.append(KeeneticWanTxSensor(coordinator, entry))
 
-    host: str | None = data.get("host") or data.get("ip")
-    if not host:
-        # A config entry with no host is unrecoverable without user
-        # intervention — fail fast with a clear error rather than
-        # passing None into the API client and getting an opaque
-        # crash later. ConfigEntryNotReady triggers HA's normal
-        # retry-with-backoff and surfaces the issue to the user.
-        raise ConfigEntryNotReady(
-            "Keenetic config entry is missing 'host'; please reconfigure the integration"
-        )
-    username: str = data["username"]
-    password: str = data["password"]
-    port: int = int(data.get("port", DEFAULT_PORT))
-    use_ssl: bool = bool(data.get("ssl", DEFAULT_SSL))
+    host = entry.data.get("host") or entry.data.get("ip", "unknown")
+    entities.append(KeeneticLocalIpSensor(coordinator, entry, host))
 
-    session = async_get_clientsession(hass)
+    # Main router port sensors
+    main_ports = coordinator.data.get("port_info", [])
+    for port in main_ports:
+        port_label = port.get("label")
+        if port_label is not None:
+            entities.append(KeeneticMainPortSensor(coordinator, entry, port_label))
 
-    client = KeeneticClient(
-        host=host,
-        username=username,
-        password=password,
-        port=port,
-        ssl=use_ssl,
-        use_challenge_auth=bool(data.get(CONF_USE_CHALLENGE_AUTH, False)),
-    )
-    try:
-        await client.async_start(session)
-    except KeeneticAuthError as err:
-        raise ConfigEntryAuthFailed("Keenetic credentials were rejected") from err
-    except KeeneticApiError as err:
-        raise ConfigEntryNotReady(f"Could not connect to Keenetic router: {err}") from err
+    entities.append(KeeneticMeshSystemStateSensor(coordinator, entry))
 
-    coordinator = KeeneticCoordinator(hass, client)
-    await coordinator.async_config_entry_first_refresh()
+    # Mesh node sensors
+    mesh_nodes = coordinator.data.get("mesh_nodes", [])
+    for node in mesh_nodes:
+        node_cid = node.get("cid") or node.get("id")
+        node_ip = node.get("ip")
+        if node_cid:
+            entities.append(KeeneticMeshCpuLoadSensor(coordinator, entry, node_cid))
+            entities.append(KeeneticMeshMemorySensor(coordinator, entry, node_cid))
+            entities.append(KeeneticMeshUptimeSensor(coordinator, entry, node_cid))
+            entities.append(KeeneticMeshClientsSensor(coordinator, entry, node_cid))
+            entities.append(KeeneticMeshFirmwareVersionSensor(coordinator, entry, node_cid))
+            if node_ip:
+                entities.append(KeeneticMeshLocalIpSensor(coordinator, entry, node_cid, node_ip))
+            ports = node.get("port", [])
+            for port in ports:
+                port_label = port.get("label")
+                if port_label is not None:
+                    entities.append(KeeneticMeshPortSensor(coordinator, entry, node_cid, port_label))
 
-    tracked_clients = data.get(CONF_TRACKED_CLIENTS, [])
+    # WireGuard tunnel sensors
+    wg_profiles = coordinator.data.get("wireguard", {}).get("profiles", {})
+    for name in wg_profiles:
+        entities.append(KeeneticWgUptimeSensor(coordinator, entry, name))
+        entities.append(KeeneticWgRxSensor(coordinator, entry, name))
+        entities.append(KeeneticWgTxSensor(coordinator, entry, name))
 
-    # Ping interval: options flow takes precedence over data, falls back to default.
-    ping_interval = entry.options.get(
-        CONF_PING_INTERVAL,
-        data.get(CONF_PING_INTERVAL, DEFAULT_PING_INTERVAL),
-    )
-    try:
-        ping_interval = int(ping_interval)
-    except (TypeError, ValueError):
-        ping_interval = DEFAULT_PING_INTERVAL
-    if ping_interval < MIN_PING_INTERVAL:
-        ping_interval = DEFAULT_PING_INTERVAL
+    # Per-tracked-client sensors
+    tracked_clients = entry.data.get(CONF_TRACKED_CLIENTS, [])
+    seen_macs: set[str] = set()
 
-    ping_coordinator = KeeneticPingCoordinator(
-        hass, client, tracked_clients, interval=ping_interval
-    )
+    for client_info in tracked_clients:
+        if not isinstance(client_info, dict):
+            continue
 
-    if tracked_clients:
-        # async_config_entry_first_refresh yerine async_refresh kullanıyoruz.
-        # Ping sırasında CancelledError veya başka bir hata olursa setup
-        # iptal edilmesin; coordinator boş veriyle başlasın, sonraki
-        # döngüde tekrar denensin.
-        try:
-            await ping_coordinator.async_refresh()
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.debug(
-                "Initial ping refresh failed (non-fatal), will retry on next cycle: %s", err
-            )
+        mac = str(client_info.get("mac") or "").lower()
+        if not mac or mac in seen_macs:
+            continue
+        seen_macs.add(mac)
 
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {
-        DATA_CLIENT: client,
-        DATA_COORDINATOR: coordinator,
-        DATA_PING_COORDINATOR: ping_coordinator,
-    }
+        label = client_info.get("name") or mac.upper()
+        initial_ip = client_info.get("ip")
 
+        entities.append(KeeneticClientIpSensor(coordinator, entry, mac, label, initial_ip))
+        entities.append(KeeneticClientRegisteredSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientLinkSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientUptimeSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientFirstSeenSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientLastSeenSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientRxSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientTxSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientSpeedSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientPortSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientRssiSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientTxRateSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientConnectionTypeSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientWifiBandSensor(coordinator, entry, mac, label))
+        entities.append(KeeneticClientWifiModeSensor(coordinator, entry, mac, label))
+
+    # Per-WAN sensor set: one sub-device per uplink (Default + backups).
+    # Covers provider name, priority role, underlying interface, public
+    # IP, uptime, byte counters and live throughput.
+    known_wan_ids: set[str] = set()
+
+    def _wan_sensor_set(wan_id: str) -> list[SensorEntity]:
+        return [
+            KeeneticWanProviderSensor(coordinator, entry, wan_id),
+            KeeneticWanRoleSensor(coordinator, entry, wan_id),
+            KeeneticWanInterfaceSensor(coordinator, entry, wan_id),
+            KeeneticWanPublicIpSensor(coordinator, entry, wan_id),
+            KeeneticWanUptimeSensor(coordinator, entry, wan_id),
+            KeeneticWanRxBytesSensor(coordinator, entry, wan_id),
+            KeeneticWanTxBytesSensor(coordinator, entry, wan_id),
+            KeeneticWanRxThroughputSensor(coordinator, entry, wan_id),
+            KeeneticWanTxThroughputSensor(coordinator, entry, wan_id),
+        ]
+
+    for wan in coordinator.data.get("wan_interfaces", []) or []:
+        wan_id = wan.get("id")
+        if not wan_id or wan_id in known_wan_ids:
+            continue
+        known_wan_ids.add(wan_id)
+        entities.extend(_wan_sensor_set(wan_id))
+
+    # Per-crypto-map sensor set: one sub-device per site-to-site
+    # IPsec tunnel. Covers the two state strings (tunnel, IKE), byte
+    # counters and live throughput. Connected binary_sensor and the
+    # Enabled switch live on their respective platforms.
+    known_cmap_names: set[str] = set()
+
+    def _crypto_map_sensor_set(cmap_name: str) -> list[SensorEntity]:
+        return [
+            KeeneticCryptoMapStateSensor(coordinator, entry, cmap_name),
+            KeeneticCryptoMapIkeStateSensor(coordinator, entry, cmap_name),
+            KeeneticCryptoMapRxBytesSensor(coordinator, entry, cmap_name),
+            KeeneticCryptoMapTxBytesSensor(coordinator, entry, cmap_name),
+            KeeneticCryptoMapRxThroughputSensor(coordinator, entry, cmap_name),
+            KeeneticCryptoMapTxThroughputSensor(coordinator, entry, cmap_name),
+        ]
+
+    for cmap_name in (coordinator.data.get("crypto_maps") or {}).keys():
+        if cmap_name in known_cmap_names:
+            continue
+        known_cmap_names.add(cmap_name)
+        entities.extend(_crypto_map_sensor_set(cmap_name))
+
+    async_add_entities(entities)
+
+    # New WAN interfaces may appear at runtime (LTE stick plugged in,
+    # new WireGuard tunnel configured as uplink, PPPoE redialed on a
+    # different interface). Mirror the binary_sensor platform and add
+    # the per-WAN sensor set on the fly so the user doesn't need to
+    # restart HA. Crypto maps added from the web UI fan out through
+    # the same listener.
     @callback
-    def _async_handle_new_device() -> None:
-        """Yeni cihaz bağlandığında event tetikle."""
-        new_clients = coordinator.data.get("new_clients", set())
-        clients = coordinator.data.get("clients", [])
-        
-        for mac in new_clients:
-            client_info = None
-            for c in clients:
-                if str(c.get("mac") or "").lower() == mac:
-                    client_info = c
-                    break
-            
-            if client_info:
-                name = client_info.get("name") or client_info.get("hostname") or mac.upper()
-                ip = client_info.get("ip")
-                
-                _LOGGER.info("New device connected: %s (%s) - %s", name, mac, ip)
-                
-                hass.bus.async_fire(
-                    EVENT_NEW_DEVICE,
-                    {
-                        "mac": mac,
-                        "name": name,
-                        "ip": ip,
-                        "hostname": client_info.get("hostname"),
-                        "interface": client_info.get("interface"),
-                        "ssid": client_info.get("ssid"),
-                    },
-                )
+    def _async_add_new_dynamic_entities() -> None:
+        new_entities: list[SensorEntity] = []
+        for wan in coordinator.data.get("wan_interfaces", []) or []:
+            wan_id = wan.get("id")
+            if not wan_id or wan_id in known_wan_ids:
+                continue
+            known_wan_ids.add(wan_id)
+            new_entities.extend(_wan_sensor_set(wan_id))
+        for cmap_name in (coordinator.data.get("crypto_maps") or {}).keys():
+            if cmap_name in known_cmap_names:
+                continue
+            known_cmap_names.add(cmap_name)
+            new_entities.extend(_crypto_map_sensor_set(cmap_name))
+        if new_entities:
+            async_add_entities(new_entities)
 
-    # async_add_listener returns an unsubscribe callable. Without
-    # registering it via entry.async_on_unload, every reload of the
-    # integration leaks a listener bound to the previous coordinator
-    # and the closure-captured hass/_LOGGER, slowly growing memory.
-    entry.async_on_unload(coordinator.async_add_listener(_async_handle_new_device))
-
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-
-    entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    
-    return True
-
-
-async def async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Config entry güncellendiğinde çağrılır (options flow sonrası)."""
-    await hass.config_entries.async_reload(entry.entry_id)
-
-
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Config entry silinir veya devre dışı bırakılırken çalışır."""
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    if not unload_ok:
-        return False
-
-    entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
-    if not hass.data.get(DOMAIN):
-        hass.data.pop(DOMAIN, None)
-
-    return True
+    entry.async_on_unload(
+        coordinator.async_add_listener(_async_add_new_dynamic_entities)
+    )
