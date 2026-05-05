@@ -8,6 +8,19 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.6.4 - IPsec S2S discovery fallback
+
+### Fixes
+
+- **Site-to-site IPsec tunnels are discovered on firmware that exposes them
+  only through `show crypto map`.** The integration still tries the REST-style
+  `show/crypto/map` path first, then falls back to the CLI/parse command that
+  KeeneticOS 5 returns for S2S tunnel state.
+- **IPsec endpoints and traffic selectors are more complete.** When status
+  fields contain placeholder `0.0.0.0`, the integration now falls back to the
+  established IKE phase-1 addresses and exposes local/remote traffic selectors
+  as attributes.
+
 ## 1.6.3 - WireGuard entity cleanup
 
 ### Fixes
