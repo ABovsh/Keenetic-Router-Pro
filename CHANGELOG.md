@@ -8,6 +8,33 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.6.1 - Mesh firmware update start fix
+
+### Fixes
+
+- **Mesh node firmware updates now use the controller MWS command first.**
+  KeeneticOS starts extender updates with `mws member <member> update start`;
+  the previous direct-node component update path could fail with "Could not
+  start firmware update on node ...". The direct-node path remains as a
+  fallback for older or unusual setups.
+
+## 1.6.0 - DNS over HTTPS diagnostics
+
+### Improvements
+
+- **New DNS Proxy Status sensor** — shows whether the router's DNS proxy is
+  healthy, degraded, down or unknown. This helps detect the failure mode where
+  raw IP connectivity still works but DNS over HTTPS stops answering.
+- **New DNS Proxy Failed Requests sensor** — exposes failed upstream DNS proxy
+  requests from the router's own stats so you can build Home Assistant
+  automations around DNS/DoH trouble without scraping router logs.
+
+### Internal
+
+- DNS proxy health is polled on the existing slow coordinator cadence and reuses
+  Keenetic RCI state (`show dns-proxy`), so it does not add a separate polling
+  loop or parse local Home Assistant logs.
+
 ## 1.5.1 - Stability and reload hygiene
 
 ### Bug fixes
