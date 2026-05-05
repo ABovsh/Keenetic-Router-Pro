@@ -1,7 +1,7 @@
 # Keenetic Router Pro
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![Version](https://img.shields.io/badge/version-1.6.2-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
+[![Version](https://img.shields.io/badge/version-1.6.3-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
 
 Home Assistant custom integration for Keenetic routers. It focuses on local polling, router diagnostics, mesh monitoring, presence tracking, WAN status, traffic counters, firmware updates, and selected client controls.
 
@@ -62,8 +62,9 @@ works for them.
 - WAN and IPsec throughput shown in Mbit/s with automatic unit conversion (kbit/s ↔ Mbit/s ↔ Gbit/s) in the HA entity UI.
 - WAN interface devices group status, public IP, role, traffic counters,
   throughput and enable/disable control for each uplink.
-- VPN controls are grouped with the VPN/interface device they control; VPN
-  uplinks share the same WAN device as their WAN status sensors.
+- VPN controls are grouped with the VPN/interface device they control and use
+  a single `Enabled` switch. VPN uplinks share the same WAN device as their
+  WAN status sensors, without duplicate WireGuard controls.
 
 Removed from this fork: QR image entities, USB polling, bundled non-English translations, and ZIP-release mode for HACS.
 

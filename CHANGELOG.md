@@ -8,6 +8,21 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.6.3 - WireGuard entity cleanup
+
+### Fixes
+
+- **Removed duplicate WireGuard entities from the main router device.** The old
+  WireGuard-specific RX/TX/Uptime sensors are no longer created because the
+  per-interface/WAN device model already exposes the relevant state in the
+  correct place.
+- **Removed duplicate VPN controls on WireGuard WAN devices.** VPN uplinks now
+  keep the WAN `Enabled` switch only, instead of showing both `Enabled` and a
+  separate `WireGuard` switch.
+- **Duration sensors now request whole-second display precision.** WAN and
+  PPPoE uptime sensors set HA's suggested precision to `0`, avoiding noisy
+  values like `212.00 s` where Home Assistant respects the hint.
+
 ## 1.6.2 - Interface device organization and VLAN WAN throughput
 
 ### Fixes

@@ -98,6 +98,7 @@ class KeeneticPppoeUptimeSensor(ControllerEntity, SensorEntity):
     _attr_icon = "mdi:timer-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -400,6 +401,7 @@ class KeeneticWanUptimeSensor(_WanSensorBase):
     _attr_icon = "mdi:timer-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.DURATION
+    _attr_suggested_display_precision = 0
 
     @property
     def unique_id(self) -> str:

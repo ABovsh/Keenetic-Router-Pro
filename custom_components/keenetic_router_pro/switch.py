@@ -58,6 +58,8 @@ async def async_setup_entry(
     known_vpn_ids: set[str] = set()
     vpn_profiles = coordinator.data.get("vpn_tunnels", {}).get("profiles", {}) or {}
     for iface_id, profile in vpn_profiles.items():
+        if iface_id in known_wan_ids:
+            continue
         if iface_id in known_vpn_ids:
             continue
         known_vpn_ids.add(iface_id)
@@ -111,6 +113,8 @@ async def async_setup_entry(
             )
         profiles = coordinator.data.get("vpn_tunnels", {}).get("profiles", {}) or {}
         for iface_id, profile in profiles.items():
+            if iface_id in known_wan_ids:
+                continue
             if not iface_id or iface_id in known_vpn_ids:
                 continue
             known_vpn_ids.add(iface_id)
@@ -266,20 +270,8 @@ class KeeneticVpnSwitch(InterfaceEntity, SwitchEntity):
         )
         self._client = client
 
-        if self._profile_type == "wireguard":
-            prefix = "Wireguard"
-        elif self._profile_type == "sstp":
-            prefix = "SSTP"
-        elif self._profile_type == "openvpn":
-            prefix = "OpenVPN"
-        elif self._profile_type == "ipsec":
-            prefix = "IPsec"
-        elif self._profile_type:
-            prefix = self._profile_type.capitalize()
-        else:
-            prefix = "VPN"
-
-        self._attr_name = prefix
+        self._attr_name = "Enabled"
+        self._attr_icon = "mdi:vpn"
 
     @property
     def unique_id(self) -> str:

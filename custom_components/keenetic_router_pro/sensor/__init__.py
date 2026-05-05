@@ -50,7 +50,6 @@ from .wifi import (
     KeeneticWifi5RxSensor,
     KeeneticWifi5TxSensor,
 )
-from .wireguard import KeeneticWgUptimeSensor, KeeneticWgRxSensor, KeeneticWgTxSensor
 from .mesh import (
     KeeneticMeshSystemStateSensor,
     KeeneticMeshCpuLoadSensor,
@@ -173,13 +172,6 @@ async def async_setup_entry(
                 port_label = port.get("label")
                 if port_label is not None:
                     entities.append(KeeneticMeshPortSensor(coordinator, entry, node_cid, port_label))
-
-    # WireGuard tunnel sensors
-    wg_profiles = coordinator.data.get("wireguard", {}).get("profiles", {})
-    for name in wg_profiles:
-        entities.append(KeeneticWgUptimeSensor(coordinator, entry, name))
-        entities.append(KeeneticWgRxSensor(coordinator, entry, name))
-        entities.append(KeeneticWgTxSensor(coordinator, entry, name))
 
     # Per-tracked-client sensors
     tracked_clients = entry.data.get(CONF_TRACKED_CLIENTS, [])
