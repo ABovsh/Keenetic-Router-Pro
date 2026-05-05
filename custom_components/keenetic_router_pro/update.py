@@ -325,6 +325,7 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
             result = await self._client.async_start_node_firmware_update(
                 node_ip=node_ip,
                 node_name=node_name,
+                node_cid=node.get("cid") or node.get("mac") or self._node_cid,
             )
 
             if not result:
