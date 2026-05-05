@@ -25,6 +25,16 @@ _SENSITIVE_RESPONSE_RE = re.compile(
     r'(?i)("?(?:authorization|cookie|key|pass|password|psk|secret)"?\s*[:=]\s*)'
     r'("[^"]*"|\'[^\']*\'|[^,\s;}\]]+)'
 )
+_DNS_PROXY_STAT_RE = re.compile(
+    r"^\s*(?P<ip>\S+)\s+"
+    r"(?P<port>\d+)\s+"
+    r"(?P<sent>\d+)\s+"
+    r"(?P<answered>\d+)\s+"
+    r"(?P<nxdomain>\d+)\s+"
+    r"(?P<median>\d+)ms\s+"
+    r"(?P<average>\d+)ms\s+"
+    r"(?P<rank>\d+)\s*$"
+)
 
 
 class KeeneticApiError(Exception):
@@ -1550,6 +1560,127 @@ class KeeneticClient:
             result[iface_id] = flat
 
         return result
+
+    @staticmethod
+    def _parse_dns_proxy_stat(stat_text: str) -> List[Dict[str, Any]]:
+        """Parse the DNS Servers table from `show dns-proxy` statistics."""
+        servers: List[Dict[str, Any]] = []
+        for line in str(stat_text or "").splitlines():
+            match = _DNS_PROXY_STAT_RE.match(line)
+            if not match:
+                continue
+            sent = int(match.group("sent"))
+            answered = int(match.group("answered"))
+            nxdomain = int(match.group("nxdomain"))
+            servers.append(
+                {
+                    "ip": match.group("ip"),
+                    "port": int(match.group("port")),
+                    "sent": sent,
+                    "answered": answered,
+                    "nxdomain": nxdomain,
+                    "failed": max(0, sent - answered - nxdomain),
+                    "median_ms": int(match.group("median")),
+                    "average_ms": int(match.group("average")),
+                    "rank": int(match.group("rank")),
+                }
+            )
+        return servers
+
+    async def async_get_dns_proxy_status(self) -> Dict[str, Any]:
+        """Return a lightweight health summary for Keenetic DNS/DoH proxy.
+
+        This intentionally reads the router's generated DNS proxy state
+        instead of scraping logs. It is useful for detecting the class of
+        outage where raw IP connectivity still works but DoH proxy requests
+        are timing out or all encrypted upstreams stop answering.
+        """
+        try:
+            data = await self._rci_get("show/dns-proxy") or {}
+            proxy_status = data.get("proxy-status") or []
+            if not isinstance(proxy_status, list):
+                return {}
+
+            proxies: List[Dict[str, Any]] = []
+            total_servers = 0
+            active_servers = 0
+            failed_requests = 0
+            sent_requests = 0
+            do_h_servers = 0
+
+            for proxy in proxy_status:
+                if not isinstance(proxy, dict):
+                    continue
+
+                name = str(proxy.get("proxy-name") or "Unknown")
+                config = str(proxy.get("proxy-config") or "")
+                stat = str(proxy.get("proxy-stat") or "")
+                stat_servers = self._parse_dns_proxy_stat(stat)
+                https_servers = (
+                    (proxy.get("proxy-https") or {}).get("server-https") or []
+                )
+                if not isinstance(https_servers, list):
+                    https_servers = []
+
+                proxy_sent = sum(int(s["sent"]) for s in stat_servers)
+                proxy_failed = sum(int(s["failed"]) for s in stat_servers)
+                proxy_active = sum(1 for s in stat_servers if int(s["answered"]) > 0)
+                proxy_doh = sum(
+                    1
+                    for server in https_servers
+                    if isinstance(server, dict) and server.get("uri")
+                )
+
+                total_servers += len(stat_servers)
+                active_servers += proxy_active
+                failed_requests += proxy_failed
+                sent_requests += proxy_sent
+                do_h_servers += proxy_doh
+
+                proxies.append(
+                    {
+                        "name": name,
+                        "doh_servers": proxy_doh,
+                        "configured_doh_uris": [
+                            str(server.get("uri"))
+                            for server in https_servers
+                            if isinstance(server, dict) and server.get("uri")
+                        ],
+                        "client_path_uses_doh": "https://" in config,
+                        "servers": stat_servers,
+                        "requests_sent": proxy_sent,
+                        "failed_requests": proxy_failed,
+                        "active_servers": proxy_active,
+                    }
+                )
+
+            if not proxies:
+                status = "unknown"
+            elif total_servers == 0:
+                status = "unknown"
+            elif active_servers == 0 and sent_requests > 0:
+                status = "down"
+            elif failed_requests > 0:
+                status = "degraded"
+            else:
+                status = "ok"
+
+            return {
+                "status": status,
+                "proxy_count": len(proxies),
+                "doh_server_count": do_h_servers,
+                "dns_server_count": total_servers,
+                "active_dns_server_count": active_servers,
+                "requests_sent": sent_requests,
+                "failed_requests": failed_requests,
+                "client_path_uses_doh": any(
+                    bool(proxy.get("client_path_uses_doh")) for proxy in proxies
+                ),
+                "proxies": proxies,
+            }
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Error getting DNS proxy status: %s", err)
+            return {}
 
     async def async_get_crypto_maps(self) -> Dict[str, Dict[str, Any]]:
         """Return site-to-site IPsec tunnels (`crypto map` entries).
