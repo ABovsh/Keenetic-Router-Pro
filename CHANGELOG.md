@@ -8,6 +8,28 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.6.2 - Interface device organization and VLAN WAN throughput
+
+### Fixes
+
+- **VLAN WAN throughput now works.** WAN VLAN interfaces such as
+  `GigabitEthernet0/Vlan5` are no longer skipped when collecting interface
+  statistics. The integration now uses Keenetic's working
+  `show interface <name> stat` command first and keeps the older RCI GET form
+  as a fallback.
+
+### Improvements
+
+- **WAN interfaces now have an Enable switch on their own HA device.** The
+  switch uses the same Keenetic interface up/down control as the web UI and is
+  grouped with the WAN's status, IP, role, counters and throughput sensors.
+- **VPN controls are grouped with the interface they control.** VPN switches
+  now attach to the matching WAN device when the VPN is an uplink; otherwise
+  they appear under their own VPN/interface device instead of the main router.
+- **Throughput sensors expose raw stat details.** Per-WAN throughput entities
+  now include the raw `rxbytes`, `txbytes`, `rxspeed`, `txspeed`, stat
+  interface and stat timestamp as attributes for easier troubleshooting.
+
 ## 1.6.1 - Mesh firmware update start fix
 
 ### Fixes

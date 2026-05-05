@@ -618,7 +618,22 @@ class KeeneticClient:
 
     async def async_get_interface_stat(self, name: str) -> Dict[str, Any]:
         """Return statistics (traffic, speed) for a specific interface."""
-        return await self._rci_get("show/interface/stat", params={"name": name}) or {}
+        safe_name = _validate_cli_arg(name, "interface name")
+        try:
+            data = await self._rci_parse(f"show interface {safe_name} stat")
+            if isinstance(data, dict):
+                stat_keys = {"rxbytes", "txbytes", "rxspeed", "txspeed"}
+                if stat_keys.intersection(data):
+                    return data
+        except Exception as err:
+            _LOGGER.debug(
+                "Parse-style interface stat failed for %s: %s; trying GET fallback",
+                safe_name,
+                err,
+            )
+        return await self._rci_get(
+            "show/interface/stat", params={"name": safe_name}
+        ) or {}
 
     async def async_get_clients(self) -> List[Dict[str, Any]]:
 
@@ -2150,15 +2165,23 @@ class KeeneticClient:
         iface_list = self._normalize_interfaces(interfaces)
 
         all_stats: Dict[str, Dict[str, Any]] = {}
+        wan_ids = {
+            str(wan.get("id"))
+            for wan in await self.async_get_wan_interfaces(interfaces=interfaces)
+            if wan.get("id")
+        }
 
         for iface in iface_list:
             iface_name = iface.get("id") or iface.get("interface-name")
             if not iface_name:
                 continue
 
-            # Skip internal virtual interfaces.
             iface_type = iface.get("type", "").lower()
-            if iface_type in ("bridge", "vlan", "accesspoint"):
+            if iface_name not in wan_ids and iface_type in (
+                "bridge",
+                "vlan",
+                "accesspoint",
+            ):
                 continue
 
             try:

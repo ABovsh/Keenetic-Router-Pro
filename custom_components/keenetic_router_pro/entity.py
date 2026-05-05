@@ -11,6 +11,7 @@ from .utils import (
     get_mesh_device_info,
     get_client_device_info,
     get_wan_device_info,
+    get_vpn_interface_device_info,
     get_crypto_map_device_info,
 )
 
@@ -159,6 +160,59 @@ class WanEntity(CoordinatorEntity):
             description=wan.get("description"),
             iface_type=wan.get("type"),
             role_label=wan.get("role_label"),
+        )
+
+
+class InterfaceEntity(CoordinatorEntity):
+    """Base class for generic router interface entities.
+
+    If an interface is also present in ``wan_interfaces`` it is grouped
+    under the existing WAN sub-device. Otherwise it gets a lightweight
+    interface/VPN sub-device under the router.
+    """
+
+    def __init__(
+        self,
+        coordinator: KeeneticCoordinator,
+        entry_id: str,
+        title: str,
+        iface_id: str,
+        label: str | None = None,
+        iface_type: str | None = None,
+    ) -> None:
+        super().__init__(coordinator)
+        self._entry_id = entry_id
+        self._title = title
+        self._iface_id = iface_id
+        self._label = label or iface_id
+        self._iface_type = iface_type
+
+    @property
+    def _wan(self) -> dict[str, Any] | None:
+        for w in self.coordinator.data.get("wan_interfaces", []) or []:
+            if w.get("id") == self._iface_id:
+                return w
+        return None
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        wan = self._wan
+        if wan is not None:
+            return get_wan_device_info(
+                title=self._title,
+                entry_id=self._entry_id,
+                wan_id=self._iface_id,
+                description=wan.get("description"),
+                iface_type=wan.get("type"),
+                role_label=wan.get("role_label"),
+            )
+
+        return get_vpn_interface_device_info(
+            title=self._title,
+            entry_id=self._entry_id,
+            iface_id=self._iface_id,
+            label=self._label,
+            iface_type=self._iface_type,
         )
 
 

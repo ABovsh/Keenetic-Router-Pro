@@ -293,6 +293,18 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             wan["tx_packets"] = _to_int(
                 stats.get("txpackets") or stats.get("tx-packets")
             )
+            wan["rx_speed_raw"] = _to_int(
+                stats.get("rxspeed")
+                or stats.get("rx-speed")
+                or stats.get("rx_rate")
+            )
+            wan["tx_speed_raw"] = _to_int(
+                stats.get("txspeed")
+                or stats.get("tx-speed")
+                or stats.get("tx_rate")
+            )
+            wan["stats_interface"] = stats.get("interface_name") or wan_id
+            wan["stats_timestamp"] = stats.get("timestamp")
             wan["_sample_ts"] = now_ts
  
             # --- Authoritative ping-check override ---

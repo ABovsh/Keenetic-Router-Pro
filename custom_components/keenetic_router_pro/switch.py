@@ -8,7 +8,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .api import KeeneticClient
 from .const import DOMAIN, DATA_CLIENT, DATA_COORDINATOR
 from .coordinator import KeeneticCoordinator
-from .entity import ControllerEntity, CryptoMapEntity
+from .entity import ControllerEntity, CryptoMapEntity, InterfaceEntity, WanEntity
 
 
 async def async_setup_entry(
@@ -40,8 +40,27 @@ async def async_setup_entry(
             )
         )
 
+    known_wan_ids: set[str] = set()
+    for wan in coordinator.data.get("wan_interfaces", []) or []:
+        wan_id = wan.get("id")
+        if not wan_id or wan_id in known_wan_ids:
+            continue
+        known_wan_ids.add(wan_id)
+        entities.append(
+            KeeneticWanEnabledSwitch(
+                coordinator=coordinator,
+                entry=entry,
+                client=client,
+                wan_id=wan_id,
+            )
+        )
+
+    known_vpn_ids: set[str] = set()
     vpn_profiles = coordinator.data.get("vpn_tunnels", {}).get("profiles", {}) or {}
     for iface_id, profile in vpn_profiles.items():
+        if iface_id in known_vpn_ids:
+            continue
+        known_vpn_ids.add(iface_id)
         entities.append(
             KeeneticVpnSwitch(
                 coordinator=coordinator,
@@ -72,14 +91,38 @@ async def async_setup_entry(
     if entities:
         async_add_entities(entities)
 
-    # Tunnels added later via the web UI should show up without a HA
-    # restart. Wi-Fi and VPN-client switches don't use this listener
-    # pattern today (they pick up changes on the next reload), but
-    # crypto maps do because they are a brand-new entity family here
-    # and we want the better UX from day one.
+    # Interfaces and tunnels added later via the web UI should show up
+    # without a HA restart.
     @callback
-    def _async_add_new_crypto_maps() -> None:
+    def _async_add_new_interface_switches() -> None:
         new_entities: list[SwitchEntity] = []
+        for wan in coordinator.data.get("wan_interfaces", []) or []:
+            wan_id = wan.get("id")
+            if not wan_id or wan_id in known_wan_ids:
+                continue
+            known_wan_ids.add(wan_id)
+            new_entities.append(
+                KeeneticWanEnabledSwitch(
+                    coordinator=coordinator,
+                    entry=entry,
+                    client=client,
+                    wan_id=wan_id,
+                )
+            )
+        profiles = coordinator.data.get("vpn_tunnels", {}).get("profiles", {}) or {}
+        for iface_id, profile in profiles.items():
+            if not iface_id or iface_id in known_vpn_ids:
+                continue
+            known_vpn_ids.add(iface_id)
+            new_entities.append(
+                KeeneticVpnSwitch(
+                    coordinator=coordinator,
+                    entry=entry,
+                    client=client,
+                    iface_id=iface_id,
+                    profile=profile,
+                )
+            )
         for cmap_name in (coordinator.data.get("crypto_maps") or {}).keys():
             if cmap_name in known_cmap_names:
                 continue
@@ -96,7 +139,7 @@ async def async_setup_entry(
             async_add_entities(new_entities)
 
     entry.async_on_unload(
-        coordinator.async_add_listener(_async_add_new_crypto_maps)
+        coordinator.async_add_listener(_async_add_new_interface_switches)
     )
 
 
@@ -156,8 +199,50 @@ class KeeneticWifiSwitch(BaseKeeneticSwitch):
         await self.coordinator.async_request_refresh()
 
 
-class KeeneticVpnSwitch(BaseKeeneticSwitch):
-    """Genel VPN tüneli aç/kapat switch'i (WireGuard, OpenVPN, IPsec, ...)."""
+class KeeneticWanEnabledSwitch(WanEntity, SwitchEntity):
+    """Enable/disable a WAN interface from its WAN sub-device."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:toggle-switch"
+
+    def __init__(
+        self,
+        coordinator: KeeneticCoordinator,
+        entry: ConfigEntry,
+        client: KeeneticClient,
+        wan_id: str,
+    ) -> None:
+        WanEntity.__init__(self, coordinator, entry.entry_id, entry.title, wan_id)
+        self._client = client
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self._entry_id}_wan_{self._wan_id}_enabled_switch"
+
+    @property
+    def name(self) -> str:
+        return "Enabled"
+
+    @property
+    def is_on(self) -> bool:
+        wan = self._wan
+        if wan is None:
+            return False
+        return bool(wan.get("enabled"))
+
+    async def async_turn_on(self, **_: Any) -> None:
+        await self._client.async_set_interface_enabled(self._wan_id, True)
+        await self.coordinator.async_request_refresh()
+
+    async def async_turn_off(self, **_: Any) -> None:
+        await self._client.async_set_interface_enabled(self._wan_id, False)
+        await self.coordinator.async_request_refresh()
+
+
+class KeeneticVpnSwitch(InterfaceEntity, SwitchEntity):
+    """Generic VPN tunnel enable/disable switch."""
+
+    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -167,10 +252,19 @@ class KeeneticVpnSwitch(BaseKeeneticSwitch):
         iface_id: str,
         profile: dict[str, Any],
     ) -> None:
-        super().__init__(coordinator, entry, client)
         self._iface_id = iface_id
         self._profile_type = str(profile.get("type") or "").lower()
         self._label = profile.get("label") or iface_id
+        InterfaceEntity.__init__(
+            self,
+            coordinator,
+            entry.entry_id,
+            entry.title,
+            iface_id,
+            label=self._label,
+            iface_type=self._profile_type,
+        )
+        self._client = client
 
         if self._profile_type == "wireguard":
             prefix = "Wireguard"
@@ -185,7 +279,7 @@ class KeeneticVpnSwitch(BaseKeeneticSwitch):
         else:
             prefix = "VPN"
 
-        self._attr_name = f"{prefix} - {self._label}"
+        self._attr_name = prefix
 
     @property
     def unique_id(self) -> str:

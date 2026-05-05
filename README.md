@@ -1,7 +1,7 @@
 # Keenetic Router Pro
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![Version](https://img.shields.io/badge/version-1.5.1-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
+[![Version](https://img.shields.io/badge/version-1.6.2-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
 
 Home Assistant custom integration for Keenetic routers. It focuses on local polling, router diagnostics, mesh monitoring, presence tracking, WAN status, traffic counters, firmware updates, and selected client controls.
 
@@ -16,6 +16,13 @@ A maintained, hardened fork of the original Keenetic Router Pro integration. It 
 **Mesh nodes could lock up until HA restarted.** Auth headers for each mesh node were cached but never cleared on a 401 response. A credential rotation or a node session reset left the coordinator permanently locked out with a stale token. The cache is now evicted on 401 so the next poll re-authenticates automatically.
 
 **Throughput displayed in bits instead of bytes.** The upstream reported WAN and IPsec throughput in B/s. All networking equipment and ISP plans use Mbit/s. Sensors now report in bits/s and HA offers automatic unit conversion to kbit/s or Gbit/s from the entity settings — no dashboard template tricks needed.
+
+**VLAN WAN throughput could stay at zero.** Some Keenetic WANs are VLAN
+interfaces such as `GigabitEthernet0/Vlan5`. Those interfaces were skipped by
+the generic stats collector, so their per-WAN throughput stayed at zero even
+when the router reported live `rxbytes`, `txbytes`, `rxspeed` and `txspeed`.
+VLAN WANs are now included and queried through the Keenetic CLI stat form that
+works for them.
 
 **Device URLs could render as `http://None`.** Fixed. Configuration URLs are only set when a valid address is available.
 
@@ -53,6 +60,10 @@ A maintained, hardened fork of the original Keenetic Router Pro integration. It 
 - Firmware update entities for the controller and mesh nodes.
 - WireGuard and IPsec diagnostic sensors.
 - WAN and IPsec throughput shown in Mbit/s with automatic unit conversion (kbit/s ↔ Mbit/s ↔ Gbit/s) in the HA entity UI.
+- WAN interface devices group status, public IP, role, traffic counters,
+  throughput and enable/disable control for each uplink.
+- VPN controls are grouped with the VPN/interface device they control; VPN
+  uplinks share the same WAN device as their WAN status sensors.
 
 Removed from this fork: QR image entities, USB polling, bundled non-English translations, and ZIP-release mode for HACS.
 
@@ -126,9 +137,17 @@ See [`SECURITY.md`](SECURITY.md) for recommended file permissions on
 
 Common entity groups:
 
+- Router device: router-wide health, firmware, reboot, client totals, ports,
+  Wi-Fi radio temperature and legacy WAN summary sensors kept for compatibility.
+- WAN interface devices: per-uplink connectivity, enabled state, enable switch,
+  provider, role, public IP, uptime, traffic counters and throughput.
+- VPN interface devices: VPN state and enable/disable control for VPN profiles
+  that are not WAN uplinks.
+- IPsec crypto-map devices: site-to-site tunnel state, IKE state, traffic,
+  throughput and enable/disable control.
 - Sensors: router health, WAN state, traffic, ports, Wi-Fi radio temperature, mesh diagnostics, VPN diagnostics, client details.
 - Binary sensors: firmware/update availability, mesh/client/connectivity status.
-- Switches: Wi-Fi networks, VPN profiles, client blocks where supported.
+- Switches: Wi-Fi networks, WAN interfaces, VPN profiles, client blocks where supported.
 - Selects: client connection policy where supported.
 - Buttons: router and mesh node reboot.
 - Update entities: controller and mesh firmware updates.

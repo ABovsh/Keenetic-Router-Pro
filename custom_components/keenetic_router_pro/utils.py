@@ -102,6 +102,28 @@ def get_wan_device_info(
     }
 
 
+def get_vpn_interface_device_info(
+    title: str,
+    entry_id: str,
+    iface_id: str,
+    label: str | None = None,
+    iface_type: str | None = None,
+) -> dict[str, Any]:
+    """Device info for a VPN/interface that is not a WAN uplink."""
+    display = label or iface_id
+    model = "VPN interface"
+    if iface_type:
+        model = f"{str(iface_type).upper()} interface"
+
+    return {
+        "identifiers": {(DOMAIN, f"{entry_id}_iface_{iface_id}")},
+        "name": f"{title} — {display}",
+        "manufacturer": "Keenetic",
+        "model": model,
+        "via_device": (DOMAIN, entry_id),
+    }
+
+
 def get_crypto_map_device_info(
     title: str,
     entry_id: str,

@@ -495,6 +495,20 @@ class _WanThroughputBase(_WanSensorBase):
         except (TypeError, ValueError):
             return None
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        wan = self._wan
+        if not wan:
+            return None
+        return {
+            "rxbytes": wan.get("rx_bytes"),
+            "txbytes": wan.get("tx_bytes"),
+            "rxspeed": wan.get("rx_speed_raw"),
+            "txspeed": wan.get("tx_speed_raw"),
+            "stats_interface": wan.get("stats_interface"),
+            "stats_timestamp": wan.get("stats_timestamp"),
+        }
+
 
 class KeeneticWanRxThroughputSensor(_WanThroughputBase):
     _attr_icon = "mdi:download-network"

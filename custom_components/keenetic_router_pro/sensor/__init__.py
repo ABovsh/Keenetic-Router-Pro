@@ -115,7 +115,9 @@ async def async_setup_entry(
     entities.append(KeeneticUptimeSensor(coordinator, entry))
     entities.append(KeeneticFirmwareVersionSensor(coordinator, entry))
 
-    # Yeni sensörler
+    # Legacy controller-level WAN summary sensors are kept for
+    # backwards compatibility. The per-WAN device entities below are
+    # the preferred model for new dashboards.
     entities.append(KeeneticWanStatusSensor(coordinator, entry))
     entities.append(KeeneticWanIpSensor(coordinator, entry))
     entities.append(KeeneticPppoeUptimeSensor(coordinator, entry))
