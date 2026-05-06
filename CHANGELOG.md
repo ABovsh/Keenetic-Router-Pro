@@ -8,18 +8,26 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
-## 1.6.4 - IPsec S2S discovery fallback
+## 1.6.4 - KeenDNS protected web app access
 
-### Fixes
+### Improvements
 
-- **Site-to-site IPsec tunnels are discovered on firmware that exposes them
-  only through `show crypto map`.** The integration still tries the REST-style
-  `show/crypto/map` path first, then falls back to the CLI/parse command that
-  KeeneticOS 5 returns for S2S tunnel state.
-- **IPsec endpoints and traffic selectors are more complete.** When status
-  fields contain placeholder `0.0.0.0`, the integration now falls back to the
-  established IKE phase-1 addresses and exposes local/remote traffic selectors
-  as attributes.
+- **Added a KeenDNS protected web app connection mode.** The integration can
+  now be configured with a password-protected KeenDNS app hostname over HTTPS
+  while keeping the existing direct/local API mode unchanged.
+- **Full URL input is normalized safely.** Setup and reconfigure accept either
+  a bare host name or a full `https://...` URL, reject paths/query strings, and
+  store a clean host/port/SSL target.
+- **Clearer 502 errors for protected apps.** Bad Gateway responses now point to
+  the KeenDNS published application/upstream configuration instead of looking
+  like a generic router API failure.
+
+### Documentation
+
+- Documented the tested protected-access setup and the minimal `HTTP Proxy`
+  permission observed to allow full proxied RCI access.
+- Added a warning that verbose curl logs expose Basic Auth headers and should
+  be followed by password rotation when shared.
 
 ## 1.6.3 - WireGuard entity cleanup
 

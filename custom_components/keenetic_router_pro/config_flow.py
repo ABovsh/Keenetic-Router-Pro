@@ -24,11 +24,19 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.service_info.ssdp import SsdpServiceInfo
 from homeassistant.helpers.device_registry import format_mac
 
-from .api import KeeneticApiError, KeeneticAuthError, KeeneticClient
+from .api import (
+    KeeneticApiError,
+    KeeneticAuthError,
+    KeeneticClient,
+    normalize_connection_target,
+)
 from .const import (
     DOMAIN,
     DEFAULT_PORT,
     DEFAULT_SSL,
+    CONF_CONNECTION_MODE,
+    CONNECTION_MODE_DIRECT,
+    CONNECTION_MODE_KEENDNS_PROTECTED,
     CONF_TRACKED_CLIENTS,
     CONF_USE_CHALLENGE_AUTH,
     CONF_PING_INTERVAL,
@@ -43,6 +51,21 @@ _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.config_flow")
 # during setup, reauth and reconfigure flows.
 _PASSWORD_SELECTOR = selector.TextSelector(
     selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+)
+_CONNECTION_MODE_SELECTOR = selector.SelectSelector(
+    selector.SelectSelectorConfig(
+        options=[
+            selector.SelectOptionDict(
+                value=CONNECTION_MODE_DIRECT,
+                label="Direct / local",
+            ),
+            selector.SelectOptionDict(
+                value=CONNECTION_MODE_KEENDNS_PROTECTED,
+                label="KeenDNS protected web app",
+            ),
+        ],
+        mode=selector.SelectSelectorMode.DROPDOWN,
+    )
 )
 
 
@@ -83,14 +106,81 @@ def _client_options(clients: list[dict[str, Any]]) -> dict[str, str]:
     return dict(sorted(options.items(), key=lambda item: item[1].lower()))
 
 
+def _connection_mode(defaults: dict[str, Any]) -> str:
+    """Return a valid connection mode for config data."""
+    mode = defaults.get(CONF_CONNECTION_MODE, CONNECTION_MODE_DIRECT)
+    if mode == CONNECTION_MODE_KEENDNS_PROTECTED:
+        return CONNECTION_MODE_KEENDNS_PROTECTED
+    return CONNECTION_MODE_DIRECT
+
+
+def _connection_defaults(defaults: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return form defaults adjusted for the selected connection mode."""
+    defaults = dict(defaults or {})
+    mode = _connection_mode(defaults)
+    defaults[CONF_CONNECTION_MODE] = mode
+    if mode == CONNECTION_MODE_KEENDNS_PROTECTED:
+        defaults.setdefault(CONF_PORT, 443)
+        defaults.setdefault(CONF_SSL, True)
+        defaults.setdefault(CONF_USE_CHALLENGE_AUTH, False)
+    else:
+        defaults.setdefault(CONF_PORT, DEFAULT_PORT)
+        defaults.setdefault(CONF_SSL, DEFAULT_SSL)
+    return defaults
+
+
+def _normalize_connection_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a submitted connection form before storing or connecting."""
+    normalized = dict(data)
+    mode = _connection_mode(normalized)
+
+    # The form initially shows direct defaults. If the user switches to
+    # KeenDNS protected mode and leaves those untouched, use the tested
+    # protected-access defaults.
+    port = normalized.get(CONF_PORT, DEFAULT_PORT)
+    ssl = normalized.get(CONF_SSL, DEFAULT_SSL)
+    try:
+        port = int(port)
+    except (TypeError, ValueError) as err:
+        raise KeeneticApiError("Port must be between 1 and 65535") from err
+    if mode == CONNECTION_MODE_KEENDNS_PROTECTED:
+        if port == DEFAULT_PORT:
+            port = 443
+        if bool(ssl) == DEFAULT_SSL:
+            ssl = True
+
+    target = normalize_connection_target(
+        normalized[CONF_HOST],
+        port,
+        bool(ssl),
+    )
+    if mode == CONNECTION_MODE_KEENDNS_PROTECTED and not target.ssl:
+        raise KeeneticApiError(
+            "KeenDNS protected web app mode requires external HTTPS"
+        )
+    normalized[CONF_HOST] = target.host
+    normalized[CONF_PORT] = target.port
+    normalized[CONF_SSL] = target.ssl
+    normalized[CONF_CONNECTION_MODE] = mode
+    if mode == CONNECTION_MODE_KEENDNS_PROTECTED:
+        normalized[CONF_USE_CHALLENGE_AUTH] = bool(
+            normalized.get(CONF_USE_CHALLENGE_AUTH, False)
+        )
+    return normalized
+
+
 def _connection_schema(
     defaults: dict[str, Any] | None = None,
     *,
     validate_port: bool = False,
 ) -> vol.Schema:
     """Build the shared connection schema for setup, reauth and reconfigure."""
-    defaults = defaults or {}
+    defaults = _connection_defaults(defaults)
     fields: dict[Any, Any] = {
+        vol.Optional(
+            CONF_CONNECTION_MODE,
+            default=defaults.get(CONF_CONNECTION_MODE, CONNECTION_MODE_DIRECT),
+        ): _CONNECTION_MODE_SELECTOR,
         vol.Required(CONF_HOST, default=defaults.get(CONF_HOST, "192.168.1.1")): str
     }
     port_validator: Any = int
@@ -236,6 +326,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if self._discovered_host and data.get(CONF_HOST) == "192.168.1.1":
                     data[CONF_HOST] = self._discovered_host
                     _LOGGER.debug("Using discovered host: %s", data[CONF_HOST])
+                data = _normalize_connection_data(data)
                 
                 _LOGGER.debug("Attempting to connect to router at %s:%s", 
                              data[CONF_HOST], data[CONF_PORT])
@@ -379,7 +470,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         entry_data = dict(entry.data)
 
         if user_input is not None:
-            new_data = {**entry_data, **user_input}
+            new_data = _normalize_connection_data({**entry_data, **user_input})
             errors = await self._async_validate_and_update(entry, new_data, "reconfigure") or {}
             if not errors:
                 return self.async_abort(reason="reconfigure_successful")

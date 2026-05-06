@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Optional, Dict, List
+from urllib.parse import urlparse
 from homeassistant.exceptions import HomeAssistantError
 
 import aiohttp
@@ -43,6 +45,64 @@ class KeeneticApiError(Exception):
 
 class KeeneticAuthError(KeeneticApiError):
     """Authentication failed."""
+
+
+@dataclass(frozen=True)
+class KeeneticConnectionTarget:
+    """Normalized Keenetic HTTP target."""
+
+    host: str
+    port: int
+    ssl: bool
+
+    @property
+    def base_url(self) -> str:
+        """Return the normalized base URL for API requests."""
+        scheme = "https" if self.ssl else "http"
+        return f"{scheme}://{self.host}:{self.port}"
+
+
+def normalize_connection_target(host: str, port: int, ssl: bool) -> KeeneticConnectionTarget:
+    """Normalize host/port/SSL input from config flows and existing entries.
+
+    ``host`` may be a bare host name/IP or a full URL with an optional port.
+    Paths, query strings and fragments are rejected because the integration
+    appends its own ``/rci/...`` paths.
+    """
+    raw_host = str(host or "").strip()
+    if not raw_host:
+        raise KeeneticApiError("Host is required")
+
+    parsed = urlparse(raw_host if "://" in raw_host else f"//{raw_host}")
+    if parsed.scheme and parsed.scheme not in ("http", "https"):
+        raise KeeneticApiError(f"Unsupported URL scheme: {parsed.scheme}")
+    if parsed.path not in ("", "/") or parsed.params or parsed.query or parsed.fragment:
+        raise KeeneticApiError("Host must not include a path, query string or fragment")
+
+    normalized_host = parsed.hostname or raw_host
+    normalized_host = normalized_host.strip()
+    if not normalized_host:
+        raise KeeneticApiError("Host is required")
+    if any(ch.isspace() for ch in normalized_host):
+        raise KeeneticApiError("Host must not contain whitespace")
+
+    normalized_ssl = parsed.scheme == "https" if parsed.scheme else bool(ssl)
+    try:
+        url_port = parsed.port
+    except ValueError as err:
+        raise KeeneticApiError("Port must be between 1 and 65535") from err
+    try:
+        normalized_port = url_port if url_port is not None else int(port)
+    except (TypeError, ValueError) as err:
+        raise KeeneticApiError("Port must be between 1 and 65535") from err
+    if not 1 <= normalized_port <= 65535:
+        raise KeeneticApiError("Port must be between 1 and 65535")
+
+    return KeeneticConnectionTarget(
+        host=normalized_host,
+        port=normalized_port,
+        ssl=normalized_ssl,
+    )
 
 
 def _validate_cli_arg(value: str, label: str) -> str:
@@ -94,16 +154,17 @@ class KeeneticClient:
         request_timeout: int = 15,
         use_challenge_auth: bool = False,
     ) -> None:
-        self._host = host
+        target = normalize_connection_target(host, port, ssl)
+
+        self._host = target.host
         self._username = username
         self._password = password
-        self._port = port
-        self._ssl = ssl
+        self._port = target.port
+        self._ssl = target.ssl
         self._request_timeout = request_timeout
         self._use_challenge_auth = use_challenge_auth
 
-        scheme = "https" if ssl else "http"
-        self._base = f"{scheme}://{host}:{port}"
+        self._base = target.base_url
 
         self._session: Optional[aiohttp.ClientSession] = None
         self._auth_header: Optional[Dict[str, str]] = None
@@ -383,6 +444,13 @@ class KeeneticClient:
 
         if resp.status >= 400:
             text = await resp.text()
+            if resp.status == 502:
+                raise KeeneticApiError(
+                    "HTTP error 502 for "
+                    f"{path}: KeenDNS protected web app was reached, but its "
+                    "internal published application/upstream is unavailable or "
+                    f"misconfigured: {_response_summary(text)}"
+                )
             raise KeeneticApiError(
                 f"HTTP error {resp.status} for {path}: {_response_summary(text)}"
             )
@@ -1763,16 +1831,15 @@ class KeeneticClient:
             }
         """
         try:
-            data = await self._rci_get("show/crypto/map") or {}
+            data = await self._rci_get("show/crypto/map")
         except Exception as err:
-            # Endpoint may not exist on older firmwares or on routers
-            # without the IPsec component installed. Debug-log and
-            # return empty — the coordinator's _ok helper will keep
-            # this out of the warning aggregation.
             _LOGGER.debug("show/crypto/map unavailable: %s", err)
             return {}
 
+        if not isinstance(data, dict):
+            return {}
         raw_maps = data.get("crypto_map") or {}
+
         if not isinstance(raw_maps, dict):
             return {}
 
@@ -1855,6 +1922,8 @@ class KeeneticClient:
 
             state = _clean_str(status.get("state"))
             connected = state == "PHASE2_ESTABLISHED"
+            local_endpoint = _clean_addr(status.get("local-endpoint-address"))
+            remote_endpoint = _clean_addr(status.get("remote-endpoint-address"))
 
             result[name] = {
                 "name": name,
@@ -1868,12 +1937,8 @@ class KeeneticClient:
                 "ike_state": ike_state,
                 "connected": connected,
                 "via": _clean_str(status.get("via")),
-                "local_endpoint": _clean_addr(
-                    status.get("local-endpoint-address")
-                ),
-                "remote_endpoint": _clean_addr(
-                    status.get("remote-endpoint-address")
-                ),
+                "local_endpoint": local_endpoint,
+                "remote_endpoint": remote_endpoint,
                 "rx_bytes": rx_bytes,
                 "tx_bytes": tx_bytes,
                 "rx_packets": rx_packets,

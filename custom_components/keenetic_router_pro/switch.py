@@ -11,6 +11,76 @@ from .coordinator import KeeneticCoordinator
 from .entity import ControllerEntity, CryptoMapEntity, InterfaceEntity, WanEntity
 
 
+def _add_wan_enabled_switches(
+    entities: list[SwitchEntity],
+    coordinator: KeeneticCoordinator,
+    entry: ConfigEntry,
+    client: KeeneticClient,
+    known_wan_ids: set[str],
+) -> None:
+    """Append switches for newly discovered WAN interfaces."""
+    for wan in coordinator.data.get("wan_interfaces", []) or []:
+        wan_id = wan.get("id")
+        if not wan_id or wan_id in known_wan_ids:
+            continue
+        known_wan_ids.add(wan_id)
+        entities.append(
+            KeeneticWanEnabledSwitch(
+                coordinator=coordinator,
+                entry=entry,
+                client=client,
+                wan_id=wan_id,
+            )
+        )
+
+
+def _add_vpn_enabled_switches(
+    entities: list[SwitchEntity],
+    coordinator: KeeneticCoordinator,
+    entry: ConfigEntry,
+    client: KeeneticClient,
+    known_wan_ids: set[str],
+    known_vpn_ids: set[str],
+) -> None:
+    """Append switches for VPN interfaces that are not already WAN devices."""
+    profiles = coordinator.data.get("vpn_tunnels", {}).get("profiles", {}) or {}
+    for iface_id, profile in profiles.items():
+        if not iface_id or iface_id in known_wan_ids or iface_id in known_vpn_ids:
+            continue
+        known_vpn_ids.add(iface_id)
+        entities.append(
+            KeeneticVpnSwitch(
+                coordinator=coordinator,
+                entry=entry,
+                client=client,
+                iface_id=iface_id,
+                profile=profile,
+            )
+        )
+
+
+def _add_crypto_map_enabled_switches(
+    entities: list[SwitchEntity],
+    coordinator: KeeneticCoordinator,
+    entry: ConfigEntry,
+    client: KeeneticClient,
+    known_cmap_names: set[str],
+) -> None:
+    """Append switches for newly discovered site-to-site IPsec crypto maps."""
+    for cmap_name in (coordinator.data.get("crypto_maps") or {}).keys():
+        if cmap_name in known_cmap_names:
+            continue
+        known_cmap_names.add(cmap_name)
+        entities.append(
+            KeeneticCryptoMapEnabledSwitch(
+                coordinator=coordinator,
+                entry=entry,
+                client=client,
+                cmap_name=cmap_name,
+            )
+        )
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -41,54 +111,29 @@ async def async_setup_entry(
         )
 
     known_wan_ids: set[str] = set()
-    for wan in coordinator.data.get("wan_interfaces", []) or []:
-        wan_id = wan.get("id")
-        if not wan_id or wan_id in known_wan_ids:
-            continue
-        known_wan_ids.add(wan_id)
-        entities.append(
-            KeeneticWanEnabledSwitch(
-                coordinator=coordinator,
-                entry=entry,
-                client=client,
-                wan_id=wan_id,
-            )
-        )
+    _add_wan_enabled_switches(entities, coordinator, entry, client, known_wan_ids)
 
     known_vpn_ids: set[str] = set()
-    vpn_profiles = coordinator.data.get("vpn_tunnels", {}).get("profiles", {}) or {}
-    for iface_id, profile in vpn_profiles.items():
-        if iface_id in known_wan_ids:
-            continue
-        if iface_id in known_vpn_ids:
-            continue
-        known_vpn_ids.add(iface_id)
-        entities.append(
-            KeeneticVpnSwitch(
-                coordinator=coordinator,
-                entry=entry,
-                client=client,
-                iface_id=iface_id,
-                profile=profile,
-            )
-        )
+    _add_vpn_enabled_switches(
+        entities,
+        coordinator,
+        entry,
+        client,
+        known_wan_ids,
+        known_vpn_ids,
+    )
 
     # Per-crypto-map "Enabled" switch. Site-to-site IPsec tunnels
     # have their own enable/disable knob that is distinct from any
     # interface up/down, so they need a dedicated switch class.
     known_cmap_names: set[str] = set()
-    for cmap_name in (coordinator.data.get("crypto_maps") or {}).keys():
-        if cmap_name in known_cmap_names:
-            continue
-        known_cmap_names.add(cmap_name)
-        entities.append(
-            KeeneticCryptoMapEnabledSwitch(
-                coordinator=coordinator,
-                entry=entry,
-                client=client,
-                cmap_name=cmap_name,
-            )
-        )
+    _add_crypto_map_enabled_switches(
+        entities,
+        coordinator,
+        entry,
+        client,
+        known_cmap_names,
+    )
 
     if entities:
         async_add_entities(entities)
@@ -98,47 +143,28 @@ async def async_setup_entry(
     @callback
     def _async_add_new_interface_switches() -> None:
         new_entities: list[SwitchEntity] = []
-        for wan in coordinator.data.get("wan_interfaces", []) or []:
-            wan_id = wan.get("id")
-            if not wan_id or wan_id in known_wan_ids:
-                continue
-            known_wan_ids.add(wan_id)
-            new_entities.append(
-                KeeneticWanEnabledSwitch(
-                    coordinator=coordinator,
-                    entry=entry,
-                    client=client,
-                    wan_id=wan_id,
-                )
-            )
-        profiles = coordinator.data.get("vpn_tunnels", {}).get("profiles", {}) or {}
-        for iface_id, profile in profiles.items():
-            if iface_id in known_wan_ids:
-                continue
-            if not iface_id or iface_id in known_vpn_ids:
-                continue
-            known_vpn_ids.add(iface_id)
-            new_entities.append(
-                KeeneticVpnSwitch(
-                    coordinator=coordinator,
-                    entry=entry,
-                    client=client,
-                    iface_id=iface_id,
-                    profile=profile,
-                )
-            )
-        for cmap_name in (coordinator.data.get("crypto_maps") or {}).keys():
-            if cmap_name in known_cmap_names:
-                continue
-            known_cmap_names.add(cmap_name)
-            new_entities.append(
-                KeeneticCryptoMapEnabledSwitch(
-                    coordinator=coordinator,
-                    entry=entry,
-                    client=client,
-                    cmap_name=cmap_name,
-                )
-            )
+        _add_wan_enabled_switches(
+            new_entities,
+            coordinator,
+            entry,
+            client,
+            known_wan_ids,
+        )
+        _add_vpn_enabled_switches(
+            new_entities,
+            coordinator,
+            entry,
+            client,
+            known_wan_ids,
+            known_vpn_ids,
+        )
+        _add_crypto_map_enabled_switches(
+            new_entities,
+            coordinator,
+            entry,
+            client,
+            known_cmap_names,
+        )
         if new_entities:
             async_add_entities(new_entities)
 

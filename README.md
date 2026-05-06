@@ -1,7 +1,7 @@
 # Keenetic Router Pro
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![Version](https://img.shields.io/badge/version-1.6.3-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
+[![Version](https://img.shields.io/badge/version-1.6.4-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
 
 Home Assistant custom integration for Keenetic routers. It focuses on local polling, router diagnostics, mesh monitoring, presence tracking, WAN status, traffic counters, firmware updates, and selected client controls.
 
@@ -85,6 +85,7 @@ Required fields:
 
 | Field | Description | Example |
 | --- | --- | --- |
+| Connection mode | Direct/local API or KeenDNS protected web app | `Direct / local` |
 | Host | Router IP address or host name | `192.168.1.1` |
 | Port | Router web/API port | `100` |
 | Username | Router admin username | `admin` |
@@ -93,6 +94,43 @@ Required fields:
 | Use Challenge Auth | Enable NDW2 challenge auth for newer models | `off` |
 
 Use **Challenge Auth** for models/firmware that reject Basic Auth, such as newer Keenetic Hero devices. Older devices usually keep it disabled.
+
+### KeenDNS protected web app
+
+The integration can also connect through a KeenDNS **Password protected** web
+application. This is useful when Home Assistant cannot reach the router over
+LAN/VPN, but the router is published through a protected KeenDNS hostname.
+
+Tested working shape:
+
+```text
+Home Assistant -> https://<app>.<domain>.keenetic.pro/rci/...
+KeenDNS protected app -> This Keenetic device, internal HTTP app port
+```
+
+Use these Home Assistant settings:
+
+| Field | Value |
+| --- | --- |
+| Connection mode | `KeenDNS protected web app` |
+| Host | The protected app hostname, e.g. `rsi.example.keenetic.pro` |
+| Port | `443` |
+| SSL | `on` |
+| Use Challenge Auth | `off` |
+
+On the router, publish the app as:
+
+- Client: `This Keenetic device`
+- Internal app protocol: `HTTP`
+- Internal app port: the working RCI/web app port for this publication
+- External access: HTTPS KeenDNS hostname
+- User permission: `HTTP Proxy`
+
+Live testing showed that a user with only `HTTP Proxy` permission could access
+`/rci/show/...`, `/rci/parse`, and management commands through the protected
+app. Treat that account like a management credential. Use a dedicated random
+password and rotate it after sharing verbose curl logs, because Basic Auth
+headers in logs can be decoded.
 
 ## Polling
 
@@ -109,6 +147,8 @@ Slow and very slow data is cached between refreshes to reduce router load.
 - Prefer LAN-only access.
 - If you expose a custom management port, restrict it with firewall rules to the Home Assistant IP.
 - Do not expose router management to WAN without strict firewall rules.
+- For KeenDNS protected web-app access, use external HTTPS only. Plain HTTP
+  sends Basic Auth credentials without transport encryption.
 
 ### Credential handling
 

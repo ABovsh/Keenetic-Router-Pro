@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 
 import pytest
@@ -12,6 +13,7 @@ from custom_components.keenetic_router_pro.api import (
     _payload_summary,
     _response_summary,
     _validate_cli_arg,
+    normalize_connection_target,
 )
 
 
@@ -44,6 +46,75 @@ def test_basic_auth_headers_are_generated_without_mutating_state() -> None:
     expected = base64.b64encode(b"admin:secret").decode()
     assert headers == {"Authorization": f"Basic {expected}"}
     assert client._auth_header is None
+
+
+def test_connection_target_preserves_direct_defaults() -> None:
+    """Bare direct hosts keep the configured port and scheme."""
+    target = normalize_connection_target("192.0.2.1", 100, False)
+
+    assert target.host == "192.0.2.1"
+    assert target.port == 100
+    assert target.ssl is False
+    assert target.base_url == "http://192.0.2.1:100"
+
+
+def test_connection_target_normalizes_keendns_url() -> None:
+    """Full HTTPS URLs are accepted for KeenDNS protected web apps."""
+    target = normalize_connection_target(
+        "https://rsi.example.keenetic.pro",
+        443,
+        True,
+    )
+
+    assert target.host == "rsi.example.keenetic.pro"
+    assert target.port == 443
+    assert target.ssl is True
+    assert target.base_url == "https://rsi.example.keenetic.pro:443"
+
+
+def test_connection_target_uses_url_port_and_scheme() -> None:
+    """URL port and scheme override the separately supplied defaults."""
+    target = normalize_connection_target(
+        "https://rsi.example.keenetic.pro:8443",
+        100,
+        False,
+    )
+
+    assert target.host == "rsi.example.keenetic.pro"
+    assert target.port == 8443
+    assert target.ssl is True
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "",
+        "https://rsi.example.keenetic.pro/rci/show/version",
+        "https://rsi.example.keenetic.pro?x=1",
+        "ftp://rsi.example.keenetic.pro",
+        "bad host",
+        "https://rsi.example.keenetic.pro:99999",
+    ],
+)
+def test_connection_target_rejects_invalid_hosts(raw: str) -> None:
+    """Unsafe or ambiguous connection targets fail before requests are made."""
+    with pytest.raises(KeeneticApiError):
+        normalize_connection_target(raw, 443, True)
+
+
+def test_502_response_mentions_keendns_upstream() -> None:
+    """Bad Gateway errors point users at protected web-app upstream setup."""
+
+    class FakeResponse:
+        status = 502
+
+        async def text(self) -> str:
+            return "<html><h1>502 Bad Gateway</h1></html>"
+
+    client = KeeneticClient("rsi.example.keenetic.pro", "admin", "secret", 443, True)
+
+    with pytest.raises(KeeneticApiError, match="internal published application"):
+        asyncio.run(client._handle_response(FakeResponse(), "/rci/show/version"))
 
 
 def test_response_summary_redacts_obvious_secrets() -> None:

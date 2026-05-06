@@ -3,8 +3,9 @@
     "step": {
       "user": {
         "title": "Keenetic Router Pro",
-        "description": "Enter your Keenetic router credentials",
+        "description": "Enter your Keenetic router credentials. For KeenDNS protected web-app access, use the protected app hostname and HTTPS port 443.",
         "data": {
+          "connection_mode": "Connection mode",
           "host": "Host",
           "port": "Port",
           "username": "Username",
@@ -31,8 +32,9 @@
       },
       "reconfigure": {
         "title": "Reconfigure Keenetic Router Pro",
-        "description": "Update the connection settings for your Keenetic router.",
+        "description": "Update the connection settings for your Keenetic router. Direct/local mode uses the normal router API address. KeenDNS protected mode uses the password-protected web-app hostname.",
         "data": {
+          "connection_mode": "Connection mode",
           "host": "Host",
           "port": "Port",
           "username": "Username",

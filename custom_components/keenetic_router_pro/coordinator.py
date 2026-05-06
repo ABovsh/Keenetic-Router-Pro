@@ -32,6 +32,38 @@ _VERSION_CACHE_KEYS = (
     "bsp",
 )
 
+
+def _to_int(value: Any) -> int:
+    """Best-effort integer coercion for loosely typed Keenetic RCI values."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _first_stat_int(stats: dict[str, Any], *keys: str) -> int:
+    """Return the first non-empty integer stat from several firmware key names."""
+    for key in keys:
+        value = stats.get(key)
+        if value not in (None, ""):
+            return _to_int(value)
+    return 0
+
+
+def _counter_rate_bytes_per_second(
+    current: int,
+    previous: Any,
+    elapsed_seconds: float,
+) -> float:
+    """Calculate a monotonic byte-counter rate, clamping resets to zero."""
+    if elapsed_seconds <= 0:
+        return 0.0
+    delta = current - _to_int(previous)
+    if delta < 0:
+        return 0.0
+    return max(0.0, delta / elapsed_seconds)
+
+
 # ICMP ping via icmplib (mirrors the Home Assistant Ping integration).
 try:
     from icmplib import async_ping, SocketPermissionError
@@ -266,42 +298,44 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     prev_wan_by_id[pid] = prev
         now_ts = asyncio.get_running_loop().time()
  
-        def _to_int(v: Any) -> int:
-            try:
-                return int(v)
-            except (TypeError, ValueError):
-                return 0
- 
         for wan in wan_interfaces:
             wan_id = wan.get("id")
             stats = (interface_stats or {}).get(wan_id) or {}
-            rx_bytes = _to_int(
-                stats.get("rxbytes")
-                or stats.get("rx-bytes")
-                or stats.get("rx_bytes")
+            rx_bytes = _first_stat_int(
+                stats,
+                "rxbytes",
+                "rx-bytes",
+                "rx_bytes",
             )
-            tx_bytes = _to_int(
-                stats.get("txbytes")
-                or stats.get("tx-bytes")
-                or stats.get("tx_bytes")
+            tx_bytes = _first_stat_int(
+                stats,
+                "txbytes",
+                "tx-bytes",
+                "tx_bytes",
             )
             wan["rx_bytes"] = rx_bytes
             wan["tx_bytes"] = tx_bytes
-            wan["rx_packets"] = _to_int(
-                stats.get("rxpackets") or stats.get("rx-packets")
+            wan["rx_packets"] = _first_stat_int(
+                stats,
+                "rxpackets",
+                "rx-packets",
             )
-            wan["tx_packets"] = _to_int(
-                stats.get("txpackets") or stats.get("tx-packets")
+            wan["tx_packets"] = _first_stat_int(
+                stats,
+                "txpackets",
+                "tx-packets",
             )
-            wan["rx_speed_raw"] = _to_int(
-                stats.get("rxspeed")
-                or stats.get("rx-speed")
-                or stats.get("rx_rate")
+            wan["rx_speed_raw"] = _first_stat_int(
+                stats,
+                "rxspeed",
+                "rx-speed",
+                "rx_rate",
             )
-            wan["tx_speed_raw"] = _to_int(
-                stats.get("txspeed")
-                or stats.get("tx-speed")
-                or stats.get("tx_rate")
+            wan["tx_speed_raw"] = _first_stat_int(
+                stats,
+                "txspeed",
+                "tx-speed",
+                "tx_rate",
             )
             wan["stats_interface"] = stats.get("interface_name") or wan_id
             wan["stats_timestamp"] = stats.get("timestamp")
@@ -331,15 +365,16 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             prev = prev_wan_by_id.get(wan_id)
             if prev and prev.get("_sample_ts"):
                 dt = now_ts - float(prev.get("_sample_ts") or 0)
-                if dt > 0:
-                    d_rx = rx_bytes - _to_int(prev.get("rx_bytes"))
-                    d_tx = tx_bytes - _to_int(prev.get("tx_bytes"))
-                    # Counter wraps / resets (interface bounced): treat as 0.
-                    wan["rx_throughput"] = max(0.0, d_rx / dt) if d_rx >= 0 else 0.0
-                    wan["tx_throughput"] = max(0.0, d_tx / dt) if d_tx >= 0 else 0.0
-                else:
-                    wan["rx_throughput"] = 0.0
-                    wan["tx_throughput"] = 0.0
+                wan["rx_throughput"] = _counter_rate_bytes_per_second(
+                    rx_bytes,
+                    prev.get("rx_bytes"),
+                    dt,
+                )
+                wan["tx_throughput"] = _counter_rate_bytes_per_second(
+                    tx_bytes,
+                    prev.get("tx_bytes"),
+                    dt,
+                )
             else:
                 wan["rx_throughput"] = 0.0
                 wan["tx_throughput"] = 0.0
@@ -361,18 +396,16 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             prev_cmap = prev_cmap_by_name.get(cmap_name)
             if prev_cmap and prev_cmap.get("_sample_ts"):
                 dt = now_ts - float(prev_cmap.get("_sample_ts") or 0)
-                if dt > 0:
-                    d_rx = cmap["rx_bytes"] - _to_int(prev_cmap.get("rx_bytes"))
-                    d_tx = cmap["tx_bytes"] - _to_int(prev_cmap.get("tx_bytes"))
-                    cmap["rx_throughput"] = (
-                        max(0.0, d_rx / dt) if d_rx >= 0 else 0.0
-                    )
-                    cmap["tx_throughput"] = (
-                        max(0.0, d_tx / dt) if d_tx >= 0 else 0.0
-                    )
-                else:
-                    cmap["rx_throughput"] = 0.0
-                    cmap["tx_throughput"] = 0.0
+                cmap["rx_throughput"] = _counter_rate_bytes_per_second(
+                    cmap["rx_bytes"],
+                    prev_cmap.get("rx_bytes"),
+                    dt,
+                )
+                cmap["tx_throughput"] = _counter_rate_bytes_per_second(
+                    cmap["tx_bytes"],
+                    prev_cmap.get("tx_bytes"),
+                    dt,
+                )
             else:
                 cmap["rx_throughput"] = 0.0
                 cmap["tx_throughput"] = 0.0

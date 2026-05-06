@@ -79,6 +79,16 @@ class KeeneticCryptoMapStateSensor(_CryptoMapSensorBase):
             return None
         return cmap.get("state")
 
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        cmap = self._cmap
+        if cmap is None:
+            return None
+        return {
+            "local_endpoint": cmap.get("local_endpoint"),
+            "remote_endpoint": cmap.get("remote_endpoint"),
+        }
+
 
 class KeeneticCryptoMapIkeStateSensor(_CryptoMapSensorBase):
     """Phase-1 / IKE state.

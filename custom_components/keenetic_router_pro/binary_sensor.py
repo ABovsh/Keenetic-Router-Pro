@@ -512,4 +512,8 @@ class KeeneticCryptoMapConnectedSensor(CryptoMapEntity, BinarySensorEntity):
             "ike_state": cmap.get("ike_state"),
             "via": cmap.get("via"),
             "remote_peer": cmap.get("remote_peer"),
+            "local_endpoint": cmap.get("local_endpoint"),
+            "remote_endpoint": cmap.get("remote_endpoint"),
+            "rx_bytes": cmap.get("rx_bytes"),
+            "tx_bytes": cmap.get("tx_bytes"),
         }
