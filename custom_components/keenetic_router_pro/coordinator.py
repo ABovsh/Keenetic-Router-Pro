@@ -174,6 +174,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ping_check_status,
             crypto_maps,
             dns_proxy,
+            ipsec_diagnostics,
         ) = await asyncio.gather(
             _bounded(self.client.async_get_system_info()),
             _bounded(self.client.async_get_current_version_info()) if slow_refresh else _resolve(_cached_version),
@@ -184,8 +185,9 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _bounded(self.client.async_get_host_policies()) if slow_refresh else _resolve(_prev.get("host_policies", {})),
             _bounded(self.client.async_get_ndns_info()) if very_slow_refresh else _resolve(_prev.get("ndns", {})),
             _bounded(self.client.async_get_ping_check_status()),
-            _bounded(self.client.async_get_crypto_maps()) if slow_refresh else _resolve(_prev.get("crypto_maps", {})),
+            _bounded(self.client.async_get_crypto_maps()) if very_slow_refresh else _resolve(_prev.get("crypto_maps", {})),
             _bounded(self.client.async_get_dns_proxy_status()) if very_slow_refresh else _resolve(_prev.get("dns_proxy", {})),
+            _bounded(self.client.async_get_ipsec_diagnostics()) if very_slow_refresh else _resolve(_prev.get("ipsec_diagnostics", {})),
             return_exceptions=True,
         )
  
@@ -208,6 +210,12 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # DNS proxy is diagnostic-only and intentionally slow-cadence;
         # routers without the endpoint should not warn every refresh.
         dns_proxy = _ok("dns_proxy", dns_proxy, {}, silent=True)
+        # IPsec diagnostics read recent router log lines on the same
+        # very-slow cadence as DNS diagnostics. Missing log access is
+        # non-critical and should not affect normal polling.
+        ipsec_diagnostics = _ok(
+            "ipsec_diagnostics", ipsec_diagnostics, {}, silent=True
+        )
 
         # Fail-fast on critical fetches. If the router is unreachable,
         # auth has expired, or the RCI surface is down, ``system_info``
@@ -475,6 +483,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "port_info": port_info,
             "crypto_maps": crypto_maps,
             "dns_proxy": dns_proxy,
+            "ipsec_diagnostics": ipsec_diagnostics,
             "new_clients": new_macs,
         }
 

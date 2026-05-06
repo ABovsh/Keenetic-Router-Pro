@@ -37,6 +37,10 @@ _DNS_PROXY_STAT_RE = re.compile(
     r"(?P<average>\d+)ms\s+"
     r"(?P<rank>\d+)\s*$"
 )
+_IPSEC_VICI_OOM_RE = re.compile(
+    r"IpSec::Vici::Stats:\s+out of memory(?:\s+\[(?P<code>[^\]]+)\])?",
+    re.IGNORECASE,
+)
 
 
 class KeeneticApiError(Exception):
@@ -1773,6 +1777,55 @@ class KeeneticClient:
             }
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("Error getting DNS proxy status: %s", err)
+            return {}
+
+    @staticmethod
+    def _extract_parse_messages(data: Any) -> List[str]:
+        """Return textual lines from a `/rci/parse` response."""
+        if isinstance(data, dict):
+            messages = data.get("message")
+            if isinstance(messages, list):
+                return [str(line) for line in messages]
+            if isinstance(messages, str):
+                return messages.splitlines()
+        if isinstance(data, str):
+            return data.splitlines()
+        if isinstance(data, list):
+            return [str(line) for line in data]
+        return []
+
+    @classmethod
+    def _parse_ipsec_vici_diagnostics(cls, lines: List[str]) -> Dict[str, Any]:
+        """Summarize recent IPsec VICI memory errors from router log lines."""
+        matches: List[Dict[str, Any]] = []
+        for line in lines:
+            match = _IPSEC_VICI_OOM_RE.search(line)
+            if not match:
+                continue
+            matches.append({
+                "line": line.strip(),
+                "code": match.group("code"),
+            })
+
+        last_match = matches[-1] if matches else None
+        return {
+            "status": "warning" if matches else "ok",
+            "vici_out_of_memory_count": len(matches),
+            "last_vici_out_of_memory": last_match.get("line") if last_match else None,
+            "last_error_code": last_match.get("code") if last_match else None,
+            "scanned_log_lines": len(lines),
+        }
+
+    async def async_get_ipsec_diagnostics(self) -> Dict[str, Any]:
+        """Return low-cadence diagnostics for IPsec/VICI router log errors."""
+        try:
+            data = await self._rci_parse("show log 200 once")
+            lines = self._extract_parse_messages(data)
+            diag = self._parse_ipsec_vici_diagnostics(lines)
+            diag["command"] = "show log 200 once"
+            return diag
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Error getting IPsec diagnostics: %s", err)
             return {}
 
     async def async_get_crypto_maps(self) -> Dict[str, Dict[str, Any]]:

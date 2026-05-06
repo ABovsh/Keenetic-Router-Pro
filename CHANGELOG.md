@@ -8,6 +8,18 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.6.5 - IPsec VICI diagnostics
+
+### Improvements
+
+- **Added IPsec VICI diagnostic sensors.** The integration now summarizes
+  recent `IpSec::Vici::Stats: out of memory` router log entries so these
+  firmware/IPsec-stat issues are visible in Home Assistant without manually
+  scraping logs.
+- **Reduced IPsec crypto-map polling pressure.** Site-to-site IPsec tunnel
+  data now uses the very-slow coordinator cadence, matching other diagnostic
+  endpoints and avoiding unnecessary hits to Keenetic's IPsec statistics path.
+
 ## 1.6.4 - KeenDNS protected web app access
 
 ### Improvements

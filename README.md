@@ -1,7 +1,7 @@
 # Keenetic Router Pro
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![Version](https://img.shields.io/badge/version-1.6.4-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
+[![Version](https://img.shields.io/badge/version-1.6.5-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
 
 Home Assistant custom integration for Keenetic routers. It focuses on local polling, router diagnostics, mesh monitoring, presence tracking, WAN status, traffic counters, firmware updates, and selected client controls.
 
@@ -15,7 +15,7 @@ A maintained, hardened fork of the original Keenetic Router Pro integration. It 
 
 **Mesh nodes could lock up until HA restarted.** Auth headers for each mesh node were cached but never cleared on a 401 response. A credential rotation or a node session reset left the coordinator permanently locked out with a stale token. The cache is now evicted on 401 so the next poll re-authenticates automatically.
 
-**Throughput displayed in bytes instead of bits.** The upstream reported WAN and IPsec throughput in B/s. All networking equipment and ISP plans use Mbit/s. Sensors now report in bits/s and HA offers automatic unit conversion to kbit/s or Gbit/s from the entity settings — no dashboard template tricks needed.
+**Throughput displayed in bits instead of bytes.** The upstream reported WAN and IPsec throughput in B/s. All networking equipment and ISP plans use Mbit/s. Sensors now report in bits/s and HA offers automatic unit conversion to kbit/s or Gbit/s from the entity settings — no dashboard template tricks needed.
 
 **VLAN WAN throughput could stay at zero.** Some Keenetic WANs are VLAN
 interfaces such as `GigabitEthernet0/Vlan5`. Those interfaces were skipped by
@@ -59,6 +59,8 @@ works for them.
 - Wi-Fi, VPN, and client policy controls where supported by the router firmware.
 - Firmware update entities for the controller and mesh nodes.
 - WireGuard and IPsec diagnostic sensors.
+- IPsec VICI diagnostics for recent `IpSec::Vici::Stats: out of memory`
+  router log entries.
 - WAN and IPsec throughput shown in Mbit/s with automatic unit conversion (kbit/s ↔ Mbit/s ↔ Gbit/s) in the HA entity UI.
 - WAN interface devices group status, public IP, role, traffic counters,
   throughput and enable/disable control for each uplink.
