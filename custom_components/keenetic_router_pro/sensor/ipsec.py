@@ -53,6 +53,7 @@ class KeeneticIpsecViciStatusSensor(ControllerEntity, SensorEntity):
             "vici_out_of_memory_count": diagnostics.get("vici_out_of_memory_count"),
             "last_vici_out_of_memory": diagnostics.get("last_vici_out_of_memory"),
             "last_error_code": diagnostics.get("last_error_code"),
+            "recent_matches": diagnostics.get("recent_matches"),
             "scanned_log_lines": diagnostics.get("scanned_log_lines"),
             "command": diagnostics.get("command"),
             "poll_interval_seconds": _IPSEC_DIAGNOSTIC_INTERVAL_SECONDS,

@@ -1781,18 +1781,46 @@ class KeeneticClient:
 
     @staticmethod
     def _extract_parse_messages(data: Any) -> List[str]:
-        """Return textual lines from a `/rci/parse` response."""
-        if isinstance(data, dict):
-            messages = data.get("message")
-            if isinstance(messages, list):
-                return [str(line) for line in messages]
-            if isinstance(messages, str):
-                return messages.splitlines()
-        if isinstance(data, str):
-            return data.splitlines()
-        if isinstance(data, list):
-            return [str(line) for line in data]
-        return []
+        """Return textual log/message lines from a Keenetic response.
+
+        `show log ...` has used a few response shapes across firmware
+        versions: plain text, `message: [...]`, and structured rows with
+        `message`, `text`, `time` or `level` fields. Walk the payload so
+        diagnostics don't silently report OK just because the shape changed.
+        """
+        lines: List[str] = []
+
+        def _walk(value: Any) -> None:
+            if value is None:
+                return
+            if isinstance(value, str):
+                lines.extend(line for line in value.splitlines() if line)
+                return
+            if isinstance(value, list):
+                for item in value:
+                    _walk(item)
+                return
+            if isinstance(value, dict):
+                for key in ("message", "text", "line", "event"):
+                    if key in value:
+                        _walk(value.get(key))
+                        return
+                parts = [
+                    str(value[key])
+                    for key in ("level", "time", "module", "ident", "service")
+                    if value.get(key) not in (None, "")
+                ]
+                msg = value.get("msg") or value.get("description")
+                if msg:
+                    parts.append(str(msg))
+                if parts:
+                    lines.append(" ".join(parts))
+                    return
+                for nested in value.values():
+                    _walk(nested)
+
+        _walk(data)
+        return lines
 
     @classmethod
     def _parse_ipsec_vici_diagnostics(cls, lines: List[str]) -> Dict[str, Any]:
@@ -1813,6 +1841,7 @@ class KeeneticClient:
             "vici_out_of_memory_count": len(matches),
             "last_vici_out_of_memory": last_match.get("line") if last_match else None,
             "last_error_code": last_match.get("code") if last_match else None,
+            "recent_matches": [match["line"] for match in matches[-5:]],
             "scanned_log_lines": len(lines),
         }
 

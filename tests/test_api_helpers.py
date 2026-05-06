@@ -170,7 +170,40 @@ def test_parse_ipsec_vici_diagnostics_counts_recent_memory_errors() -> None:
     assert summary["status"] == "warning"
     assert summary["vici_out_of_memory_count"] == 2
     assert summary["last_error_code"] == "0xcffe02a7"
+    assert summary["recent_matches"] == [
+        "May 6 23:04:13 ndm IpSec::Vici::Stats: out of memory [0xcffe02a7].",
+        "May 6 23:05:12 ndm IpSec::Vici::Stats: out of memory [0xcffe02a7].",
+    ]
     assert summary["scanned_log_lines"] == 3
+
+
+def test_extract_parse_messages_handles_structured_log_payloads() -> None:
+    """Structured show-log payloads are flattened into searchable lines."""
+    payload = {
+        "log": [
+            {
+                "level": "C",
+                "time": "May 7 00:12:18",
+                "module": "ndm",
+                "message": "IpSec::Vici::Stats: out of memory [0xcffe02a7].",
+            },
+            {
+                "time": "May 7 00:13:32",
+                "service": "ndhcpc",
+                "msg": "GigabitEthernet0/Vlan5: received ACK",
+            },
+        ]
+    }
+
+    lines = KeeneticClient._extract_parse_messages(payload)
+
+    assert lines == [
+        "IpSec::Vici::Stats: out of memory [0xcffe02a7].",
+        "May 7 00:13:32 ndhcpc GigabitEthernet0/Vlan5: received ACK",
+    ]
+    summary = KeeneticClient._parse_ipsec_vici_diagnostics(lines)
+    assert summary["status"] == "warning"
+    assert summary["vici_out_of_memory_count"] == 1
 
 
 def test_parse_ipsec_vici_diagnostics_reports_ok_without_errors() -> None:
