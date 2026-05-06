@@ -106,6 +106,56 @@ def _client_options(clients: list[dict[str, Any]]) -> dict[str, str]:
     return dict(sorted(options.items(), key=lambda item: item[1].lower()))
 
 
+def _tracked_client_lookup(
+    available_clients: list[dict[str, str]],
+    tracked_clients: list[Any],
+) -> dict[str, dict[str, str]]:
+    """Return MAC-keyed client records, preserving tracked offline clients."""
+    mac_lookup: dict[str, dict[str, str]] = {
+        client["mac"].lower(): client
+        for client in available_clients
+        if isinstance(client, dict) and client.get("mac")
+    }
+    for client in tracked_clients:
+        if isinstance(client, dict) and client.get("mac"):
+            mac_lookup.setdefault(client["mac"].lower(), client)
+    return mac_lookup
+
+
+def _tracked_clients_from_selection(
+    selected_macs: list[str],
+    mac_lookup: dict[str, dict[str, str]],
+) -> list[dict[str, str]]:
+    """Return config-entry client records for selected MAC addresses."""
+    return [
+        mac_lookup.get(mac.lower(), {"mac": mac.lower(), "ip": "", "name": ""})
+        for mac in selected_macs
+    ]
+
+
+def _client_options_with_offline_tracked(
+    available_clients: list[dict[str, str]],
+    tracked_clients: list[Any],
+) -> dict[str, str]:
+    """Return selection options including previously tracked offline clients."""
+    client_options = _client_options(available_clients)
+    for tracked in tracked_clients:
+        if isinstance(tracked, dict) and tracked.get("mac"):
+            mac = tracked["mac"].lower()
+            if mac not in client_options:
+                client_options[mac] = _client_label(tracked, offline=True)
+    return dict(sorted(client_options.items(), key=lambda item: item[1].lower()))
+
+
+def _normalized_clients(clients: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Return compact tracked-client records from raw router client data."""
+    return [
+        client
+        for client in (_normalize_client(c) for c in clients)
+        if client is not None
+    ]
+
+
 def _connection_mode(defaults: dict[str, Any]) -> str:
     """Return a valid connection mode for config data."""
     mode = defaults.get(CONF_CONNECTION_MODE, CONNECTION_MODE_DIRECT)
@@ -403,11 +453,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     available_clients = await client.async_get_clients()
                     _LOGGER.debug("Found %d clients", len(available_clients) if available_clients else 0)
                     
-                    self._available_clients = [
-                        client
-                        for client in (_normalize_client(c) for c in available_clients)
-                        if client is not None
-                    ]
+                    self._available_clients = _normalized_clients(available_clients)
                     if self._available_clients:
                         return await self.async_step_select_clients()
 
@@ -609,24 +655,11 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
             ping_interval = _clamp_ping_interval(
                 user_input.get(CONF_PING_INTERVAL, DEFAULT_PING_INTERVAL)
             )
-            
-            # Convert selected MAC strings back to dict format
-            # First, build a lookup from available clients + previously tracked
-            mac_lookup: dict[str, dict[str, str]] = {}
-            for c in self._available_clients:
-                if isinstance(c, dict) and c.get("mac"):
-                    mac_lookup[c["mac"].lower()] = c
-            # Also include previously tracked clients (for offline devices)
-            for c in self._config_entry.data.get(CONF_TRACKED_CLIENTS, []):
-                if isinstance(c, dict) and c.get("mac"):
-                    mac_lower = c["mac"].lower()
-                    if mac_lower not in mac_lookup:
-                        mac_lookup[mac_lower] = c
-            
-            tracked_clients = [
-                mac_lookup.get(mac.lower(), {"mac": mac.lower(), "ip": "", "name": ""})
-                for mac in selected_macs
-            ]
+            current_tracked = self._config_entry.data.get(CONF_TRACKED_CLIENTS, [])
+            tracked_clients = _tracked_clients_from_selection(
+                selected_macs,
+                _tracked_client_lookup(self._available_clients, current_tracked),
+            )
             
             # Update configuration
             new_data = dict(self._config_entry.data)
@@ -663,21 +696,11 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
             available_clients = await client.async_get_clients()
             _LOGGER.debug("Found %d clients from router", len(available_clients) if available_clients else 0)
 
-            self._available_clients = [
-                client
-                for client in (_normalize_client(c) for c in available_clients)
-                if client is not None
-            ]
-            client_options = _client_options(self._available_clients)
-            
-            # Add offline clients that were previously tracked
-            for tracked in current_tracked:
-                if isinstance(tracked, dict) and tracked.get("mac"):
-                    mac = tracked["mac"].lower()
-                    if mac not in client_options:
-                        client_options[mac] = _client_label(tracked, offline=True)
-            
-            client_options = dict(sorted(client_options.items(), key=lambda item: item[1].lower()))
+            self._available_clients = _normalized_clients(available_clients)
+            client_options = _client_options_with_offline_tracked(
+                self._available_clients,
+                current_tracked,
+            )
             _LOGGER.debug("Prepared %d client options", len(client_options))
             
         except Exception as err:  # noqa: BLE001

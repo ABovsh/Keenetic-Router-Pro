@@ -10,6 +10,7 @@ from homeassistant.const import UnitOfInformation, UnitOfTime, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
 from ..entity import ControllerEntity
+from ..utils import coerce_seconds
 
 
 class _BaseWgSensor(ControllerEntity, SensorEntity):
@@ -41,6 +42,7 @@ class _BaseWgSensor(ControllerEntity, SensorEntity):
 class KeeneticWgUptimeSensor(_BaseWgSensor):
     """WireGuard tunnel uptime sensor."""
     _attr_has_entity_name = True
+    _attr_suggested_display_precision = 0
 
     @property
     def unique_id(self) -> str:
@@ -57,13 +59,9 @@ class KeeneticWgUptimeSensor(_BaseWgSensor):
     @property
     def native_value(self) -> int:
         for key in ("uptime", "uptime_sec", "uptime_seconds"):
-            value = self._wg.get(key)
-            if value in (None, "", "unknown", "Unknown"):
-                continue
-            try:
-                return int(float(value))
-            except (TypeError, ValueError):
-                continue
+            seconds = coerce_seconds(self._wg.get(key), default=None)
+            if seconds is not None:
+                return seconds
         return 0
 
 

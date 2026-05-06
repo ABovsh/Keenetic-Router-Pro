@@ -10,6 +10,7 @@ from homeassistant.const import PERCENTAGE, UnitOfTime, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
 from ..entity import ControllerEntity, MeshEntity
+from ..utils import coerce_seconds
 
 
 class KeeneticCpuLoadSensor(ControllerEntity, SensorEntity):
@@ -97,6 +98,7 @@ class KeeneticUptimeSensor(ControllerEntity, SensorEntity):
     _attr_icon = "mdi:timer-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -125,12 +127,9 @@ class KeeneticUptimeSensor(ControllerEntity, SensorEntity):
                     candidates.append(nested.get(key))
 
         for value in candidates:
-            if value in (None, "", "unknown", "Unknown"):
-                continue
-            try:
-                return int(float(value))
-            except (TypeError, ValueError):
-                continue
+            seconds = coerce_seconds(value, default=None)
+            if seconds is not None:
+                return seconds
 
         return 0
 

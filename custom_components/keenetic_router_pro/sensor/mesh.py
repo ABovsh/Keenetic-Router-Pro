@@ -10,6 +10,7 @@ from homeassistant.const import UnitOfTime, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
 from ..entity import ControllerEntity, MeshEntity
+from ..utils import coerce_seconds
 
 
 class KeeneticMeshSystemStateSensor(ControllerEntity, SensorEntity):
@@ -112,6 +113,7 @@ class KeeneticMeshUptimeSensor(MeshEntity, SensorEntity):
     _attr_icon = "mdi:timer-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry, node_cid: str) -> None:
         MeshEntity.__init__(self, coordinator, entry.entry_id, entry.title, node_cid)
@@ -128,14 +130,9 @@ class KeeneticMeshUptimeSensor(MeshEntity, SensorEntity):
     @property
     def native_value(self) -> int:
         node = self._node
-        if node:
-            uptime = node.get("uptime")
-            if uptime not in (None, "", "unknown", "Unknown"):
-                try:
-                    return int(float(uptime))
-                except (TypeError, ValueError):
-                    pass
-        return 0
+        if not node:
+            return 0
+        return coerce_seconds(node.get("uptime"), default=0) or 0
 
 
 class KeeneticMeshClientsSensor(MeshEntity, SensorEntity):

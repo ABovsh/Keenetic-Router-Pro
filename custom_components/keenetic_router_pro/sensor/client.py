@@ -6,11 +6,11 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfInformation, UnitOfTime, PERCENTAGE, EntityCategory
+from homeassistant.const import UnitOfInformation, UnitOfTime, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
 from ..entity import ClientEntity
-from ..const import DOMAIN
+from ..utils import coerce_seconds
 
 
 class KeeneticClientIpSensor(ClientEntity, SensorEntity):
@@ -125,6 +125,7 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_suggested_display_precision = 0
 
     def __init__(
         self,
@@ -150,14 +151,9 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
     @property
     def native_value(self) -> int:
         client = self._client
-        if client:
-            uptime = client.get("uptime")
-            if uptime not in (None, "", "unknown", "Unknown"):
-                try:
-                    return int(float(uptime))
-                except (TypeError, ValueError):
-                    pass
-        return 0
+        if not client:
+            return 0
+        return coerce_seconds(client.get("uptime"), default=0) or 0
 
 
 class KeeneticClientFirstSeenSensor(ClientEntity, SensorEntity):
@@ -167,6 +163,7 @@ class KeeneticClientFirstSeenSensor(ClientEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_suggested_display_precision = 0
 
     def __init__(
         self,
@@ -192,14 +189,9 @@ class KeeneticClientFirstSeenSensor(ClientEntity, SensorEntity):
     @property
     def native_value(self) -> int:
         client = self._client
-        if client:
-            first_seen = client.get("first-seen")
-            if first_seen not in (None, "", "unknown", "Unknown"):
-                try:
-                    return int(float(first_seen))
-                except (TypeError, ValueError):
-                    pass
-        return 0
+        if not client:
+            return 0
+        return coerce_seconds(client.get("first-seen"), default=0) or 0
 
 
 class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
@@ -209,6 +201,7 @@ class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_suggested_display_precision = 0
 
     def __init__(
         self,
@@ -234,14 +227,9 @@ class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
     @property
     def native_value(self) -> int:
         client = self._client
-        if client:
-            last_seen = client.get("last-seen")
-            if last_seen not in (None, "", "unknown", "Unknown"):
-                try:
-                    return int(float(last_seen))
-                except (TypeError, ValueError):
-                    pass
-        return 0
+        if not client:
+            return 0
+        return coerce_seconds(client.get("last-seen"), default=0) or 0
 
 
 class KeeneticClientRxSensor(ClientEntity, SensorEntity):

@@ -15,6 +15,7 @@ from homeassistant.const import UnitOfTime, UnitOfInformation, UnitOfDataRate, E
 
 from ..coordinator import KeeneticCoordinator
 from ..entity import ControllerEntity, WanEntity
+from ..utils import coerce_seconds
 
 
 class KeeneticWanStatusSensor(ControllerEntity, SensorEntity):
@@ -114,13 +115,7 @@ class KeeneticPppoeUptimeSensor(ControllerEntity, SensorEntity):
     @property
     def native_value(self) -> int:
         wan = self.coordinator.data.get("wan_status", {})
-        uptime = wan.get("uptime")
-        if uptime in (None, "", "unknown", "Unknown"):
-            return 0
-        try:
-            return int(float(uptime))
-        except (TypeError, ValueError):
-            return 0
+        return coerce_seconds(wan.get("uptime"), default=0) or 0
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
@@ -420,13 +415,7 @@ class KeeneticWanUptimeSensor(_WanSensorBase):
         wan = self._wan
         if not wan:
             return None
-        up = wan.get("uptime")
-        if up in (None, "", "unknown"):
-            return None
-        try:
-            return int(float(up))
-        except (TypeError, ValueError):
-            return None
+        return coerce_seconds(wan.get("uptime"), default=None)
 
 
 class _WanBytesBase(_WanSensorBase):

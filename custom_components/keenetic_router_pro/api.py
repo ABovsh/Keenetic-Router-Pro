@@ -142,6 +142,29 @@ def _payload_summary(payload: Any) -> Any:
     return type(payload).__name__
 
 
+def _dict_items(value: Any) -> List[Dict[str, Any]]:
+    """Return dict entries from a Keenetic list/dict payload."""
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        return [item for item in value.values() if isinstance(item, dict)]
+    return []
+
+
+def _nested_dict_items(data: Any, *keys: str) -> List[Dict[str, Any]]:
+    """Return dict entries from a list payload or first matching nested key."""
+    if isinstance(data, list):
+        return _dict_items(data)
+    if not isinstance(data, dict):
+        return []
+
+    for key in keys:
+        items = _dict_items(data.get(key))
+        if items:
+            return items
+    return []
+
+
 class KeeneticClient:
 
     def __init__(
@@ -497,7 +520,7 @@ class KeeneticClient:
         """
         if isinstance(raw, dict):
             # {"GigabitEthernet0": {...}, "WifiMaster0/AccessPoint0": {...}}
-            result = []
+            result: List[Dict[str, Any]] = []
             for key, val in raw.items():
                 if not isinstance(val, dict):
                     continue
@@ -507,7 +530,7 @@ class KeeneticClient:
             return result
         if isinstance(raw, list):
             # [ {...}, {...} ]
-            return [v for v in raw if isinstance(v, dict)]
+            return _dict_items(raw)
         return []
 
     async def async_ping_ip(self, ip_address: str, timeout: float = 2.0) -> bool:
@@ -714,20 +737,7 @@ class KeeneticClient:
             except Exception:
                 continue
 
-            hosts: Any
-            if isinstance(data, list):
-                hosts = data
-            elif isinstance(data, dict):
-                hosts = data.get("hosts") or data.get("host") or data.get("items") or []
-            else:
-                hosts = []
-
-            if isinstance(hosts, dict):
-                items = [v for v in hosts.values() if isinstance(v, dict)]
-            elif isinstance(hosts, list):
-                items = [v for v in hosts if isinstance(v, dict)]
-            else:
-                items = []
+            items = _nested_dict_items(data, "hosts", "host", "items")
 
             if items:
                 return items
@@ -2369,19 +2379,8 @@ class KeeneticClient:
             if not data:
                 return {}
 
-            # Liste veya dict gelebilir
-            hosts: list = []
-            if isinstance(data, list):
-                hosts = data
-            elif isinstance(data, dict):
-                hosts = data.get("host") or data.get("hosts") or []
-                if isinstance(hosts, dict):
-                    hosts = list(hosts.values())
-
             host_policies = {}
-            for host in hosts:
-                if not isinstance(host, dict):
-                    continue
+            for host in _nested_dict_items(data, "host", "hosts"):
                 mac = str(host.get("mac") or "").lower()
                 if mac:
                     host_policies[mac] = {

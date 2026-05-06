@@ -4,6 +4,19 @@ from __future__ import annotations
 from typing import Any
 from .const import DOMAIN
 
+UNKNOWN_SECONDS_VALUES = (None, "", "unknown", "Unknown")
+
+
+def coerce_seconds(value: Any, default: int | None = 0) -> int | None:
+    """Convert a Keenetic duration value to whole seconds."""
+    if value in UNKNOWN_SECONDS_VALUES:
+        return default
+
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
 
 def get_main_device_info(
         title: str,
