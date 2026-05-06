@@ -15,6 +15,9 @@ git log.
 - **Added a KeenDNS protected web app connection mode.** The integration can
   now be configured with a password-protected KeenDNS app hostname over HTTPS
   while keeping the existing direct/local API mode unchanged.
+- **Setup and reconfigure now show mode-specific fields.** KeenDNS protected
+  mode hides direct-only port, SSL and challenge-auth options and uses the
+  tested HTTPS/443 Basic Auth defaults automatically.
 - **Full URL input is normalized safely.** Setup and reconfigure accept either
   a bare host name or a full `https://...` URL, reject paths/query strings, and
   store a clean host/port/SSL target.

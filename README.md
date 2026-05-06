@@ -87,11 +87,11 @@ Required fields:
 | --- | --- | --- |
 | Connection mode | Direct/local API or KeenDNS protected web app | `Direct / local` |
 | Host | Router IP address or host name | `192.168.1.1` |
-| Port | Router web/API port | `100` |
+| Port | Router web/API port, direct mode only | `100` |
 | Username | Router admin username | `admin` |
 | Password | Router admin password | `********` |
-| SSL | Use HTTPS for router API calls | `off` |
-| Use Challenge Auth | Enable NDW2 challenge auth for newer models | `off` |
+| SSL | Use HTTPS for router API calls, direct mode only | `off` |
+| Use Challenge Auth | Enable NDW2 challenge auth for newer models, direct mode only | `off` |
 
 Use **Challenge Auth** for models/firmware that reject Basic Auth, such as newer Keenetic Hero devices. Older devices usually keep it disabled.
 
@@ -114,9 +114,10 @@ Use these Home Assistant settings:
 | --- | --- |
 | Connection mode | `KeenDNS protected web app` |
 | Host | The protected app hostname, e.g. `rsi.example.keenetic.pro` |
-| Port | `443` |
-| SSL | `on` |
-| Use Challenge Auth | `off` |
+
+In this mode the form hides port, SSL, and challenge-auth options. The
+integration always uses external HTTPS on port `443` with Basic Auth, matching
+the tested KeenDNS protected web-app behavior.
 
 On the router, publish the app as:
 

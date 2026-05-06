@@ -173,29 +173,66 @@ def _connection_schema(
     defaults: dict[str, Any] | None = None,
     *,
     validate_port: bool = False,
+    include_mode: bool = True,
 ) -> vol.Schema:
     """Build the shared connection schema for setup, reauth and reconfigure."""
     defaults = _connection_defaults(defaults)
     fields: dict[Any, Any] = {
-        vol.Optional(
-            CONF_CONNECTION_MODE,
-            default=defaults.get(CONF_CONNECTION_MODE, CONNECTION_MODE_DIRECT),
-        ): _CONNECTION_MODE_SELECTOR,
         vol.Required(CONF_HOST, default=defaults.get(CONF_HOST, "192.168.1.1")): str
     }
-    port_validator: Any = int
-    if validate_port:
-        port_validator = vol.All(vol.Coerce(int), vol.Range(min=1, max=65535))
-    fields[vol.Optional(CONF_PORT, default=defaults.get(CONF_PORT, DEFAULT_PORT))] = port_validator
+    if include_mode:
+        fields[
+            vol.Optional(
+                CONF_CONNECTION_MODE,
+                default=defaults.get(CONF_CONNECTION_MODE, CONNECTION_MODE_DIRECT),
+            )
+        ] = _CONNECTION_MODE_SELECTOR
+    if defaults[CONF_CONNECTION_MODE] == CONNECTION_MODE_DIRECT:
+        port_validator: Any = int
+        if validate_port:
+            port_validator = vol.All(vol.Coerce(int), vol.Range(min=1, max=65535))
+        fields[vol.Optional(CONF_PORT, default=defaults.get(CONF_PORT, DEFAULT_PORT))] = port_validator
     fields[vol.Required(CONF_USERNAME, default=defaults.get(CONF_USERNAME, "admin"))] = str
     fields[vol.Required(CONF_PASSWORD)] = _PASSWORD_SELECTOR
-    fields[vol.Optional(CONF_SSL, default=defaults.get(CONF_SSL, DEFAULT_SSL))] = bool
-    fields[
-        vol.Optional(
-            CONF_USE_CHALLENGE_AUTH,
-            default=defaults.get(CONF_USE_CHALLENGE_AUTH, False),
-        )
-    ] = bool
+    if defaults[CONF_CONNECTION_MODE] == CONNECTION_MODE_DIRECT:
+        fields[vol.Optional(CONF_SSL, default=defaults.get(CONF_SSL, DEFAULT_SSL))] = bool
+        fields[
+            vol.Optional(
+                CONF_USE_CHALLENGE_AUTH,
+                default=defaults.get(CONF_USE_CHALLENGE_AUTH, False),
+            )
+        ] = bool
+    return vol.Schema(fields)
+
+
+def _mode_schema(default_mode: str = CONNECTION_MODE_DIRECT) -> vol.Schema:
+    """Return the mode-only schema used before showing mode-specific fields."""
+    return vol.Schema(
+        {
+            vol.Required(
+                CONF_CONNECTION_MODE,
+                default=default_mode,
+            ): _CONNECTION_MODE_SELECTOR
+        }
+    )
+
+
+def _reauth_schema(entry_data: dict[str, Any]) -> vol.Schema:
+    """Build the credential update schema for the entry's connection mode."""
+    fields: dict[Any, Any] = {
+        vol.Required(
+            CONF_USERNAME,
+            default=entry_data.get(CONF_USERNAME, "admin"),
+        ): str,
+        vol.Required(CONF_PASSWORD): _PASSWORD_SELECTOR,
+    }
+    if _connection_mode(entry_data) == CONNECTION_MODE_DIRECT:
+        fields[
+            vol.Optional(
+                CONF_USE_CHALLENGE_AUTH,
+                default=entry_data.get(CONF_USE_CHALLENGE_AUTH, False),
+            )
+        ] = bool
     return vol.Schema(fields)
 
 
@@ -211,6 +248,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._available_clients: list[dict[str, Any]] = []
         self._user_input: dict[str, Any] = {}
         self._title: str = ""
+        self._selected_connection_mode: str = CONNECTION_MODE_DIRECT
 
     async def _async_connect(
         self, data: dict[str, Any]
@@ -315,14 +353,33 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self.async_step_user()
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Handle the initial step."""
+        """Select the connection mode before showing mode-specific fields."""
+        if user_input is not None:
+            self._selected_connection_mode = _connection_mode(user_input)
+            return await self.async_step_connection()
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=_mode_schema(self._selected_connection_mode),
+            description_placeholders={
+                "name": self._discovered_name or "Keenetic Router"
+            } if self._discovered_name else None,
+        )
+
+    async def async_step_connection(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle mode-specific connection settings."""
         errors: dict[str, str] = {}
-        
-        _LOGGER.debug("Step user called with input=%s", user_input is not None)
+
+        _LOGGER.debug("Step connection called with input=%s", user_input is not None)
 
         if user_input is not None:
             try:
-                data = dict(user_input)
+                data = {
+                    CONF_CONNECTION_MODE: self._selected_connection_mode,
+                    **dict(user_input),
+                }
                 if self._discovered_host and data.get(CONF_HOST) == "192.168.1.1":
                     data[CONF_HOST] = self._discovered_host
                     _LOGGER.debug("Using discovered host: %s", data[CONF_HOST])
@@ -375,11 +432,21 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Unexpected error during setup")
                 errors["base"] = "unknown"
 
-        default_host = self._discovered_host or "192.168.1.1"
+        default_host = (
+            "rsi.example.keenetic.pro"
+            if self._selected_connection_mode == CONNECTION_MODE_KEENDNS_PROTECTED
+            else self._discovered_host or "192.168.1.1"
+        )
+        defaults = _connection_defaults(
+            {
+                CONF_CONNECTION_MODE: self._selected_connection_mode,
+                CONF_HOST: default_host,
+            }
+        )
         
         return self.async_show_form(
-            step_id="user",
-            data_schema=_connection_schema({CONF_HOST: default_host}),
+            step_id="connection",
+            data_schema=_connection_schema(defaults, include_mode=False),
             errors=errors,
             description_placeholders={
                 "name": self._discovered_name or "Keenetic Router"
@@ -447,18 +514,32 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="reauth_confirm",
-            data_schema=vol.Schema({
-                vol.Required(CONF_USERNAME, default=entry_data.get(CONF_USERNAME, "admin")): str,
-                vol.Required(CONF_PASSWORD): _PASSWORD_SELECTOR,
-                vol.Optional(
-                    CONF_USE_CHALLENGE_AUTH,
-                    default=entry_data.get(CONF_USE_CHALLENGE_AUTH, False),
-                ): bool,
-            }),
+            data_schema=_reauth_schema(entry_data),
             errors=errors,
         )
 
     async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Select the connection mode for an existing entry."""
+        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        if entry is None:
+            return self.async_abort(reason="unknown")
+
+        entry_data = dict(entry.data)
+        if user_input is not None:
+            self._selected_connection_mode = _connection_mode(user_input)
+            return await self.async_step_reconfigure_connection()
+
+        self._selected_connection_mode = _connection_mode(entry_data)
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=_mode_schema(self._selected_connection_mode),
+            errors={},
+        )
+
+    async def async_step_reconfigure_connection(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Allow changing router connection settings for an existing entry."""
@@ -470,14 +551,33 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         entry_data = dict(entry.data)
 
         if user_input is not None:
-            new_data = _normalize_connection_data({**entry_data, **user_input})
-            errors = await self._async_validate_and_update(entry, new_data, "reconfigure") or {}
+            new_data = _normalize_connection_data(
+                {
+                    **entry_data,
+                    CONF_CONNECTION_MODE: self._selected_connection_mode,
+                    **user_input,
+                }
+            )
+            errors = await self._async_validate_and_update(
+                entry, new_data, "reconfigure"
+            ) or {}
             if not errors:
                 return self.async_abort(reason="reconfigure_successful")
 
+        defaults = _connection_defaults(
+            {
+                **entry_data,
+                CONF_CONNECTION_MODE: self._selected_connection_mode,
+            }
+        )
+
         return self.async_show_form(
-            step_id="reconfigure",
-            data_schema=_connection_schema(entry_data, validate_port=True),
+            step_id="reconfigure_connection",
+            data_schema=_connection_schema(
+                defaults,
+                validate_port=True,
+                include_mode=False,
+            ),
             errors=errors,
         )
 

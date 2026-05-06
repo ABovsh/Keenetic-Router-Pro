@@ -3,9 +3,15 @@
     "step": {
       "user": {
         "title": "Keenetic Router Pro",
-        "description": "Enter your Keenetic router credentials. For KeenDNS protected web-app access, use the protected app hostname and HTTPS port 443.",
+        "description": "Choose how Home Assistant should reach your Keenetic router.",
         "data": {
-          "connection_mode": "Connection mode",
+          "connection_mode": "Connection mode"
+        }
+      },
+      "connection": {
+        "title": "Keenetic Router Pro",
+        "description": "Enter the connection details for the selected mode.",
+        "data": {
           "host": "Host",
           "port": "Port",
           "username": "Username",
@@ -32,9 +38,15 @@
       },
       "reconfigure": {
         "title": "Reconfigure Keenetic Router Pro",
-        "description": "Update the connection settings for your Keenetic router. Direct/local mode uses the normal router API address. KeenDNS protected mode uses the password-protected web-app hostname.",
+        "description": "Choose how Home Assistant should reach this Keenetic router.",
         "data": {
-          "connection_mode": "Connection mode",
+          "connection_mode": "Connection mode"
+        }
+      },
+      "reconfigure_connection": {
+        "title": "Reconfigure Keenetic Router Pro",
+        "description": "Update the connection details for the selected mode.",
+        "data": {
           "host": "Host",
           "port": "Port",
           "username": "Username",
