@@ -8,6 +8,30 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.6.6 - Internal cleanup and bug fixes
+
+### Fixes
+
+- **Mesh device info no longer crashes when a node briefly disappears.** The
+  `MeshEntity.device_info` property could raise `AttributeError` when the
+  underlying mesh node had been removed from the router response between
+  ticks; it now safely returns the fallback router device info.
+- **Hotspot client fetch no longer swallows unrelated exceptions.** The fallback
+  loop in `async_get_clients` previously caught `Exception` indiscriminately,
+  hiding unexpected errors; it now narrows to `KeeneticApiError` and logs
+  fallthroughs at debug level.
+
+### Improvements
+
+- **Internal refactor and dead-code removal.** Removed an unused duplicate
+  `dns.py` module, several unreferenced API helpers
+  (`async_check_firmware_update`, `async_get_client_stats`, `async_ping_ip`,
+  `async_ping_multiple`, `async_set_wireguard_enabled`), unused imports and
+  dead helper properties. No user-facing entities or unique IDs changed.
+- **Tighter `ControllerEntity` model lookup.** The `_model_name` helper now
+  iterates a single tuple of candidate keys instead of a fall-through ladder.
+- **De-duplicated mesh-association math** in the "router clients" sensor.
+
 ## 1.6.5 - IPsec VICI diagnostics
 
 ### Improvements

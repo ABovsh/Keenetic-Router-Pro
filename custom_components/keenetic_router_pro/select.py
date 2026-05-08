@@ -1,9 +1,6 @@
 """Select entities for Keenetic Router Pro (client connection policy)."""
 from __future__ import annotations
-import logging
 from typing import Any
-import homeassistant.helpers.config_validation as cv
-import voluptuous as vol
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -12,8 +9,6 @@ from .api import KeeneticClient
 from .const import DOMAIN, DATA_CLIENT, DATA_COORDINATOR, CONF_TRACKED_CLIENTS
 from .coordinator import KeeneticCoordinator
 from .entity import ClientEntity
-
-_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(

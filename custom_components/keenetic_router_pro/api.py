@@ -537,62 +537,6 @@ class KeeneticClient:
             return _dict_items(raw)
         return []
 
-    async def async_ping_ip(self, ip_address: str, timeout: float = 2.0) -> bool:
-        """Ping an IP address using the router's ping functionality.
-        
-        Returns True if the host is reachable, False otherwise.
-        """
-        try:
-            ip_address = _validate_cli_arg(ip_address, "IP address")
-
-            result = await self._rci_parse(f"ip ping {ip_address} count 1")
-
-            if result is None:
-                return False
-
-            result_str = str(result).lower()
-
-            if "1 received" in result_str or "bytes from" in result_str:
-                return True
-
-            # Check for failure patterns
-            if "0 received" in result_str or "100% packet loss" in result_str:
-                return False
-
-            if "timeout" not in result_str and "unreachable" not in result_str:
-                return True
-
-            return False
-
-        except Exception as err:
-            _LOGGER.debug("Ping to %s failed: %s", ip_address, err)
-            return False
-
-    async def async_ping_multiple(
-        self, 
-        ip_addresses: List[str], 
-        timeout: float = 2.0
-    ) -> Dict[str, bool]:
-        """Ping multiple IP addresses concurrently.
-        
-        Returns a dict mapping IP address to reachability status.
-        """
-        if not ip_addresses:
-            return {}
-
-        tasks = [self.async_ping_ip(ip, timeout) for ip in ip_addresses]
-
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        ping_results: Dict[str, bool] = {}
-        for ip, result in zip(ip_addresses, results):
-            if isinstance(result, Exception):
-                ping_results[ip] = False
-            else:
-                ping_results[ip] = bool(result)
-
-        return ping_results
-
     async def async_get_system_info(self) -> Dict[str, Any]:
         """Return basic system info: hostname, version, cpu, memory, uptime, etc."""
         data = await self._rci_get("show/system")
@@ -731,15 +675,15 @@ class KeeneticClient:
         ) or {}
 
     async def async_get_clients(self) -> List[Dict[str, Any]]:
-
         last_data: Any = None
 
         for subpath in ("show/ip/hotspot/host", "ip/hotspot/host"):
             try:
                 data = await self._rci_get(subpath)
-                last_data = data
-            except Exception:
+            except KeeneticApiError as err:
+                _LOGGER.debug("Hotspot host fetch via %s failed: %s", subpath, err)
                 continue
+            last_data = data
 
             items = _nested_dict_items(data, "hosts", "host", "items")
 
@@ -1007,19 +951,7 @@ class KeeneticClient:
 
 
     async def async_set_wifi_enabled(self, interface_name: str, enabled: bool) -> None:
-        """Enable or disable a Wi-Fi interface via RCI parse."""
-        interface_name = _validate_cli_arg(interface_name, "interface name")
-        cmd = f"interface {interface_name} {'up' if enabled else 'down'}"
-        _LOGGER.debug("Set Wi-Fi %s enabled=%s via: %s", interface_name, enabled, cmd)
-        await self._rci_parse(cmd)
-
-    async def async_set_wireguard_enabled(self, interface_name: str, enabled: bool) -> None:
-        """Enable or disable a WireGuard interface via RCI parse.
-
-        Kept for backwards compatibility; delegates to the generic
-        async_set_interface_enabled which works for any interface type
-        (WireGuard, OpenVPN, SSTP, IPsec, ...).
-        """
+        """Enable or disable a Wi-Fi interface (alias for set_interface_enabled)."""
         await self.async_set_interface_enabled(interface_name, enabled)
 
     async def async_set_interface_enabled(self, interface_name: str, enabled: bool) -> None:
@@ -2417,13 +2349,6 @@ class KeeneticClient:
             "extender_count": len(extenders),
         }
 
-    async def async_get_client_stats(self) -> Dict[str, Any]:
-        """Get connected/disconnected client counts and per-AP stats.
-        
-        Extender/repeater cihazları client sayısından çıkarılır.
-        """
-        return self.summarize_client_stats(await self.async_get_clients())
-
     async def async_get_policies(self) -> Dict[str, str]:
         """Get available connection policies.
         
@@ -2515,39 +2440,6 @@ class KeeneticClient:
     async def async_unblock_client(self, mac: str) -> None:
         """Unblock a client's internet access."""
         await self.async_set_client_policy(mac, "default")
-
-    async def async_check_firmware_update(self) -> Dict[str, Any]:
-        """Check for available firmware update via /rci/show/version."""
-        try:
-            data = await self._rci_get("show/version")
-            if not data:
-                return {}
-
-            current = data.get("title") or data.get("release")
-            available = data.get("fw-available") or data.get("release-available")
-
-            has_update = (
-                current and available and 
-                current != available and
-                data.get("fw-update-sandbox") == "stable"
-            )
-
-            return {
-                "current": {
-                    "title": current,
-                    "release": data.get("release"),
-                },
-                "available": {
-                    "title": available,
-                    "release": data.get("release-available"),
-                } if has_update else None,
-                "channel": data.get("fw-update-sandbox"),
-                "has_update": has_update,
-            }
-        except Exception as err:
-            _LOGGER.debug("Error checking firmware update: %s", err)
-            return {}
-
 
     async def async_start_firmware_update(self) -> bool:
         """Start firmware update for the controller (main router) ONLY.

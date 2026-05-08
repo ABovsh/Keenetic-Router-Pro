@@ -4,8 +4,7 @@ from __future__ import annotations
 from typing import Any
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
-from .const import DOMAIN
-from .coordinator import KeeneticCoordinator, KeeneticPingCoordinator
+from .coordinator import KeeneticCoordinator
 from .utils import (
     get_main_device_info,
     get_mesh_device_info,
@@ -30,37 +29,24 @@ class ControllerEntity(CoordinatorEntity):
         self._title = title
 
     @property
-    def _version_data(self) -> dict[str, Any]:
-        return self.coordinator.data.get("system", {}) or {}
-
-    @property
     def _firmware_version(self) -> str | None:
         version = self.coordinator.data.get("system", {}) or {}
-
         if version.get("title"):
             return str(version["title"])
         if version.get("release"):
             return str(version["release"])
-
         ndw4 = version.get("ndw4", {})
         if isinstance(ndw4, dict) and ndw4.get("version"):
             return str(ndw4["version"])
-
         return None
 
     @property
     def _model_name(self) -> str | None:
         version = self.coordinator.data.get("system", {}) or {}
-        
-        if version.get("model"):
-            return str(version["model"])
-        if version.get("description"):
-            return str(version["description"])
-        if version.get("device"):
-            return str(version["device"])
-        if version.get("hw_id"):
-            return str(version["hw_id"])
-        
+        for key in ("model", "description", "device", "hw_id"):
+            value = version.get(key)
+            if value:
+                return str(value)
         return None
     
     @property
@@ -111,16 +97,14 @@ class MeshEntity(CoordinatorEntity):
     @property
     def device_info(self) -> DeviceInfo:
         node = self._node
-        node_ip = node.get("ip") if node else None
-        
         return get_mesh_device_info(
             self._title,
             self._entry_id,
-            self._node,
+            node,
             self._node_cid,
-            host=node_ip,
+            host=node.get("ip") if node else None,
             ssl=bool(getattr(self.coordinator.client, "_ssl", False)),
-            fqdn=node.get("fqdn")
+            fqdn=node.get("fqdn") if node else None,
         )
     
 class WanEntity(CoordinatorEntity):

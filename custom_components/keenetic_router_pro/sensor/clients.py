@@ -55,36 +55,26 @@ class KeeneticRouterClientsSensor(ControllerEntity, SensorEntity):
     def unique_id(self) -> str:
         return f"{self._entry_id}_router_clients_v2"
 
+    def _mesh_associations(self) -> int:
+        total = 0
+        for node in self.coordinator.data.get("mesh_nodes", []):
+            try:
+                total += int(node.get("associations", 0))
+            except (TypeError, ValueError):
+                pass
+        return total
+
     @property
     def native_value(self) -> int:
         stats = self.coordinator.data.get("client_stats", {})
-        total_connected = stats.get("connected", 0)
-
-        mesh_nodes = self.coordinator.data.get("mesh_nodes", [])
-        mesh_associations = 0
-        for node in mesh_nodes:
-            try:
-                mesh_associations += int(node.get("associations", 0))
-            except (TypeError, ValueError):
-                pass
-
-        return max(total_connected - mesh_associations, 0)
+        return max(stats.get("connected", 0) - self._mesh_associations(), 0)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         stats = self.coordinator.data.get("client_stats", {})
-        mesh_nodes = self.coordinator.data.get("mesh_nodes", [])
-
-        mesh_associations = 0
-        for node in mesh_nodes:
-            try:
-                mesh_associations += int(node.get("associations", 0))
-            except (TypeError, ValueError):
-                pass
-
         return {
             "total_connected": stats.get("connected", 0),
-            "mesh_clients": mesh_associations,
+            "mesh_clients": self._mesh_associations(),
             "per_ap": stats.get("per_ap", {}),
         }
 
