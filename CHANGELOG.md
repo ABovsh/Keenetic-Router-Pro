@@ -8,6 +8,19 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.6.7 - Plaintext-HTTP repair warning
+
+### 🔒 Security
+
+- **Repair card now warns when the integration is configured for plaintext
+  HTTP to a non-loopback router.** When SSL is disabled and the host is not
+  a loopback address, the integration raises a Home Assistant Repair issue
+  explaining that your router username, NDW2 password hash, and session
+  cookie traverse the LAN unencrypted on every poll. The card links to the
+  remediation steps in `SECURITY.md` and is automatically cleared once you
+  reconfigure the entry to use HTTPS. No configuration changes required —
+  existing setups will see the card on next reload.
+
 ## 1.6.6 - Internal cleanup and bug fixes
 
 ### Fixes

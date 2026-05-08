@@ -8,6 +8,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import KeeneticApiError, KeeneticAuthError, KeeneticClient
@@ -28,6 +29,42 @@ from .const import (
 from .coordinator import KeeneticCoordinator, KeeneticPingCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+ISSUE_INSECURE_HTTP = "insecure_http"
+
+
+def _is_loopback_host(host: str) -> bool:
+    """True if host is loopback (localhost / 127.x / ::1) — plaintext is acceptable."""
+    candidate = (host or "").strip().lower()
+    if candidate in {"localhost", "ip6-localhost", "ip6-loopback"}:
+        return True
+    try:
+        import ipaddress
+
+        return ipaddress.ip_address(candidate).is_loopback
+    except ValueError:
+        return False
+
+
+@callback
+def _async_update_insecure_http_issue(
+    hass: HomeAssistant, entry: ConfigEntry, host: str, use_ssl: bool
+) -> None:
+    """Raise/clear a Repair issue when credentials traverse plaintext HTTP to a non-loopback host."""
+    issue_id = f"{ISSUE_INSECURE_HTTP}_{entry.entry_id}"
+    if not use_ssl and not _is_loopback_host(host):
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            issue_id,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=ISSUE_INSECURE_HTTP,
+            translation_placeholders={"host": host, "title": entry.title},
+            learn_more_url="https://github.com/ABovsh/Keenetic-Router-Pro/blob/main/SECURITY.md",
+        )
+    else:
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
 
 PLATFORMS: list[str] = [
     "sensor",
@@ -112,6 +149,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "Initial ping refresh failed (non-fatal), will retry on next cycle: %s", err
             )
 
+    _async_update_insecure_http_issue(hass, entry, host, use_ssl)
+
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
         DATA_CLIENT: client,
@@ -177,5 +216,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     if not hass.data.get(DOMAIN):
         hass.data.pop(DOMAIN, None)
+
+    ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_INSECURE_HTTP}_{entry.entry_id}")
 
     return True

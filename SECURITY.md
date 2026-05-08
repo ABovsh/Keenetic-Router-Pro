@@ -42,6 +42,37 @@ What this integration controls:
   user → set a new password → reconfigure the integration in HA
   (*Settings → Devices & Services → Keenetic Router Pro → Reconfigure*).
 
+## Plaintext HTTP vs HTTPS
+
+Keenetic routers accept both HTTP and HTTPS for the web admin / RCI API.
+This integration supports both via the **SSL** toggle in setup and
+reconfigure. **Use HTTPS** wherever the router supports it.
+
+When the integration is configured for plaintext HTTP and the host is not
+a loopback address, every poll sends:
+
+- the router username in cleartext;
+- a replayable NDW2 challenge-response password hash (or HTTP Basic Auth
+  credentials, depending on the connection mode);
+- the authenticated session cookie.
+
+Anyone on the same LAN — an untrusted Wi-Fi guest, a compromised IoT
+device, or a malicious Ethernet drop — can capture these and impersonate
+you to the router. The integration raises a Home Assistant Repair card
+when this is detected so the risk is visible in the UI.
+
+To switch to HTTPS:
+1. In the router web UI: *System → Components* → confirm `SSL/TLS support`
+   is installed.
+2. *Management → Web Admin* → enable HTTPS (port 443 by default).
+3. In Home Assistant: *Settings → Devices & Services → Keenetic Router Pro
+   → Reconfigure* → enable **SSL** and update the port.
+4. After confirming HTTPS works, **rotate the router admin password** —
+   anyone who sniffed the LAN since setup may already have it.
+
+The repair card is automatically cleared once the entry reloads with SSL
+enabled or with a loopback host.
+
 ## Diagnostics dumps
 
 When you click *Download diagnostics* on the config entry, HA produces a
