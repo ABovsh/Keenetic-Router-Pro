@@ -1,4 +1,8 @@
 {
+  "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/tests/test_client_control_entities.py": {
+    "mtime": 1778435283.6932626,
+    "hash": "3ee99bb779d5bc7cb8a498177cf26aff"
+  },
   "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/tests/test_state_classes.py": {
     "mtime": 1778432332.9595606,
     "hash": "757b1149a9f43eabb8cebd68ef3884fa"
@@ -16,12 +20,16 @@
     "hash": "fa9a1eb619912587fffb2d777955d21c"
   },
   "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/tests/conftest.py": {
-    "mtime": 1778434214.6055133,
-    "hash": "2a34d27716a489bc4cde775719a79ff2"
+    "mtime": 1778435255.0987358,
+    "hash": "973120109642ce4f69d0e6822d979bbc"
   },
   "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/tests/test_modern_config_flow_shape.py": {
     "mtime": 1778431408.4961855,
     "hash": "f15e990d15354f474614d31d019f4815"
+  },
+  "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/tests/test_platform_helpers.py": {
+    "mtime": 1778435066.9896243,
+    "hash": "7dc486f28f01121f06ce33f85042d3f9"
   },
   "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/tests/test_runtime_data_shape.py": {
     "mtime": 1778431408.496246,
@@ -40,12 +48,16 @@
     "hash": "e7a8e7d843cc669b0f0ed02fc08606e4"
   },
   "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/tests/test_api_helpers.py": {
-    "mtime": 1778432706.428916,
-    "hash": "2943a43f911db8ddf11b824a52382d53"
+    "mtime": 1778435003.5165277,
+    "hash": "4496dbcb2c3269831071896601c0e319"
   },
   "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/tests/test_api_lifecycle.py": {
     "mtime": 1778434380.7274277,
     "hash": "b32971289603427936b811de88a2d1ce"
+  },
+  "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/tests/test_coordinator_update_flow.py": {
+    "mtime": 1778435183.2120326,
+    "hash": "a74cc1127e371836741e3d455c70643e"
   },
   "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/tests/test_clients_by_mac_lookup.py": {
     "mtime": 1778431408.495631,
@@ -59,13 +71,17 @@
     "mtime": 1778432791.3091638,
     "hash": "a6cc29edd9d4a44bd926d4b29cf583ef"
   },
+  "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/tests/test_wireguard_sensors.py": {
+    "mtime": 1778435299.1139357,
+    "hash": "ff1413a7da455d6d75aa3ec291c65d45"
+  },
   "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/custom_components/keenetic_router_pro/update.py": {
     "mtime": 1778432739.8428307,
     "hash": "a5d1bb85e1911c6476033a31aa394ecb"
   },
   "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/custom_components/keenetic_router_pro/coordinator.py": {
-    "mtime": 1778431408.4916086,
-    "hash": "a738dbaf88164d6fe5c8dbb22fbaf2a5"
+    "mtime": 1778435172.2566879,
+    "hash": "97ed0e880c7e0a93d6ace0372b0876df"
   },
   "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/custom_components/keenetic_router_pro/diagnostics.py": {
     "mtime": 1778431408.4918227,
@@ -80,8 +96,8 @@
     "hash": "cd27d76fe1d84b1ead1c6a35a2378c6e"
   },
   "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/custom_components/keenetic_router_pro/api.py": {
-    "mtime": 1778434365.2835948,
-    "hash": "6d0ce57f6af13f4516b72ec2a5484f5d"
+    "mtime": 1778434979.220529,
+    "hash": "817ed8196f4e2a927bb3acbda3fa7068"
   },
   "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/custom_components/keenetic_router_pro/button.py": {
     "mtime": 1778432739.7898345,
@@ -164,16 +180,16 @@
     "hash": "5bff97671738b523d947c9c49c37e295"
   },
   "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/CHANGELOG.md": {
-    "mtime": 1778434443.763138,
-    "hash": "88dd04bed8afe9f6a35270b3342e57f8"
+    "mtime": 1778435372.258938,
+    "hash": "d3c721dc5187a2da84b942eab8861920"
   },
   "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/README.md": {
     "mtime": 1778434434.0221286,
     "hash": "2d2a1c3aff2bf28e03dd2a5e136a1384"
   },
   "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/requirements-dev.txt": {
-    "mtime": 1778432316.028856,
-    "hash": "7aa92275f720188365e8a3e5caa687fe"
+    "mtime": 1778435313.4521275,
+    "hash": "df70fdd2219dc16bd01924718338372c"
   },
   "/Users/abovsh/Vault/03-projects/Keenetic-Router-Pro/SECURITY.md": {
     "mtime": 1778431408.4904382,
