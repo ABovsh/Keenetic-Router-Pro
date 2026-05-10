@@ -176,7 +176,11 @@ def _dict_items(value: Any) -> List[Dict[str, Any]]:
     if isinstance(value, list):
         return [item for item in value if isinstance(item, dict)]
     if isinstance(value, dict):
-        return [item for item in value.values() if isinstance(item, dict)]
+        children = [item for item in value.values() if isinstance(item, dict)]
+        if children:
+            return children
+        if value:
+            return [value]
     return []
 
 
@@ -2178,7 +2182,7 @@ class KeeneticClient:
             self._mws_member_supported = True
 
             if not data or not isinstance(data, list):
-                return nodes
+                return fallback_nodes
 
             for member in data:
                 cid = member.get("cid")
@@ -2243,7 +2247,7 @@ class KeeneticClient:
             _LOGGER.debug("Error getting mesh nodes from mws/member: %s", err)
             return fallback_nodes
 
-        return nodes
+        return nodes or fallback_nodes
 
     async def _get_mesh_nodes_from_clients(
         self, clients: List[Dict[str, Any]] | None = None

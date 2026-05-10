@@ -10,6 +10,8 @@ import pytest
 from custom_components.keenetic_router_pro.api import (
     KeeneticApiError,
     KeeneticClient,
+    _dict_items,
+    _nested_dict_items,
     _payload_summary,
     _response_summary,
     _validate_cli_arg,
@@ -182,6 +184,26 @@ def test_normalize_interfaces_injects_ids_for_dict_payloads() -> None:
     ]
 
 
+def test_dict_items_accepts_single_object_payloads() -> None:
+    """Keenetic endpoints may collapse a one-item collection to a plain object."""
+    payload = {"mac": "aa:bb:cc:dd:ee:ff", "active": True}
+
+    assert _dict_items(payload) == [payload]
+
+
+def test_nested_dict_items_handles_single_host_payload() -> None:
+    """Single-host hotspot payloads must not disappear during normalization."""
+    payload = {
+        "host": {
+            "mac": "aa:bb:cc:dd:ee:ff",
+            "ip": "192.0.2.25",
+            "active": True,
+        }
+    }
+
+    assert _nested_dict_items(payload, "host") == [payload["host"]]
+
+
 def test_parse_ipsec_vici_diagnostics_counts_recent_memory_errors() -> None:
     """IPsec VICI memory errors are summarized from router log lines."""
     lines = [
@@ -308,6 +330,32 @@ def test_get_mesh_nodes_from_clients_falls_back_to_fetch_when_no_arg() -> None:
     assert nodes[0]["state"] == "down"
 
 
+def test_async_get_clients_parses_single_host_dict_payload() -> None:
+    """Router hotspot host responses may be a single dict instead of a list."""
+    client = KeeneticClient("192.0.2.1", "admin", "secret")
+
+    async def fake_get(subpath):
+        return {
+            "host": {
+                "mac": "AA:BB:CC:DD:EE:FF",
+                "ip": "192.0.2.44",
+                "active": True,
+            }
+        }
+
+    client._rci_get = fake_get  # type: ignore[assignment]
+
+    hosts = asyncio.run(client.async_get_clients())
+
+    assert hosts == [
+        {
+            "mac": "AA:BB:CC:DD:EE:FF",
+            "ip": "192.0.2.44",
+            "active": True,
+        }
+    ]
+
+
 def test_async_get_all_interface_stats_runs_in_parallel() -> None:
     """Per-interface stat fetches run via asyncio.gather, not sequentially."""
     client = KeeneticClient("192.0.2.1", "admin", "secret")
@@ -369,6 +417,55 @@ def test_async_get_all_interface_stats_swallows_per_interface_errors() -> None:
 
     assert "ISP" in stats
     assert "Backup" not in stats
+
+
+def test_async_get_mesh_nodes_keeps_fallback_when_mws_returns_empty_list() -> None:
+    """A blank MWS response should not hide extenders seen in the client list."""
+    client = KeeneticClient("192.0.2.1", "admin", "secret")
+
+    clients = [
+        {
+            "mac": "AA:BB:CC:00:00:01",
+            "system-mode": "extender",
+            "active": True,
+            "name": "Extender",
+        }
+    ]
+
+    async def fake_get(subpath):
+        assert subpath == "show/mws/member"
+        return []
+
+    client._rci_get = fake_get  # type: ignore[assignment]
+
+    nodes = asyncio.run(client.async_get_mesh_nodes(clients=clients))
+
+    assert [node["mac"] for node in nodes] == ["AA:BB:CC:00:00:01"]
+    assert nodes[0]["state"] == "up"
+
+
+def test_async_get_mesh_nodes_keeps_fallback_when_mws_members_have_no_cid() -> None:
+    """Malformed MWS members should not erase the safer hotspot fallback."""
+    client = KeeneticClient("192.0.2.1", "admin", "secret")
+
+    clients = [
+        {
+            "mac": "AA:BB:CC:00:00:02",
+            "system-mode": "repeater",
+            "active": False,
+        }
+    ]
+
+    async def fake_get(subpath):
+        assert subpath == "show/mws/member"
+        return [{"mac": "AA:BB:CC:00:00:02", "model": "Extender"}]
+
+    client._rci_get = fake_get  # type: ignore[assignment]
+
+    nodes = asyncio.run(client.async_get_mesh_nodes(clients=clients))
+
+    assert [node["mac"] for node in nodes] == ["AA:BB:CC:00:00:02"]
+    assert nodes[0]["state"] == "down"
 
 
 def test_summarize_client_stats_excludes_extenders() -> None:

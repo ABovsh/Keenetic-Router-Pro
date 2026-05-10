@@ -410,12 +410,17 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if self.data:
             for pname, pentry in (self.data.get("crypto_maps") or {}).items():
                 if isinstance(pentry, dict):
-                    prev_cmap_by_name[pname] = pentry
+                    prev_cmap_by_name[pname] = dict(pentry)
 
         for cmap_name, cmap in crypto_maps.items():
-            cmap["_sample_ts"] = now_ts
-
             prev_cmap = prev_cmap_by_name.get(cmap_name)
+            if not very_slow_refresh and prev_cmap:
+                cmap["_sample_ts"] = prev_cmap.get("_sample_ts")
+                cmap["rx_throughput"] = prev_cmap.get("rx_throughput", 0.0)
+                cmap["tx_throughput"] = prev_cmap.get("tx_throughput", 0.0)
+                continue
+
+            cmap["_sample_ts"] = now_ts
             if prev_cmap and prev_cmap.get("_sample_ts"):
                 dt = now_ts - float(prev_cmap.get("_sample_ts") or 0)
                 cmap["rx_throughput"] = _counter_rate_bytes_per_second(

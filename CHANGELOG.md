@@ -8,6 +8,28 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## Unreleased
+
+### Bug fixes
+
+- **Single-host client payloads are no longer dropped.** Some Keenetic RCI
+  responses collapse one host into a plain object instead of a list; the
+  integration now keeps that client visible.
+- **Mesh fallback nodes survive blank MWS responses.** If `show/mws/member`
+  returns an empty or incomplete payload, extenders discovered from the
+  hotspot client table remain available instead of disappearing for that tick.
+- **Cached IPsec throughput is not resampled on fast coordinator ticks.**
+  Crypto-map throughput now preserves the last real sample until the next
+  slow crypto-map refresh, avoiding misleading zero/underestimated rates.
+
+### Internal
+
+- **Coverage baseline added to CI.** The test workflow now runs coverage and
+  fails if the project drops below the current meaningful baseline.
+- **Regression coverage increased to 138 lightweight tests.** New tests cover
+  coordinator staged updates, tracked-client policy/presence entities,
+  WireGuard sensors, dynamic mesh platform helpers, and RCI payload shapes.
+
 ## 1.7.3 - State freshness and direct mesh update hardening
 
 ### Bug fixes

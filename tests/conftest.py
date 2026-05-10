@@ -147,6 +147,48 @@ switch = types.ModuleType("homeassistant.components.switch")
 switch.SwitchEntity = _Entity
 components.switch = switch
 
+binary_sensor = types.ModuleType("homeassistant.components.binary_sensor")
+binary_sensor.BinarySensorEntity = _Entity
+binary_sensor.BinarySensorDeviceClass = _AttrEnum()
+components.binary_sensor = binary_sensor
+
+button = types.ModuleType("homeassistant.components.button")
+button.ButtonEntity = _Entity
+components.button = button
+
+update = types.ModuleType("homeassistant.components.update")
+update.UpdateEntity = _Entity
+update.UpdateDeviceClass = _AttrEnum()
+
+
+class _UpdateEntityFeature:
+    INSTALL = 1
+    PROGRESS = 2
+    RELEASE_NOTES = 4
+
+
+update.UpdateEntityFeature = _UpdateEntityFeature
+components.update = update
+
+select = types.ModuleType("homeassistant.components.select")
+select.SelectEntity = _Entity
+components.select = select
+
+device_tracker = types.ModuleType("homeassistant.components.device_tracker")
+device_tracker.__path__ = []
+
+
+class _SourceType:
+    ROUTER = "router"
+
+
+device_tracker.SourceType = _SourceType
+device_tracker_config_entry = types.ModuleType(
+    "homeassistant.components.device_tracker.config_entry"
+)
+device_tracker_config_entry.ScannerEntity = _Entity
+components.device_tracker = device_tracker
+
 
 def _async_redact_data(data, to_redact):
     """Recursive redactor matching HA's behaviour for test inputs."""
@@ -214,5 +256,14 @@ sys.modules.setdefault("homeassistant.helpers.device_registry", device_registry)
 sys.modules.setdefault("homeassistant.components", components)
 sys.modules.setdefault("homeassistant.components.sensor", sensor)
 sys.modules.setdefault("homeassistant.components.switch", switch)
+sys.modules.setdefault("homeassistant.components.binary_sensor", binary_sensor)
+sys.modules.setdefault("homeassistant.components.button", button)
+sys.modules.setdefault("homeassistant.components.update", update)
+sys.modules.setdefault("homeassistant.components.select", select)
+sys.modules.setdefault("homeassistant.components.device_tracker", device_tracker)
+sys.modules.setdefault(
+    "homeassistant.components.device_tracker.config_entry",
+    device_tracker_config_entry,
+)
 sys.modules.setdefault("homeassistant.components.diagnostics", diagnostics)
 sys.modules.setdefault("homeassistant.const", const)
