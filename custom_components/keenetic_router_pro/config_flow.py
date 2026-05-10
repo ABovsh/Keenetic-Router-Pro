@@ -664,6 +664,12 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
         """Initialize options flow."""
         self._config_entry = config_entry
         self._available_clients = []
+
+    def _runtime_client(self) -> Any | None:
+        """Return the active integration client when options run during normal operation."""
+        runtime = getattr(self._config_entry, "runtime_data", None)
+        client = getattr(runtime, "client", None)
+        return client if hasattr(client, "async_get_clients") else None
     
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
@@ -702,18 +708,19 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
         
         # Try to get current clients from router
         try:
-            # Initialize client
-            data = self._config_entry.data
-            session = async_get_clientsession(self.hass)
-            client = KeeneticClient(
-                host=data[CONF_HOST],
-                username=data[CONF_USERNAME],
-                password=data[CONF_PASSWORD],
-                port=data.get(CONF_PORT, DEFAULT_PORT),
-                ssl=data.get(CONF_SSL, DEFAULT_SSL),
-                use_challenge_auth=data.get(CONF_USE_CHALLENGE_AUTH, False),
-            )
-            await client.async_start(session)
+            client = self._runtime_client()
+            if client is None:
+                data = self._config_entry.data
+                session = async_get_clientsession(self.hass)
+                client = KeeneticClient(
+                    host=data[CONF_HOST],
+                    username=data[CONF_USERNAME],
+                    password=data[CONF_PASSWORD],
+                    port=data.get(CONF_PORT, DEFAULT_PORT),
+                    ssl=data.get(CONF_SSL, DEFAULT_SSL),
+                    use_challenge_auth=data.get(CONF_USE_CHALLENGE_AUTH, False),
+                )
+                await client.async_start(session)
             available_clients = await client.async_get_clients()
             _LOGGER.debug("Found %d clients from router", len(available_clients) if available_clients else 0)
 

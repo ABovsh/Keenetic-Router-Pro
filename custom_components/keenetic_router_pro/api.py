@@ -19,11 +19,11 @@ from .const import (
     IPSEC_STATE_ESTABLISHED,
     RCI_HOTSPOT_HOST_PATHS,
     RCI_SHOW_VERSION,
-    TRUTHY_STRINGS,
     WAN_STATUS_CONNECTED,
     WAN_STATUS_DOWN,
     WAN_STATUS_LINK_UP,
 )
+from .utils import coerce_bool, coerce_int
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.api")
 
@@ -172,21 +172,12 @@ def _payload_summary(payload: Any) -> Any:
 
 def _to_int(value: Any, default: int = 0) -> int:
     """Return an int from loosely typed Keenetic RCI values."""
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
+    return coerce_int(value, default)
 
 
 def _truthy(value: Any) -> bool:
     """Return True only for actual truthy Keenetic-style values."""
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return value != 0
-    if isinstance(value, str):
-        return value.strip().lower() in TRUTHY_STRINGS
-    return bool(value)
+    return coerce_bool(value)
 
 
 def _cookie_header_from_response(resp: aiohttp.ClientResponse) -> str | None:
@@ -1650,7 +1641,10 @@ class KeeneticClient:
         def _is_test_net_only(observation: Dict[str, Any]) -> bool:
             addrs = observation.get("check_addresses") or []
             hosts = observation.get("check_hosts") or []
-            candidates = [str(x) for x in (list(addrs) + list(hosts)) if x]
+            # If the router exposes resolved addresses, trust those over
+            # host labels. ``ipcache.host`` may be a symbolic probe name
+            # while the address itself is the TEST-NET one-off target.
+            candidates = [str(x) for x in (list(addrs) or list(hosts)) if x]
             if not candidates:
                 return False
             test_net_prefixes = ("192.0.2.", "198.51.100.", "203.0.113.")
@@ -2508,12 +2502,7 @@ class KeeneticClient:
             is_active = False
             if "active" in client:
                 value = client.get("active")
-                if isinstance(value, bool):
-                    is_active = value
-                elif isinstance(value, str):
-                    is_active = value.lower() in TRUTHY_STRINGS
-                else:
-                    is_active = bool(value)
+                is_active = coerce_bool(value)
             elif "link" in client:
                 is_active = str(client.get("link") or "").lower() == "up"
 

@@ -46,6 +46,22 @@ exceptions.ConfigEntryNotReady = _ConfigEntryNotReady
 config_entries = types.ModuleType("homeassistant.config_entries")
 config_entries.ConfigEntry = object
 
+
+class _ConfigFlow:
+    def __init_subclass__(cls, **kwargs):
+        return super().__init_subclass__()
+
+
+class _OptionsFlow:
+    pass
+
+
+config_entries.ConfigFlow = _ConfigFlow
+config_entries.OptionsFlow = _OptionsFlow
+
+data_entry_flow = types.ModuleType("homeassistant.data_entry_flow")
+data_entry_flow.FlowResult = dict
+
 core = types.ModuleType("homeassistant.core")
 core.HomeAssistant = object
 
@@ -71,7 +87,41 @@ helpers.entity_platform = entity_platform
 # never exercised in these unit tests.
 config_validation = types.ModuleType("homeassistant.helpers.config_validation")
 config_validation.config_entry_only_config_schema = lambda domain: None
+config_validation.multi_select = lambda options: options
 helpers.config_validation = config_validation
+
+selector = types.ModuleType("homeassistant.helpers.selector")
+
+
+class _SelectorValue:
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+
+
+class _TextSelectorType:
+    PASSWORD = "password"
+
+
+class _SelectSelectorMode:
+    DROPDOWN = "dropdown"
+
+
+selector.TextSelector = _SelectorValue
+selector.TextSelectorConfig = _SelectorValue
+selector.TextSelectorType = _TextSelectorType
+selector.SelectSelector = _SelectorValue
+selector.SelectSelectorConfig = _SelectorValue
+selector.SelectSelectorMode = _SelectSelectorMode
+selector.SelectOptionDict = lambda **kwargs: dict(kwargs)
+helpers.selector = selector
+
+service_info = types.ModuleType("homeassistant.helpers.service_info")
+service_info.__path__ = []
+ssdp = types.ModuleType("homeassistant.helpers.service_info.ssdp")
+ssdp.SsdpServiceInfo = object
+service_info.ssdp = ssdp
+helpers.service_info = service_info
 
 issue_registry = types.ModuleType("homeassistant.helpers.issue_registry")
 
@@ -212,7 +262,9 @@ components.diagnostics = diagnostics
 const = types.ModuleType("homeassistant.const")
 const.CONF_HOST = "host"
 const.CONF_PASSWORD = "password"
+const.CONF_PORT = "port"
 const.CONF_USERNAME = "username"
+const.CONF_SSL = "ssl"
 const.PERCENTAGE = "%"
 const.EntityCategory = _AttrEnum()
 const.UnitOfDataRate = _AttrEnum()
@@ -246,10 +298,14 @@ homeassistant.const = const
 sys.modules.setdefault("homeassistant", homeassistant)
 sys.modules.setdefault("homeassistant.exceptions", exceptions)
 sys.modules.setdefault("homeassistant.config_entries", config_entries)
+sys.modules.setdefault("homeassistant.data_entry_flow", data_entry_flow)
 sys.modules.setdefault("homeassistant.core", core)
 sys.modules.setdefault("homeassistant.helpers", helpers)
 sys.modules.setdefault("homeassistant.helpers.aiohttp_client", aiohttp_client)
 sys.modules.setdefault("homeassistant.helpers.config_validation", config_validation)
+sys.modules.setdefault("homeassistant.helpers.selector", selector)
+sys.modules.setdefault("homeassistant.helpers.service_info", service_info)
+sys.modules.setdefault("homeassistant.helpers.service_info.ssdp", ssdp)
 sys.modules.setdefault("homeassistant.helpers.entity_platform", entity_platform)
 sys.modules.setdefault("homeassistant.helpers.update_coordinator", update_coordinator)
 sys.modules.setdefault("homeassistant.helpers.device_registry", device_registry)

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 from typing import Any
-from .const import DOMAIN
+from .const import DOMAIN, TRUTHY_STRINGS
 
 UNKNOWN_SECONDS_VALUES = (None, "", "unknown", "Unknown")
 _MESH_ID_SAFE_RE = re.compile(r"[^A-Za-z0-9_]+")
@@ -18,6 +18,25 @@ def coerce_seconds(value: Any, default: int | None = 0) -> int | None:
         return int(float(value))
     except (TypeError, ValueError):
         return default
+
+
+def coerce_int(value: Any, default: int = 0) -> int:
+    """Return an int from loosely typed Keenetic RCI values."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def coerce_bool(value: Any) -> bool:
+    """Return True only for actual truthy Keenetic-style values."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in TRUTHY_STRINGS
+    return bool(value)
 
 
 def normalize_mac(value: Any) -> str:

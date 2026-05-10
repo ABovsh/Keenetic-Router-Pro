@@ -22,8 +22,15 @@ git log.
   responses that collapse one member or port into a dict now still produce
   the correct mesh node and port entities.
 - **String booleans from Keenetic are handled consistently.** Mesh extender
-  activity, MWS internet availability, and firmware update progress no longer
-  treat values like `"no"` as truthy.
+  activity, MWS internet availability, firmware update progress, and client
+  statistics no longer treat values like `"no"` as truthy.
+- **Options now reuse the running router client.** Opening the integration
+  options no longer performs an avoidable extra client setup when Home
+  Assistant already has an active runtime client.
+- **Ping Check parsing is more faithful to Keenetic behaviour.** Persistent
+  `_WEBADMIN_*` profiles from the web UI are treated as authoritative, while
+  TEST-NET one-off probe targets are ignored so they do not create false WAN
+  outages.
 - **Cached IPsec throughput is not resampled on fast coordinator ticks.**
   Crypto-map throughput now preserves the last real sample until the next
   slow crypto-map refresh, avoiding misleading zero/underestimated rates.
@@ -35,10 +42,14 @@ git log.
 
 - **Coverage baseline added to CI.** The test workflow now runs coverage and
   fails if the project drops below the current meaningful baseline.
-- **Regression coverage increased to 143 lightweight tests.** New tests cover
+- **Shared router-value normalization helpers added.** String/int/bool
+  coercion used by API parsing now lives in one utility surface so future
+  firmware payload variants are easier to cover consistently.
+- **Regression coverage increased to 156 lightweight tests.** New tests cover
   coordinator staged updates, tracked-client policy/presence entities,
   WireGuard sensors, dynamic mesh platform helpers, RCI payload shapes, MWS
-  payload variants, update progress parsing, and privacy-oriented log masking.
+  payload variants, update progress parsing, Ping Check semantics, config and
+  options helpers, and privacy-oriented log masking.
 
 ## 1.7.3 - State freshness and direct mesh update hardening
 

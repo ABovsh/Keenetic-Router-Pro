@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 
 from custom_components.keenetic_router_pro.utils import (
+    coerce_bool,
+    coerce_int,
     coerce_seconds,
     find_client_by_mac,
     normalize_mac,
@@ -83,3 +85,41 @@ def test_parse_memory_fraction(raw: object, expected: float | None) -> None:
 )
 def test_coerce_seconds(raw: object, default: int | None, expected: int | None) -> None:
     assert coerce_seconds(raw, default) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (True, True),
+        (False, False),
+        (1, True),
+        (0, False),
+        ("true", True),
+        ("yes", True),
+        ("up", True),
+        ("online", True),
+        ("no", False),
+        ("down", False),
+        ("false", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_coerce_bool_matches_keenetic_payload_values(raw: object, expected: bool) -> None:
+    assert coerce_bool(raw) is expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "default", "expected"),
+    [
+        ("123", 0, 123),
+        (123, 0, 123),
+        ("", -1, -1),
+        (None, -1, -1),
+        ("not-a-number", 7, 7),
+    ],
+)
+def test_coerce_int_handles_loose_rci_values(
+    raw: object, default: int, expected: int
+) -> None:
+    assert coerce_int(raw, default) == expected
