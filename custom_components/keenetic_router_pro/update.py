@@ -175,8 +175,8 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
             try:
                 initial = await self._client.async_get_update_progress()
                 progress_supported = bool(initial and initial.get("in_progress"))
-            except Exception:
-                pass
+            except Exception as err:
+                _LOGGER.debug("Update progress endpoint not available: %s", err)
 
             if progress_supported:
                 # Poll progress until complete or timeout
@@ -352,8 +352,8 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
                                 "Mesh node %s updated to %s", node_name, new_fw
                             )
                             break
-                except Exception:
-                    pass
+                except Exception as err:
+                    _LOGGER.debug("Mesh node %s firmware re-check failed: %s", node_name, err)
 
         except HomeAssistantError:
             raise

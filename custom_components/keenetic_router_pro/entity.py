@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 from typing import Any
+from homeassistant.core import callback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
-from .coordinator import KeeneticCoordinator
+from .const import DOMAIN
+from .coordinator import KeeneticCoordinator, KeeneticPingCoordinator
 from .utils import (
     get_main_device_info,
     get_mesh_device_info,
@@ -29,24 +31,37 @@ class ControllerEntity(CoordinatorEntity):
         self._title = title
 
     @property
+    def _version_data(self) -> dict[str, Any]:
+        return self.coordinator.data.get("system", {}) or {}
+
+    @property
     def _firmware_version(self) -> str | None:
         version = self.coordinator.data.get("system", {}) or {}
+
         if version.get("title"):
             return str(version["title"])
         if version.get("release"):
             return str(version["release"])
+
         ndw4 = version.get("ndw4", {})
         if isinstance(ndw4, dict) and ndw4.get("version"):
             return str(ndw4["version"])
+
         return None
 
     @property
     def _model_name(self) -> str | None:
         version = self.coordinator.data.get("system", {}) or {}
-        for key in ("model", "description", "device", "hw_id"):
-            value = version.get(key)
-            if value:
-                return str(value)
+        
+        if version.get("model"):
+            return str(version["model"])
+        if version.get("description"):
+            return str(version["description"])
+        if version.get("device"):
+            return str(version["device"])
+        if version.get("hw_id"):
+            return str(version["hw_id"])
+        
         return None
     
     @property
@@ -85,6 +100,7 @@ class MeshEntity(CoordinatorEntity):
         self._entry_id = entry_id
         self._title = title
         self._node_cid = node_cid
+        self._safe_cid = node_cid.replace("-", "_").replace(":", "_")[:16]
 
     @property
     def _node(self) -> dict[str, Any] | None:
@@ -97,12 +113,14 @@ class MeshEntity(CoordinatorEntity):
     @property
     def device_info(self) -> DeviceInfo:
         node = self._node
+        node_ip = node.get("ip") if node else None
+        
         return get_mesh_device_info(
             self._title,
             self._entry_id,
-            node,
+            self._node,
             self._node_cid,
-            host=node.get("ip") if node else None,
+            host=node_ip,
             ssl=bool(getattr(self.coordinator.client, "_ssl", False)),
             fqdn=node.get("fqdn") if node else None,
         )
@@ -251,6 +269,16 @@ class CryptoMapEntity(CoordinatorEntity):
 class ClientEntity(CoordinatorEntity):
     """Base class for tracked-client entities exposed as their own HA device."""
 
+    # Keenetic's hotspot endpoint refreshes ``last-seen`` (and ``uptime`` for
+    # currently-connected clients) on every poll even when nothing else
+    # changed. Excluding these from the change-detection fingerprint lets
+    # idle/sleeping clients skip the per-tick state-write storm. Both fields
+    # are still surfaced on the dedicated uptime / last-seen sensors which
+    # subscribe to ``_handle_coordinator_update`` of their own — those
+    # sensors define their own native_value from the same coordinator data
+    # and HA's own state-bus dedup handles them at the SQLite level.
+    _CLIENT_FINGERPRINT_IGNORE = frozenset({"last-seen", "uptime"})
+
     def __init__(
         self,
         coordinator: KeeneticCoordinator,
@@ -268,11 +296,31 @@ class ClientEntity(CoordinatorEntity):
         self._label = label
         self._initial_ip = initial_ip
         self._ping_coordinator = ping_coordinator
+        self._last_fingerprint: dict[str, Any] | None = None
+
+    def _client_fingerprint(self, client: dict[str, Any] | None) -> dict[str, Any] | None:
+        if not client:
+            return None
+        return {
+            k: v for k, v in client.items()
+            if k not in self._CLIENT_FINGERPRINT_IGNORE
+        }
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        fingerprint = self._client_fingerprint(self._client)
+        if fingerprint is not None and fingerprint == self._last_fingerprint:
+            return
+        self._last_fingerprint = fingerprint
+        super()._handle_coordinator_update()
 
     @property
     def _client(self) -> dict[str, Any] | None:
-        clients = self.coordinator.data.get("clients", []) or []
-        for client in clients:
+        data = self.coordinator.data or {}
+        index = data.get("clients_by_mac")
+        if isinstance(index, dict):
+            return index.get(self._mac)
+        for client in data.get("clients", []) or []:
             if str(client.get("mac") or "").lower() == self._mac:
                 return client
         return None

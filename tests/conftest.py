@@ -71,10 +71,46 @@ class _UpdateFailed(Exception):
     pass
 
 
+class _CoordinatorEntity:
+    """Stub mirroring just enough of CoordinatorEntity for unit tests."""
+
+    def __init__(self, coordinator, *_a, **_kw):
+        self.coordinator = coordinator
+
+    def __class_getitem__(cls, item):
+        return cls
+
+    def _handle_coordinator_update(self) -> None:
+        return None
+
+    def async_write_ha_state(self) -> None:
+        return None
+
+
 update_coordinator = types.ModuleType("homeassistant.helpers.update_coordinator")
 update_coordinator.DataUpdateCoordinator = _DataUpdateCoordinator
 update_coordinator.UpdateFailed = _UpdateFailed
+update_coordinator.CoordinatorEntity = _CoordinatorEntity
 helpers.update_coordinator = update_coordinator
+
+device_registry = types.ModuleType("homeassistant.helpers.device_registry")
+device_registry.DeviceInfo = dict
+device_registry.format_mac = lambda mac: str(mac).lower()
+helpers.device_registry = device_registry
+
+issue_registry = types.ModuleType("homeassistant.helpers.issue_registry")
+
+
+class _IssueSeverity:
+    WARNING = "warning"
+    ERROR = "error"
+
+
+issue_registry.IssueSeverity = _IssueSeverity
+issue_registry.async_create_issue = lambda *a, **kw: None
+issue_registry.async_delete_issue = lambda *a, **kw: None
+helpers.issue_registry = issue_registry
+sys.modules.setdefault("homeassistant.helpers.issue_registry", issue_registry)
 
 homeassistant.__path__ = []  # treat as package
 
@@ -90,3 +126,4 @@ sys.modules.setdefault("homeassistant.core", core)
 sys.modules.setdefault("homeassistant.helpers", helpers)
 sys.modules.setdefault("homeassistant.helpers.aiohttp_client", aiohttp_client)
 sys.modules.setdefault("homeassistant.helpers.update_coordinator", update_coordinator)
+sys.modules.setdefault("homeassistant.helpers.device_registry", device_registry)

@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import KeeneticAuthError, KeeneticClient
 from .const import DOMAIN, FAST_SCAN_INTERVAL, DEFAULT_PING_INTERVAL
+from .utils import normalize_mac
 
 import logging
 
@@ -162,13 +163,16 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             }
 
         # ---------- Stage 1: independent fetches ----------
+        # Mesh nodes intentionally moved to stage 1.5 below so we can
+        # share the already-fetched ``clients`` list with the mesh
+        # fallback path (avoids a duplicate ``show/ip/hotspot`` round-trip
+        # on routers that have extenders).
         (
             system,
             version,
             version_available,
             interfaces,
             clients,
-            mesh_nodes,
             host_policies,
             ndns_info,
             ping_check_status,
@@ -181,7 +185,6 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _bounded(self.client.async_get_available_version_info()) if very_slow_refresh else _resolve(_cached_version_available),
             _bounded(self.client.async_get_interfaces()),
             _bounded(self.client.async_get_clients()),
-            _bounded(self.client.async_get_mesh_nodes()) if slow_refresh else _resolve(_prev.get("mesh_nodes", [])),
             _bounded(self.client.async_get_host_policies()) if slow_refresh else _resolve(_prev.get("host_policies", {})),
             _bounded(self.client.async_get_ndns_info()) if very_slow_refresh else _resolve(_prev.get("ndns", {})),
             _bounded(self.client.async_get_ping_check_status()),
@@ -190,6 +193,16 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _bounded(self.client.async_get_ipsec_diagnostics()) if very_slow_refresh else _resolve(_prev.get("ipsec_diagnostics", {})),
             return_exceptions=True,
         )
+
+        # Stage 1.5: mesh nodes — needs ``clients`` already fetched so
+        # the fallback path can reuse it instead of re-fetching.
+        if slow_refresh:
+            _resolved_clients = clients if isinstance(clients, list) else []
+            mesh_nodes = await _bounded(
+                self.client.async_get_mesh_nodes(clients=_resolved_clients)
+            )
+        else:
+            mesh_nodes = _prev.get("mesh_nodes", [])
  
         system = _ok("system_info", system, {})
         version = _ok("current_version", version, {})
@@ -247,8 +260,9 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
  
         # ---------- Stage 2: depends on stage-1 `interfaces` ----------
-        # All of these accept a pre-fetched ``interfaces=`` argument so
-        # we don't re-query the router for the same data once per call.
+        # Normalize once and share the result so each stage-2 call skips
+        # a redundant O(N) walk over the same payload.
+        iface_list = self.client._normalize_interfaces(interfaces)
         (
             wifi,
             wireguard,
@@ -259,14 +273,14 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             port_info,
             interface_stats,
         ) = await asyncio.gather(
-            _bounded(self.client.async_get_wifi_networks(interfaces=interfaces)),
-            _bounded(self.client.async_get_wireguard_status(interfaces=interfaces)),
-            _bounded(self.client.async_get_vpn_tunnels(interfaces=interfaces)),
-            _bounded(self.client.async_get_wan_status(interfaces=interfaces)),
-            _bounded(self.client.async_get_wan_interfaces(interfaces=interfaces)),
-            _bounded(self.client.async_get_traffic_stats(interfaces=interfaces)),
+            _bounded(self.client.async_get_wifi_networks(interfaces=interfaces, iface_list=iface_list)),
+            _bounded(self.client.async_get_wireguard_status(interfaces=interfaces, iface_list=iface_list)),
+            _bounded(self.client.async_get_vpn_tunnels(interfaces=interfaces, iface_list=iface_list)),
+            _bounded(self.client.async_get_wan_status(interfaces=interfaces, iface_list=iface_list)),
+            _bounded(self.client.async_get_wan_interfaces(interfaces=interfaces, iface_list=iface_list)),
+            _bounded(self.client.async_get_traffic_stats(interfaces=interfaces, iface_list=iface_list)),
             _bounded(self.client.async_get_port_info(interfaces=interfaces)),
-            _bounded(self.client.async_get_all_interface_stats(interfaces=interfaces)),
+            _bounded(self.client.async_get_all_interface_stats(interfaces=interfaces, iface_list=iface_list)),
             return_exceptions=True,
         )
  
@@ -473,6 +487,11 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "wireguard": wireguard,
             "vpn_tunnels": vpn_tunnels,
             "clients": clients,
+            "clients_by_mac": {
+                normalize_mac(c.get("mac")): c
+                for c in clients
+                if isinstance(c, dict) and c.get("mac")
+            },
             "wan_status": wan_status,
             "wan_interfaces": wan_interfaces,
             "mesh_nodes": mesh_nodes,
@@ -558,6 +577,7 @@ class KeeneticPingCoordinator(DataUpdateCoordinator[dict[str, bool]]):
 
         # MAC → IP mapping, updated by the main coordinator on each tick.
         self._mac_to_ip: dict[str, str] = {}
+        self._tracked_macs: set[str] = set()
         for c in tracked_clients:
             # Defensive: handle both dict and plain string (MAC) formats
             if isinstance(c, dict):
@@ -566,6 +586,8 @@ class KeeneticPingCoordinator(DataUpdateCoordinator[dict[str, bool]]):
             else:
                 mac = str(c).lower()
                 ip = ""
+            if mac:
+                self._tracked_macs.add(mac)
             if mac and self._is_valid_ip(ip):
                 self._mac_to_ip[mac] = ip
 
@@ -593,15 +615,7 @@ class KeeneticPingCoordinator(DataUpdateCoordinator[dict[str, bool]]):
 
     def get_tracked_macs(self) -> set[str]:
         """Return set of tracked MAC addresses."""
-        result = set()
-        for c in self._tracked_clients:
-            if isinstance(c, dict):
-                mac = str(c.get("mac") or "").lower()
-            else:
-                mac = str(c).lower()
-            if mac:
-                result.add(mac)
-        return result
+        return set(self._tracked_macs)
 
     def get_client_info(self, mac: str) -> dict[str, str] | None:
         """Get client info by MAC address."""

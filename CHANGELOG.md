@@ -8,6 +8,50 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.6.8 - Performance refactor
+
+### Performance
+
+- **Coordinator builds an O(1) MAC-keyed client index.** Per-client entities
+  (sensors, switches, device-trackers) used to scan the full client list on
+  every coordinator tick to find their own row. The coordinator now publishes
+  `clients_by_mac`, and entities look themselves up directly. On a network
+  with hundreds of tracked devices this turns an O(N²) per-tick cost into
+  O(N).
+- **Per-client entities skip no-op state writes.** `ClientEntity` now compares
+  a fingerprint of its client row (excluding `last-seen` / `uptime` ticks) and
+  short-circuits `_handle_coordinator_update` when nothing meaningful changed.
+  Idle clients no longer trigger HA state writes every poll cycle.
+- **Interface stats fetched in parallel.** `async_get_all_interface_stats`
+  now uses `asyncio.gather` instead of sequential awaits, cutting WAN-stats
+  fetch latency on multi-interface routers.
+- **Interface list shared across the polling stages.** Stage 1 now fetches
+  `iface_list` once and passes it through to stage 2, mesh fetch, and the
+  WAN-status projection — eliminating ~3 redundant `show interface` round-trips
+  per coordinator tick.
+- **Mesh fetch reuses the already-fetched client list.** `_get_mesh_nodes_from_clients`
+  accepts a pre-fetched `clients=` argument so we don't re-call
+  `async_get_clients()` when the coordinator just fetched it.
+
+### Internal
+
+- Migrated `async_timeout` → stdlib `asyncio.timeout` (Python 3.11+).
+- Centralized magic strings (`WAN_STATUS_*`, `IPSEC_STATE_ESTABLISHED`,
+  `TRUTHY_STRINGS`, RCI paths) in `const.py`.
+- Extracted `normalize_mac`, `find_client_by_mac`, `parse_memory_fraction`
+  helpers into `utils.py` with unit tests.
+- Removed dead duplicate `Mesh*` sensor classes from `sensor/system.py`.
+- Narrowed bare `except:` in API helpers to log at debug.
+- Added pytest coverage: `test_utils.py` and `test_entity_fingerprint.py`,
+  plus extended `test_api_helpers.py` for the iface_list short-circuit and
+  parallel interface-stats paths.
+
+### Notes
+
+- No user-facing config changes. Entity unique IDs preserved.
+- 1.6.6 mesh `device_info` None-guard and 1.6.7 plaintext-HTTP repair card
+  are preserved.
+
 ## 1.6.7 - Plaintext-HTTP repair warning
 
 ### 🔒 Security

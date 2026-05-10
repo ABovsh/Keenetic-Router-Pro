@@ -120,8 +120,7 @@ class KeeneticMeshUptimeSensor(MeshEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        safe_cid = self._node_cid.replace("-", "_").replace(":", "_")[:16]
-        return f"{safe_cid}_uptime_v2"
+        return f"{self._safe_cid}_uptime_v2"
 
     @property
     def native_unit_of_measurement(self) -> str:
@@ -148,8 +147,7 @@ class KeeneticMeshClientsSensor(MeshEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        safe_cid = self._node_cid.replace("-", "_").replace(":", "_")[:16]
-        return f"{safe_cid}_clients_v2"
+        return f"{self._safe_cid}_clients_v2"
 
     @property
     def native_value(self) -> int:
@@ -197,8 +195,7 @@ class KeeneticMeshLocalIpSensor(MeshEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        safe_cid = self._node_cid.replace("-", "_").replace(":", "_")[:16]
-        return f"{safe_cid}_local_ip_v2"
+        return f"{self._safe_cid}_local_ip_v2"
 
     @property
     def native_value(self) -> str | None:
@@ -222,8 +219,7 @@ class KeeneticMeshCpuLoadSensor(MeshEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        safe_cid = self._node_cid.replace("-", "_").replace(":", "_")[:16]
-        return f"{safe_cid}_cpu_load_v2"
+        return f"{self._safe_cid}_cpu_load_v2"
 
     @property
     def native_value(self) -> float | None:
@@ -252,8 +248,7 @@ class KeeneticMeshMemorySensor(MeshEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        safe_cid = self._node_cid.replace("-", "_").replace(":", "_")[:16]
-        return f"{safe_cid}_memory_v2"
+        return f"{self._safe_cid}_memory_v2"
 
     @property
     def native_value(self) -> float | None:
@@ -284,8 +279,7 @@ class KeeneticMeshFirmwareVersionSensor(MeshEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        safe_cid = self._node_cid.replace("-", "_").replace(":", "_")[:16]
-        return f"{safe_cid}_firmware_version_v2"
+        return f"{self._safe_cid}_firmware_version_v2"
 
     @property
     def native_value(self) -> str | None:
@@ -333,8 +327,7 @@ class KeeneticMeshPortSensor(MeshEntity, SensorEntity):
     @property
     def unique_id(self) -> str:
         """Return unique ID for the sensor."""
-        safe_cid = self._node_cid.replace("-", "_").replace(":", "_")[:16]
-        return f"{safe_cid}_port_{self._port_label}_v2"
+        return f"{self._safe_cid}_port_{self._port_label}_v2"
 
     @property
     def native_value(self) -> str:
