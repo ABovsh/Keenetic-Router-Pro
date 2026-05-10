@@ -29,10 +29,20 @@ _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.api")
 
 RCI_ROOT = "/rci"
 _SENSITIVE_NAMES = frozenset(
-    {"authorization", "cookie", "key", "pass", "password", "psk", "secret"}
+    {
+        "authorization",
+        "cookie",
+        "key",
+        "login",
+        "pass",
+        "password",
+        "psk",
+        "secret",
+        "username",
+    }
 )
 _SENSITIVE_RESPONSE_RE = re.compile(
-    r'(?i)("?(?:authorization|cookie|key|pass|password|psk|secret)"?\s*[:=]\s*)'
+    r'(?i)("?(?:authorization|cookie|key|login|pass|password|psk|secret|username)"?\s*[:=]\s*)'
     r'("[^"]*"|\'[^\']*\'|[^,\s;}\]]+)'
 )
 _CLI_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.:/@+-]+$")
@@ -160,6 +170,25 @@ def _payload_summary(payload: Any) -> Any:
     return type(payload).__name__
 
 
+def _to_int(value: Any, default: int = 0) -> int:
+    """Return an int from loosely typed Keenetic RCI values."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _truthy(value: Any) -> bool:
+    """Return True only for actual truthy Keenetic-style values."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in TRUTHY_STRINGS
+    return bool(value)
+
+
 def _cookie_header_from_response(resp: aiohttp.ClientResponse) -> str | None:
     """Extract a Cookie header value from a Set-Cookie response header."""
     raw_cookie = resp.headers.get("Set-Cookie", "")
@@ -192,7 +221,12 @@ def _nested_dict_items(data: Any, *keys: str) -> List[Dict[str, Any]]:
         return []
 
     for key in keys:
-        items = _dict_items(data.get(key))
+        value = data.get(key)
+        if isinstance(value, dict) and any(
+            marker in value for marker in ("cid", "mac", "id", "ip", "address")
+        ):
+            return [value]
+        items = _dict_items(value)
         if items:
             return items
     return []
@@ -2181,10 +2215,16 @@ class KeeneticClient:
             # Endpoint çalıştı
             self._mws_member_supported = True
 
-            if not data or not isinstance(data, list):
+            if not data:
                 return fallback_nodes
 
-            for member in data:
+            members = _nested_dict_items(data, "member", "members", "mws")
+            if not members and isinstance(data, list):
+                members = _dict_items(data)
+            if not members:
+                return fallback_nodes
+
+            for member in members:
                 cid = member.get("cid")
                 if not cid:
                     continue
@@ -2194,11 +2234,11 @@ class KeeneticClient:
                 rci_info = member.get("rci", {})
 
                 is_connected = (
-                    rci_info.get("errors", 0) == 0 
-                    and member.get("internet-available", False)
+                    _to_int(rci_info.get("errors", 0)) == 0
+                    and _truthy(member.get("internet-available", False))
                 )
 
-                ports = member.get("port", [])
+                ports = _dict_items(member.get("port", []))
                 normalized_ports = []
                 for port in ports:
                     if isinstance(port, dict):
@@ -2270,7 +2310,7 @@ class KeeneticClient:
             if not mac:
                 continue
 
-            is_active = bool(client.get("active", False))
+            is_active = _truthy(client.get("active", False))
 
             nodes.append({
                 "id": mac,
@@ -2407,7 +2447,7 @@ class KeeneticClient:
             iface_name = iface.get("id") or iface.get("interface-name")
             if not iface_name:
                 continue
-            iface_type = iface.get("type", "").lower()
+            iface_type = str(iface.get("type") or "").lower()
             if iface_name not in wan_ids and iface_type in (
                 "bridge",
                 "vlan",
@@ -3015,8 +3055,8 @@ class KeeneticClient:
                 return {}
 
             return {
-                "in_progress": data.get("in-progress", False),
-                "progress_percent": data.get("progress", 0),
+                "in_progress": _truthy(data.get("in-progress", False)),
+                "progress_percent": _to_int(data.get("progress", 0)),
                 "stage": data.get("stage"),
                 "eta_seconds": data.get("eta"),
             }

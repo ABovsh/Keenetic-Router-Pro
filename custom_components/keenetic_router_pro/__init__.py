@@ -52,6 +52,16 @@ _LOGGER = logging.getLogger(__name__)
 ISSUE_INSECURE_HTTP = "insecure_http"
 
 
+def _mask_identifier(value: Any, *, keep: int = 5) -> str:
+    """Return a short non-sensitive suffix for logs."""
+    text = str(value or "")
+    if not text:
+        return "<unknown>"
+    suffix = text[-keep:] if len(text) > keep else text
+    suffix = suffix.lstrip(".:")
+    return f"...{suffix}"
+
+
 def _is_loopback_host(host: str) -> bool:
     """True if host is loopback (localhost / 127.x / ::1) — plaintext is acceptable."""
     candidate = (host or "").strip().lower()
@@ -289,7 +299,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 name = client_info.get("name") or client_info.get("hostname") or mac.upper()
                 ip = client_info.get("ip")
                 
-                _LOGGER.info("New device connected: %s (%s) - %s", name, mac, ip)
+                _LOGGER.info(
+                    "New device connected: %s (%s) - %s",
+                    name,
+                    _mask_identifier(mac),
+                    _mask_identifier(ip),
+                )
                 
                 hass.bus.async_fire(
                     EVENT_NEW_DEVICE,

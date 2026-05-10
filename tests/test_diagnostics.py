@@ -142,3 +142,12 @@ def test_keenetic_client_repr_does_not_leak_credentials() -> None:
     assert "admin" not in text
     assert "test-password" not in text
     assert "<redacted>" in text
+
+
+def test_log_identifier_masking_hides_full_mac_and_ip() -> None:
+    """Info logs should not expose full client MAC/IP identifiers."""
+    from custom_components.keenetic_router_pro import _mask_identifier
+
+    assert _mask_identifier("aa:bb:cc:dd:ee:ff") == "...ee:ff"
+    assert _mask_identifier("192.168.3.55") == "...3.55"
+    assert _mask_identifier("") == "<unknown>"

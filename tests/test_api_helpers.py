@@ -147,10 +147,12 @@ def test_502_response_mentions_keendns_upstream() -> None:
 def test_response_summary_redacts_obvious_secrets() -> None:
     """Router error excerpts should not expose credentials in logs/errors."""
     summary = _response_summary(
-        '{"password": "secret", "cookie": "session=abc", "message": "failed"}'
+        '{"login": "admin", "password": "secret", '
+        '"cookie": "session=abc", "message": "failed"}'
     )
 
     assert "secret" not in summary
+    assert "admin" not in summary
     assert "session=abc" not in summary
     assert "<redacted>" in summary
 
@@ -162,7 +164,7 @@ def test_payload_summary_redacts_sensitive_keys() -> None:
     )
 
     assert summary == {
-        "login": "str",
+        "login": "<redacted>",
         "password": "<redacted>",
         "components": "list",
     }
@@ -330,6 +332,19 @@ def test_get_mesh_nodes_from_clients_falls_back_to_fetch_when_no_arg() -> None:
     assert nodes[0]["state"] == "down"
 
 
+def test_get_mesh_nodes_from_clients_parses_string_booleans() -> None:
+    """Keenetic hotspot payloads use string booleans for extender activity."""
+    client = KeeneticClient("192.0.2.1", "admin", "secret")
+    clients = [
+        {"mac": "AA:BB:CC:00:00:10", "system-mode": "extender", "active": "yes"},
+        {"mac": "AA:BB:CC:00:00:11", "system-mode": "repeater", "active": "no"},
+    ]
+
+    nodes = asyncio.run(client._get_mesh_nodes_from_clients(clients=clients))
+
+    assert [node["state"] for node in nodes] == ["up", "down"]
+
+
 def test_async_get_clients_parses_single_host_dict_payload() -> None:
     """Router hotspot host responses may be a single dict instead of a list."""
     client = KeeneticClient("192.0.2.1", "admin", "secret")
@@ -466,6 +481,105 @@ def test_async_get_mesh_nodes_keeps_fallback_when_mws_members_have_no_cid() -> N
 
     assert [node["mac"] for node in nodes] == ["AA:BB:CC:00:00:02"]
     assert nodes[0]["state"] == "down"
+
+
+def test_async_get_mesh_nodes_parses_dict_member_payload_and_single_port() -> None:
+    """RCI may return MWS members/ports as dicts instead of lists."""
+    client = KeeneticClient("192.0.2.1", "admin", "secret")
+    clients = [
+        {
+            "mac": "AA:BB:CC:00:00:03",
+            "system-mode": "extender",
+            "active": True,
+        }
+    ]
+
+    async def fake_get(subpath):
+        assert subpath == "show/mws/member"
+        return {
+            "member": {
+                "cid": "AA:BB:CC:00:00:03",
+                "mac": "AA:BB:CC:00:00:03",
+                "ip": "192.0.2.53",
+                "known-host": "Kitchen Extender",
+                "internet-available": "yes",
+                "rci": {"errors": "0"},
+                "system": {"uptime": "123"},
+                "port": {
+                    "label": "1",
+                    "appearance": "GigabitEthernet",
+                    "link": "up",
+                    "speed": 1000,
+                },
+            }
+        }
+
+    client._rci_get = fake_get  # type: ignore[assignment]
+
+    nodes = asyncio.run(client.async_get_mesh_nodes(clients=clients))
+
+    assert len(nodes) == 1
+    assert nodes[0]["cid"] == "AA:BB:CC:00:00:03"
+    assert nodes[0]["connected"] is True
+    assert nodes[0]["name"] == "Kitchen Extender"
+    assert nodes[0]["port"] == [
+        {
+            "label": "1",
+            "appearance": "GigabitEthernet",
+            "link": "up",
+            "speed": 1000,
+            "duplex": None,
+        }
+    ]
+
+
+def test_async_get_mesh_nodes_treats_string_no_as_disconnected() -> None:
+    """String booleans from MWS must not make offline extenders look online."""
+    client = KeeneticClient("192.0.2.1", "admin", "secret")
+    clients = [
+        {
+            "mac": "AA:BB:CC:00:00:04",
+            "system-mode": "extender",
+            "active": True,
+        }
+    ]
+
+    async def fake_get(subpath):
+        return [
+            {
+                "cid": "AA:BB:CC:00:00:04",
+                "mac": "AA:BB:CC:00:00:04",
+                "internet-available": "no",
+                "rci": {"errors": "0"},
+            }
+        ]
+
+    client._rci_get = fake_get  # type: ignore[assignment]
+
+    nodes = asyncio.run(client.async_get_mesh_nodes(clients=clients))
+
+    assert nodes[0]["connected"] is False
+    assert nodes[0]["state"] == "down"
+
+
+def test_update_progress_normalizes_string_values() -> None:
+    """Keenetic update status may return boolean/progress values as strings."""
+    client = KeeneticClient("192.0.2.1", "admin", "secret")
+
+    async def fake_get(subpath):
+        assert subpath == "system/update/status"
+        return {"in-progress": "no", "progress": "85", "stage": "download"}
+
+    client._rci_get = fake_get  # type: ignore[assignment]
+
+    progress = asyncio.run(client.async_get_update_progress())
+
+    assert progress == {
+        "in_progress": False,
+        "progress_percent": 85,
+        "stage": "download",
+        "eta_seconds": None,
+    }
 
 
 def test_summarize_client_stats_excludes_extenders() -> None:

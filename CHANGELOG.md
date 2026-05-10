@@ -18,17 +18,27 @@ git log.
 - **Mesh fallback nodes survive blank MWS responses.** If `show/mws/member`
   returns an empty or incomplete payload, extenders discovered from the
   hotspot client table remain available instead of disappearing for that tick.
+- **MWS single-object payloads are parsed correctly.** `show/mws/member`
+  responses that collapse one member or port into a dict now still produce
+  the correct mesh node and port entities.
+- **String booleans from Keenetic are handled consistently.** Mesh extender
+  activity, MWS internet availability, and firmware update progress no longer
+  treat values like `"no"` as truthy.
 - **Cached IPsec throughput is not resampled on fast coordinator ticks.**
   Crypto-map throughput now preserves the last real sample until the next
   slow crypto-map refresh, avoiding misleading zero/underestimated rates.
+- **New-device logs no longer expose full client MAC/IP identifiers.** Home
+  Assistant events still contain the full data for automations, but info logs
+  now use masked suffixes.
 
 ### Internal
 
 - **Coverage baseline added to CI.** The test workflow now runs coverage and
   fails if the project drops below the current meaningful baseline.
-- **Regression coverage increased to 138 lightweight tests.** New tests cover
+- **Regression coverage increased to 143 lightweight tests.** New tests cover
   coordinator staged updates, tracked-client policy/presence entities,
-  WireGuard sensors, dynamic mesh platform helpers, and RCI payload shapes.
+  WireGuard sensors, dynamic mesh platform helpers, RCI payload shapes, MWS
+  payload variants, update progress parsing, and privacy-oriented log masking.
 
 ## 1.7.3 - State freshness and direct mesh update hardening
 
