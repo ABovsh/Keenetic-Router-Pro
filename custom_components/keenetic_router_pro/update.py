@@ -16,7 +16,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api import KeeneticClient
-from .const import DOMAIN, DATA_CLIENT, DATA_COORDINATOR
+from .const import DOMAIN
 from .coordinator import KeeneticCoordinator
 from .entity import ControllerEntity, MeshEntity
 
@@ -38,6 +38,8 @@ def _reported_latest_version(available: str | None, current: str | None) -> str 
 
         if AwesomeVersion(available) < AwesomeVersion(current):
             return f"{available} (channel switch)"
+    except asyncio.CancelledError:
+        raise
     except Exception:  # noqa: BLE001
         pass
     return available
@@ -49,9 +51,9 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Keenetic Router Pro update entities."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    coordinator: KeeneticCoordinator = data[DATA_COORDINATOR]
-    client: KeeneticClient = data[DATA_CLIENT]
+    runtime = entry.runtime_data
+    coordinator: KeeneticCoordinator = runtime.coordinator
+    client: KeeneticClient = runtime.client
 
     entities: list[UpdateEntity] = [
         KeeneticFirmwareUpdate(coordinator, entry, client),
@@ -175,6 +177,8 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
             try:
                 initial = await self._client.async_get_update_progress()
                 progress_supported = bool(initial and initial.get("in_progress"))
+            except asyncio.CancelledError:
+                raise
             except Exception as err:
                 _LOGGER.debug("Update progress endpoint not available: %s", err)
 
@@ -184,6 +188,8 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
                     await asyncio.sleep(2)
                     try:
                         progress = await self._client.async_get_update_progress()
+                    except asyncio.CancelledError:
+                        raise
                     except Exception:
                         # Connection lost — router is likely rebooting
                         self._update_progress = 95
@@ -211,6 +217,8 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
                     await asyncio.sleep(2)
                     try:
                         await self._client.async_get_system_info()
+                    except asyncio.CancelledError:
+                        raise
                     except Exception:
                         # Connection lost — router is rebooting
                         self._update_progress = 90
@@ -218,6 +226,8 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
                         break
 
         except HomeAssistantError:
+            raise
+        except asyncio.CancelledError:
             raise
         except Exception as err:
             _LOGGER.error("Firmware update failed: %s", err)
@@ -352,10 +362,14 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
                                 "Mesh node %s updated to %s", node_name, new_fw
                             )
                             break
+                except asyncio.CancelledError:
+                    raise
                 except Exception as err:
                     _LOGGER.debug("Mesh node %s firmware re-check failed: %s", node_name, err)
 
         except HomeAssistantError:
+            raise
+        except asyncio.CancelledError:
             raise
         except Exception as err:
             _LOGGER.error("Mesh firmware update failed for %s: %s", node_name, err)

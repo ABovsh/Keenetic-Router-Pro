@@ -92,12 +92,18 @@ class KeeneticMemoryUsageSensor(ControllerEntity, SensorEntity):
 
 
 class KeeneticUptimeSensor(ControllerEntity, SensorEntity):
-    """Router uptime sensor."""
+    """Router uptime sensor.
+
+    ``TOTAL_INCREASING`` is the right state class for a monotonic
+    counter that resets to zero on reboot. Storing uptime as
+    ``MEASUREMENT`` produces a sawtooth in long-term statistics
+    because every poll inserts a fresh sample.
+    """
     _attr_has_entity_name = True
     _attr_translation_key = "uptime"
     _attr_icon = "mdi:timer-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:

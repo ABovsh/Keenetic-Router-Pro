@@ -40,9 +40,16 @@ class _BaseWgSensor(ControllerEntity, SensorEntity):
 
 
 class KeeneticWgUptimeSensor(_BaseWgSensor):
-    """WireGuard tunnel uptime sensor."""
+    """WireGuard tunnel uptime sensor.
+
+    Override the base ``MEASUREMENT`` default with ``TOTAL_INCREASING``:
+    uptime resets to zero when the tunnel reconnects, which is exactly
+    the semantics ``TOTAL_INCREASING`` expects, and avoids the sawtooth
+    long-term-statistics graph that ``MEASUREMENT`` would produce.
+    """
     _attr_has_entity_name = True
     _attr_suggested_display_precision = 0
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     @property
     def unique_id(self) -> str:

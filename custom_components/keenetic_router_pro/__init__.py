@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -16,9 +18,6 @@ from .const import (
     DOMAIN,
     DEFAULT_PORT,
     DEFAULT_SSL,
-    DATA_CLIENT,
-    DATA_COORDINATOR,
-    DATA_PING_COORDINATOR,
     CONF_TRACKED_CLIENTS,
     CONF_USE_CHALLENGE_AUTH,
     CONF_PING_INTERVAL,
@@ -27,6 +26,24 @@ from .const import (
     EVENT_NEW_DEVICE,
 )
 from .coordinator import KeeneticCoordinator, KeeneticPingCoordinator
+
+
+@dataclass
+class KeeneticRuntimeData:
+    """Strongly-typed runtime container for a Keenetic config entry.
+
+    Stored on ``ConfigEntry.runtime_data`` so platforms can reach the
+    coordinator and API client without going through ``hass.data``.
+    """
+
+    client: KeeneticClient
+    coordinator: KeeneticCoordinator
+    ping_coordinator: "KeeneticPingCoordinator"
+
+
+# Type alias used by platform code: ``entry: KeeneticConfigEntry``
+# gives correct typing for ``entry.runtime_data``.
+KeeneticConfigEntry = ConfigEntry  # ConfigEntry[KeeneticRuntimeData] on HA 2024.5+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -144,6 +161,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # döngüde tekrar denensin.
         try:
             await ping_coordinator.async_refresh()
+        except asyncio.CancelledError:
+            raise
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug(
                 "Initial ping refresh failed (non-fatal), will retry on next cycle: %s", err
@@ -151,12 +170,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _async_update_insecure_http_issue(hass, entry, host, use_ssl)
 
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {
-        DATA_CLIENT: client,
-        DATA_COORDINATOR: coordinator,
-        DATA_PING_COORDINATOR: ping_coordinator,
-    }
+    # Modern HA pattern: stash strongly-typed runtime data on the entry
+    # itself. Platforms read ``entry.runtime_data.coordinator`` instead
+    # of indexing ``hass.data[DOMAIN][entry.entry_id]``.
+    entry.runtime_data = KeeneticRuntimeData(
+        client=client,
+        coordinator=coordinator,
+        ping_coordinator=ping_coordinator,
+    )
 
     @callback
     def _async_handle_new_device() -> None:
@@ -208,14 +229,14 @@ async def async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Config entry silinir veya devre dışı bırakılırken çalışır."""
+    """Tear down platforms and clear the entry-scoped Repair issue.
+
+    runtime_data is automatically dropped by HA when the entry is
+    unloaded, so there is nothing for us to clean up by hand.
+    """
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if not unload_ok:
         return False
-
-    entry_data = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
-    if not hass.data.get(DOMAIN):
-        hass.data.pop(DOMAIN, None)
 
     ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_INSECURE_HTTP}_{entry.entry_id}")
 

@@ -9,7 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from ..const import DOMAIN, DATA_COORDINATOR, DATA_CLIENT, CONF_TRACKED_CLIENTS
+from ..const import DOMAIN, CONF_TRACKED_CLIENTS
 from ..coordinator import KeeneticCoordinator
 from .. import KeeneticClient
 
@@ -107,9 +107,9 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Keenetic Router Pro sensors from a config entry."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    coordinator: KeeneticCoordinator = data[DATA_COORDINATOR]
-    client: Optional[KeeneticClient] = data.get(DATA_CLIENT)
+    runtime = entry.runtime_data
+    coordinator: KeeneticCoordinator = runtime.coordinator
+    client: Optional[KeeneticClient] = runtime.client
     entities: list[SensorEntity] = []
 
     # Temel sistem sensörleri

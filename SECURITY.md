@@ -1,105 +1,70 @@
-# Security
+# Security policy
 
-This document describes how Keenetic Router Pro handles your router
-credentials and what you can do to keep them safe.
+This document describes the security model and trust boundaries of the
+Keenetic Router Pro Home Assistant integration, what the integration
+itself protects, and what it cannot protect on your behalf.
 
-## Where the password is stored
+## Reporting a vulnerability
 
-Home Assistant stores config-entry data on disk in:
+Please open a private security advisory on GitHub
+(`Security → Advisories → New draft advisory`) rather than a public
+issue. Include enough detail to reproduce the problem, the affected
+version (`manifest.json` `version` field), and the impact you
+observed.
 
-```
-/config/.storage/core.config_entries
-```
+## What this integration protects
 
-That file contains the username, password and host of every integration
-you have configured — including this one. **Home Assistant stores it in
-plain text by design.** That is a global HA architecture choice and is
-not specific to this integration.
+The integration tries hard to keep your router credentials out of any
+output that a user is likely to share publicly:
 
-What this integration controls:
+- **Diagnostics download** — `Settings → Devices & Services → Keenetic
+  Router Pro → ⋮ → Download diagnostics` redacts `username`,
+  `password`, `mac`, `ssid`, `psk`, `cookie`, `set-cookie`,
+  `authorization`, and similar keys before producing the file. The
+  redaction set is enforced by tests in `tests/test_diagnostics.py`.
+- **Logs** — request and response payloads are passed through a
+  redactor before they reach `_LOGGER`. The API client's `__repr__`
+  is hard-coded to never show username/password, so a stray
+  `_LOGGER.debug("client=%s", client)` cannot leak them.
+- **Config flow input** — the password field uses Home Assistant's
+  password selector, so it is masked in the UI on initial setup,
+  reauth, and reconfigure flows.
+- **Plaintext HTTP** — if you configure the integration to talk to a
+  router on a non-loopback host without TLS, a Repair card is raised
+  warning that credentials traverse the network in plaintext.
 
-- It only reads the password from the config entry.
-- It does NOT write the password (or any other config-entry value) to
-  any file inside `custom_components/keenetic_router_pro/`.
-- It does NOT cache credentials in `/config/` outside of HA's own
-  `.storage/` directory.
-- The in-memory client object overrides `__repr__` so that a stray
-  `_LOGGER.debug("client=%s", client)` cannot accidentally print the
-  password.
+## What this integration **cannot** protect
 
-## Recommendations
+Home Assistant stores every config-entry's data — including the router
+password — as plaintext JSON in `<config>/.storage/core.config_entries`.
+Anyone with read access to that file can recover your router password.
+**No HA integration can prevent this.** Mitigations are HA-wide:
 
-- Restrict permissions on `/config/.storage/`:
-  ```bash
-  chmod 700 /config/.storage
-  chmod 600 /config/.storage/core.config_entries
-  ```
-  (HA Container / HAOS already do this; verify after restores.)
-- Keep `/config/` backups encrypted — they contain `.storage/`.
-- If you ever shared a backup, log file or diagnostics dump from before
-  this hardening, **rotate the router password**:
-  Keenetic web UI → *Management → Users and access* → edit the admin
-  user → set a new password → reconfigure the integration in HA
-  (*Settings → Devices & Services → Keenetic Router Pro → Reconfigure*).
+- Restrict filesystem permissions on `<config>/.storage/` (HA already
+  does this by default).
+- Enable full-disk encryption on the host running Home Assistant.
+- Avoid running HA on hosts shared with untrusted users.
 
-## Plaintext HTTP vs HTTPS
+If you previously shared a HA backup, a `.storage/` snapshot, or a
+diagnostics file produced by an older version of this integration,
+**rotate your router admin password now**.
 
-Keenetic routers accept both HTTP and HTTPS for the web admin / RCI API.
-This integration supports both via the **SSL** toggle in setup and
-reconfigure. **Use HTTPS** wherever the router supports it.
+## Reducing risk on the router itself
 
-When the integration is configured for plaintext HTTP and the host is not
-a loopback address, every poll sends:
+Anything that limits the blast radius of a leaked router credential is
+worth doing on the router itself:
 
-- the router username in cleartext;
-- a replayable NDW2 challenge-response password hash (or HTTP Basic Auth
-  credentials, depending on the connection mode);
-- the authenticated session cookie.
+- Use a unique password (do not reuse your KeenDNS / mywifi.keenetic
+  account password).
+- Disable Web UI access from the WAN; require VPN or a local network
+  for admin access.
+- Disable Telnet (plaintext); use SSH or the Web UI.
+- Disable WPS on Wi-Fi.
+- Keep firmware up to date — older KeeneticOS releases have
+  CVE-tracked auth bugs.
 
-Anyone on the same LAN — an untrusted Wi-Fi guest, a compromised IoT
-device, or a malicious Ethernet drop — can capture these and impersonate
-you to the router. The integration raises a Home Assistant Repair card
-when this is detected so the risk is visible in the UI.
+## Supported versions
 
-To switch to HTTPS:
-1. In the router web UI: *System → Components* → confirm `SSL/TLS support`
-   is installed.
-2. *Management → Web Admin* → enable HTTPS (port 443 by default).
-3. In Home Assistant: *Settings → Devices & Services → Keenetic Router Pro
-   → Reconfigure* → enable **SSL** and update the port.
-4. After confirming HTTPS works, **rotate the router admin password** —
-   anyone who sniffed the LAN since setup may already have it.
-
-The repair card is automatically cleared once the entry reloads with SSL
-enabled or with a loopback host.
-
-## Diagnostics dumps
-
-When you click *Download diagnostics* on the config entry, HA produces a
-JSON file. This integration's `diagnostics.py` runs the dump through
-`homeassistant.components.diagnostics.async_redact_data` and strips at
-least:
-
-`password`, `username`, `login`, `host`, `ip`, `mac`, `bssid`, `ssid`,
-`psk`, `passphrase`, `pre_shared_key`, `key`, `secret`, `token`,
-`cookie`, `set-cookie`, `authorization`, `x-ndm-challenge`,
-`x-ndm-realm`, `serial`, `serial_number`, `hw_id`, `device_id`.
-
-Any value under one of these keys is replaced with `**REDACTED**`. You
-can safely attach the dump to bug reports.
-
-## Logs
-
-The API client redacts known sensitive fields (`password`, `cookie`,
-`authorization`, `psk`, `secret`, `key`) from request payload summaries
-and HTTP response excerpts before they reach the logger. Authentication
-headers are constructed at call-time and never logged.
-
-If you see something that looks like a credential leak in the logs,
-please open an issue (with the offending log line redacted).
-
-## Reporting vulnerabilities
-
-Please open a GitHub issue with the label `security`, or contact the
-maintainer directly via the email in the commit history. Do not include
-real credentials in bug reports — use obvious placeholders.
+Only the most recent **minor** release is supported for security
+fixes. Older minor versions receive bug fixes on a best-effort basis
+when a user reports a regression. There is no LTS branch.

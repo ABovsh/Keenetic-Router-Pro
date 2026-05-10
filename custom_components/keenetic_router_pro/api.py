@@ -572,6 +572,8 @@ class KeeneticClient:
 
             return False
 
+        except asyncio.CancelledError:
+            raise
         except Exception as err:
             _LOGGER.debug("Ping to %s failed: %s", ip_address, err)
             return False
@@ -728,6 +730,8 @@ class KeeneticClient:
                 stat_keys = {"rxbytes", "txbytes", "rxspeed", "txspeed"}
                 if stat_keys.intersection(data):
                     return data
+        except asyncio.CancelledError:
+            raise
         except Exception as err:
             _LOGGER.debug(
                 "Parse-style interface stat failed for %s: %s; trying GET fallback",
@@ -1799,6 +1803,8 @@ class KeeneticClient:
                 ),
                 "proxies": proxies,
             }
+        except asyncio.CancelledError:
+            raise
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("Error getting DNS proxy status: %s", err)
             return {}
@@ -1877,6 +1883,8 @@ class KeeneticClient:
             diag = self._parse_ipsec_vici_diagnostics(lines)
             diag["command"] = "show log 200 once"
             return diag
+        except asyncio.CancelledError:
+            raise
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("Error getting IPsec diagnostics: %s", err)
             return {}
@@ -1948,6 +1956,8 @@ class KeeneticClient:
         """
         try:
             data = await self._rci_get("show/crypto/map")
+        except asyncio.CancelledError:
+            raise
         except Exception as err:
             _LOGGER.debug("show/crypto/map unavailable: %s", err)
             return {}
@@ -2097,6 +2107,8 @@ class KeeneticClient:
         # the switch "flip back" with no obvious reason.
         try:
             await self._rci_parse("system configuration save")
+        except asyncio.CancelledError:
+            raise
         except Exception as err:
             _LOGGER.warning(
                 "crypto map %s toggled to enabled=%s but "
@@ -2131,6 +2143,8 @@ class KeeneticClient:
         # 1) Önce fallback ile "evde extender var mı?" tespit et
         try:
             fallback_nodes = await self._get_mesh_nodes_from_clients(clients=clients)
+        except asyncio.CancelledError:
+            raise
         except Exception as err:
             _LOGGER.debug("mesh fallback from clients failed: %s", err)
             fallback_nodes = []
@@ -2203,6 +2217,8 @@ class KeeneticClient:
                     "backhaul": member.get("backhaul"),
                 })
 
+        except asyncio.CancelledError:
+            raise
         except Exception as err:
             # "not found" durumunda tekrar denemeyip cache'leyelim
             msg = str(err).lower()
@@ -2341,6 +2357,8 @@ class KeeneticClient:
                     )
                     break
 
+        except asyncio.CancelledError:
+            raise
         except Exception as err:
             _LOGGER.debug("Error getting traffic stats: %s", err)
 
@@ -2495,6 +2513,8 @@ class KeeneticClient:
                     policies[policy_id] = str(desc)
 
             return policies
+        except asyncio.CancelledError:
+            raise
         except Exception as err:
             _LOGGER.debug("Error getting policies: %s", err)
             return {}
@@ -2522,6 +2542,8 @@ class KeeneticClient:
                     }
 
             return host_policies
+        except asyncio.CancelledError:
+            raise
         except Exception as err:
             _LOGGER.debug("Error getting host policies: %s", err)
             return {}
@@ -2595,6 +2617,8 @@ class KeeneticClient:
                 "channel": data.get("fw-update-sandbox"),
                 "has_update": has_update,
             }
+        except asyncio.CancelledError:
+            raise
         except Exception as err:
             _LOGGER.debug("Error checking firmware update: %s", err)
             return {}
@@ -2688,6 +2712,8 @@ class KeeneticClient:
                 )
                 await self._rci_parse(f"mws member {member} update start")
                 return True
+            except asyncio.CancelledError:
+                raise
             except Exception as err:  # noqa: BLE001
                 _LOGGER.warning(
                     "Controller MWS update command failed for node %s (%s): %s. "
@@ -2792,6 +2818,8 @@ class KeeneticClient:
             except asyncio.TimeoutError:
                 _LOGGER.debug("Timeout connecting to node %s port %s", label, port)
                 continue
+            except asyncio.CancelledError:
+                raise
             except Exception as err:
                 _LOGGER.debug(
                     "Components update on node %s failed: %s", label, err
@@ -2820,6 +2848,8 @@ class KeeneticClient:
                     )
             except asyncio.TimeoutError:
                 _LOGGER.debug("Timeout on system/update for node %s", label)
+            except asyncio.CancelledError:
+                raise
             except Exception as err:
                 _LOGGER.debug("system/update on node %s failed: %s", label, err)
 
@@ -2912,6 +2942,8 @@ class KeeneticClient:
         except asyncio.TimeoutError:
             _LOGGER.debug("Timeout during auth to node %s:%s", node_ip, port)
             return None
+        except asyncio.CancelledError:
+            raise
         except Exception as err:
             _LOGGER.debug(
                 "Auth to node %s:%s failed: %s", node_ip, port, err
@@ -2935,6 +2967,8 @@ class KeeneticClient:
                 "stage": data.get("stage"),
                 "eta_seconds": data.get("eta"),
             }
+        except asyncio.CancelledError:
+            raise
         except Exception as err:
             _LOGGER.debug("firmware progress fetch failed: %s", err)
             return {}
@@ -2980,6 +3014,8 @@ class KeeneticClient:
             _LOGGER.debug("NDNS info retrieved: %s", result)
             return result
             
+        except asyncio.CancelledError:
+            raise
         except Exception as err:
             _LOGGER.debug("Error getting NDNS info: %s", err)
             return {}

@@ -8,6 +8,89 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.0 - Hardening, modern HA APIs, and statistics fixes
+
+> ⚠️ **Minimum Home Assistant version bumped to 2024.5.0.** This release
+> uses HA's `runtime_data` config-entry pattern, which is unavailable
+> on older HA core versions. If you are still on 2024.4 or earlier,
+> stay on 1.6.8 until you upgrade HA.
+
+### 🔒 Security
+
+- **`SECURITY.md` shipped.** Documents what the integration redacts
+  (diagnostics, logs, repr) and — honestly — what it cannot protect:
+  HA stores config-entry passwords as plaintext in
+  `<config>/.storage/core.config_entries`, and no integration can fix
+  that. If you have ever shared a HA backup or a `.storage/` snapshot,
+  rotate your router admin password.
+- **Cancellation safety in every error-handling path.** Every
+  `except Exception` block in the API client, coordinator, firmware-
+  update flow, and config flow now re-raises `asyncio.CancelledError`
+  before falling through to its generic handler. The old broad catch
+  swallowed HA's shutdown signal during integration reload, sometimes
+  producing hangs that needed a HA restart to resolve. A new
+  `tests/test_cancellation_safety.py` parses the source and fails CI
+  if a regression slips back in.
+
+### 🐛 Bug fixes
+
+- **Uptime sensors no longer produce a sawtooth in long-term graphs.**
+  Router uptime, PPPoE uptime, and WireGuard tunnel uptime were
+  declared as `MEASUREMENT`, which made HA's recorder treat each poll
+  as a separate gauge value and store a 1-week sawtooth in the LTS
+  table. They are now `TOTAL_INCREASING` — the right state class for
+  a monotonic counter that resets on reboot/reconnect — and the
+  long-term-statistics graph for those sensors is now smooth.
+- **Reauth and reconfigure use the modern HA helper.** Both flows now
+  call `async_update_reload_and_abort` instead of the deprecated
+  `async_update_entry` + `async_abort` pair. The previous pattern
+  occasionally left users running with stale credentials until they
+  manually reloaded the integration; the new flow reloads in the
+  same step.
+
+### ✨ Improvements
+
+- **`runtime_data` migration.** The integration now stores its API
+  client and coordinators on `entry.runtime_data` instead of
+  `hass.data[DOMAIN][entry.entry_id]`. Cleaner platform setup, less
+  bookkeeping in `async_unload_entry`, and the data is automatically
+  dropped by HA when the entry is removed. No user-visible change —
+  but if you happen to write blueprints or scripts that poke at
+  `hass.data["keenetic_router_pro"]`, they need updating.
+- **`min_ha_version: 2024.5.0` declared in the manifest.** HACS will
+  refuse to install on older HA cores rather than letting you hit a
+  cryptic `runtime_data` AttributeError at setup time.
+
+### 🔧 Internal
+
+- **Test suite grew from 67 to 81 tests** (one skipped — needs full
+  HA env). New regression guards: cancellation propagation in hot-
+  path modules, `runtime_data` shape, modern config-flow pattern,
+  uptime state classes, and `clients_by_mac` precomputed lookup.
+- **Coordinator parallelism audit (no code change).** The Stage 1 +
+  Stage 2 + Stage 3 pipeline already uses `asyncio.gather(...,
+  return_exceptions=True)` with critical-fetch fail-fast and a
+  single aggregated warning per tick — confirmed during this audit
+  and now exercised by the cancellation-safety tests.
+
+### Deferred
+
+- **`api.py` module split.** The 2 985-line `api.py` is the codebase's
+  largest file. A clean split would move the `_validate_cli_arg`,
+  `_response_summary`, `_payload_summary` helpers into their own
+  module and break the `KeeneticClient` class apart by RCI surface
+  (read / write / parse / redact). The unit tests import the helpers
+  by their current names, so the move requires careful re-export
+  scaffolding. Punted to a 2.0 release rather than risk a bad split
+  in this minor.
+- **Generic `RetryableEndpoint` wrapper for endpoint auto-discovery.**
+  Initially planned, but the two candidate sites (mesh-node fallback,
+  VPN-tunnel discovery) need different cache semantics — one caches
+  "endpoint unsupported", the other doesn't. A wrapper covering both
+  would be either too thin to be useful or too magic to be readable.
+  Per the "don't abstract for fewer than three sites" rule, the
+  explicit code is better.
+
 ## 1.6.8 - Performance refactor
 
 ### Performance

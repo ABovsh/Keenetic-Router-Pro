@@ -16,12 +16,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
-from .const import (
-    DATA_CLIENT,
-    DATA_COORDINATOR,
-    DATA_PING_COORDINATOR,
-    DOMAIN,
-)
+from .const import DOMAIN
 
 # Keys whose values should NEVER appear in a diagnostics dump.
 # Matching is case-insensitive (HA's redactor lower-cases keys).
@@ -67,10 +62,10 @@ async def async_get_config_entry_diagnostics(
     hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
     """Return redacted diagnostics for a Keenetic config entry."""
-    domain_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-    coordinator = domain_data.get(DATA_COORDINATOR)
-    ping_coordinator = domain_data.get(DATA_PING_COORDINATOR)
-    client = domain_data.get(DATA_CLIENT)
+    runtime = getattr(entry, "runtime_data", None)
+    coordinator = getattr(runtime, "coordinator", None) if runtime else None
+    ping_coordinator = getattr(runtime, "ping_coordinator", None) if runtime else None
+    client = getattr(runtime, "client", None) if runtime else None
 
     coordinator_data: Any = None
     if coordinator is not None:

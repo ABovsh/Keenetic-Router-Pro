@@ -6,7 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .api import KeeneticClient
-from .const import DOMAIN, DATA_CLIENT, DATA_COORDINATOR
+from .const import DOMAIN
 from .coordinator import KeeneticCoordinator
 from .entity import ControllerEntity, MeshEntity
 
@@ -17,9 +17,9 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Keenetic Router Pro buttons."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    coordinator: KeeneticCoordinator = data[DATA_COORDINATOR]
-    client: KeeneticClient = data[DATA_CLIENT]
+    runtime = entry.runtime_data
+    coordinator: KeeneticCoordinator = runtime.coordinator
+    client: KeeneticClient = runtime.client
     entities: list[ButtonEntity] = [KeeneticRebootButton(coordinator, entry, client)]
 
     # Mesh node reboot butonları

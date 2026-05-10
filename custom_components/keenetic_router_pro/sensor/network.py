@@ -94,12 +94,17 @@ class KeeneticWanIpSensor(ControllerEntity, SensorEntity):
 
 
 class KeeneticPppoeUptimeSensor(ControllerEntity, SensorEntity):
-    """PPPoE connection uptime sensor."""
+    """PPPoE connection uptime sensor.
+
+    Uses ``TOTAL_INCREASING`` so long-term statistics record the
+    monotonic counter cleanly and reset to zero on reconnect, instead
+    of a sawtooth gauge graph.
+    """
     _attr_has_entity_name = True
     _attr_translation_key = "pppoe_uptime"
     _attr_icon = "mdi:timer-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:

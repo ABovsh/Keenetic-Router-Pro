@@ -6,7 +6,7 @@ from homeassistant.components.device_tracker import SourceType
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from .const import DOMAIN, DATA_COORDINATOR, DATA_PING_COORDINATOR, CONF_TRACKED_CLIENTS
+from .const import DOMAIN, CONF_TRACKED_CLIENTS
 from .coordinator import KeeneticCoordinator, KeeneticPingCoordinator
 from .entity import ClientEntity
 
@@ -17,9 +17,9 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Keenetic Router Pro device trackers from a config entry."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    coordinator: KeeneticCoordinator = data[DATA_COORDINATOR]
-    ping_coordinator: KeeneticPingCoordinator = data.get(DATA_PING_COORDINATOR)  # Note: get, might not exist
+    runtime = entry.runtime_data
+    coordinator: KeeneticCoordinator = runtime.coordinator
+    ping_coordinator: KeeneticPingCoordinator = runtime.ping_coordinator  # Note: get, might not exist
     entities: list[KeeneticClientTracker] = []
 
     tracked_clients = entry.data.get(CONF_TRACKED_CLIENTS, [])

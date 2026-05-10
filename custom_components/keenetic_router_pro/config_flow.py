@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlparse
 
+import asyncio
 import logging
 import voluptuous as vol
 
@@ -324,18 +325,26 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         new_data: dict[str, Any],
         log_context: str,
     ) -> dict[str, str] | None:
-        """Validate new data against the router. Returns error dict or None on success."""
+        """Validate new data against the router. Returns error dict or None on success.
+
+        On success, callers are expected to follow up with
+        ``async_update_reload_and_abort`` so HA persists the new data,
+        reloads the integration, and aborts the flow in one step. The
+        previous pattern (``async_update_entry`` + manual abort + a
+        background reload triggered by an update listener) is deprecated.
+        """
         try:
             await self._async_connect(new_data)
         except KeeneticAuthError:
             return {"base": "invalid_auth"}
         except KeeneticApiError:
             return {"base": "cannot_connect"}
+        except asyncio.CancelledError:
+            raise
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Unexpected error during %s", log_context)
             return {"base": "unknown"}
 
-        self.hass.config_entries.async_update_entry(entry, data=new_data)
         return None
 
     @staticmethod
@@ -463,6 +472,8 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         data={**data, CONF_TRACKED_CLIENTS: []},
                     )
                         
+                except asyncio.CancelledError:
+                    raise
                 except Exception as err:  # noqa: BLE001
                     _LOGGER.debug("Could not fetch clients: %s", err)
                     return self.async_create_entry(
@@ -474,6 +485,8 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_auth"
             except KeeneticApiError:
                 errors["base"] = "cannot_connect"
+            except asyncio.CancelledError:
+                raise
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("Unexpected error during setup")
                 errors["base"] = "unknown"
@@ -556,7 +569,11 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             new_data = {**entry_data, **user_input}
             errors = await self._async_validate_and_update(entry, new_data, "reauth") or {}
             if not errors:
-                return self.async_abort(reason="reauth_successful")
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data=new_data,
+                    reason="reauth_successful",
+                )
 
         return self.async_show_form(
             step_id="reauth_confirm",
@@ -608,7 +625,11 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 entry, new_data, "reconfigure"
             ) or {}
             if not errors:
-                return self.async_abort(reason="reconfigure_successful")
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data=new_data,
+                    reason="reconfigure_successful",
+                )
 
         defaults = _connection_defaults(
             {
@@ -703,6 +724,8 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
             )
             _LOGGER.debug("Prepared %d client options", len(client_options))
             
+        except asyncio.CancelledError:
+            raise
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("Could not fetch clients for options: %s", err)
             # Use only previously tracked clients

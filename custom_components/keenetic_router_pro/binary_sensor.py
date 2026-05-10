@@ -9,7 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from .const import DOMAIN, DATA_COORDINATOR
+from .const import DOMAIN
 from .coordinator import KeeneticCoordinator
 from .entity import MeshEntity, ControllerEntity, WanEntity, CryptoMapEntity
 
@@ -20,8 +20,8 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Keenetic Router Pro binary sensors from a config entry."""
-    data = hass.data[DOMAIN][entry.entry_id]
-    coordinator: KeeneticCoordinator = data[DATA_COORDINATOR]
+    runtime = entry.runtime_data
+    coordinator: KeeneticCoordinator = runtime.coordinator
     entities: list[BinarySensorEntity] = []
 
     entities.append(KeeneticControllerUpdateSensor(coordinator, entry))
