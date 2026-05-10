@@ -123,7 +123,7 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_icon = "mdi:timer-outline"
     _attr_device_class = SensorDeviceClass.DURATION
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_suggested_display_precision = 0
 

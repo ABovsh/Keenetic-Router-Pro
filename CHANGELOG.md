@@ -8,6 +8,36 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.2 - Stability fixes for mesh, auth, and translations
+
+### Bug fixes
+
+- **Raw aiohttp responses are now released on auth and mesh update paths.**
+  Challenge auth, mesh-node auth, and direct node firmware update requests
+  now close every response object explicitly.
+- **`/rci/parse` arguments use strict single-token validation.**
+  Interface names, MACs, policies, crypto-map names, and mesh CIDs now reject
+  whitespace, quotes, shell separators, control characters, and expansion
+  characters before command construction.
+- **English translations are synced with `strings.json`.** Reconfigure and
+  connection-mode UI strings no longer drift from Home Assistant's source
+  translation file.
+- **Mesh-node and tracked-client uptime sensors use `TOTAL_INCREASING`.**
+  This matches router, PPPoE, and WireGuard uptime statistics while leaving
+  `last_seen` as a resetting measurement.
+
+### Improvements
+
+- **Mesh unique IDs are entry-scoped and collision-resistant.** Mesh sensors,
+  connect/update binary sensors, reboot buttons, and firmware update entities
+  now use the full sanitized mesh node id with the config entry id. Existing
+  mesh entity registry entries are migrated from the old truncated IDs.
+- **Mesh entities are added dynamically.** Newly discovered mesh nodes and
+  mesh ports are added by coordinator listeners across sensor, binary sensor,
+  button, and update platforms without requiring a Home Assistant restart.
+- **Project-local test tooling added.** `requirements-dev.txt` and GitHub
+  Actions CI now run compile checks and the lightweight HA-stubbed test suite.
+
 ## 1.7.1 - HACS validation fixes for 1.7.0
 
 Hotfix for two HACS validation errors that 1.7.0 tripped:

@@ -10,6 +10,19 @@ import sys
 import types
 
 
+class _AttrEnum:
+    """Tiny enum-like object that returns stable string values."""
+
+    def __getattr__(self, name: str) -> str:
+        return name.lower()
+
+
+class _Entity:
+    """Base stand-in for Home Assistant entity classes."""
+
+    pass
+
+
 class HomeAssistantError(Exception):
     """Minimal stand-in for homeassistant.exceptions.HomeAssistantError."""
 
@@ -48,6 +61,10 @@ helpers.__path__ = []  # mark as package so submodule imports resolve
 aiohttp_client = types.ModuleType("homeassistant.helpers.aiohttp_client")
 aiohttp_client.async_get_clientsession = lambda hass: None
 helpers.aiohttp_client = aiohttp_client
+
+entity_platform = types.ModuleType("homeassistant.helpers.entity_platform")
+entity_platform.AddEntitiesCallback = object
+helpers.entity_platform = entity_platform
 
 # Stub homeassistant.helpers.config_validation just enough for the
 # integration root's CONFIG_SCHEMA helper to import. Real validation is
@@ -118,6 +135,45 @@ device_registry.DeviceInfo = dict
 device_registry.format_mac = lambda mac: str(mac).lower()
 helpers.device_registry = device_registry
 
+components = types.ModuleType("homeassistant.components")
+components.__path__ = []
+sensor = types.ModuleType("homeassistant.components.sensor")
+sensor.SensorEntity = _Entity
+sensor.SensorDeviceClass = _AttrEnum()
+sensor.SensorStateClass = _AttrEnum()
+components.sensor = sensor
+
+
+def _async_redact_data(data, to_redact):
+    """Recursive redactor matching HA's behaviour for test inputs."""
+    lowered = {str(key).lower() for key in to_redact}
+    if isinstance(data, dict):
+        return {
+            key: "**REDACTED**"
+            if str(key).lower() in lowered
+            else _async_redact_data(value, to_redact)
+            for key, value in data.items()
+        }
+    if isinstance(data, list):
+        return [_async_redact_data(value, to_redact) for value in data]
+    return data
+
+
+diagnostics = types.ModuleType("homeassistant.components.diagnostics")
+diagnostics.async_redact_data = _async_redact_data
+components.diagnostics = diagnostics
+
+const = types.ModuleType("homeassistant.const")
+const.CONF_HOST = "host"
+const.CONF_PASSWORD = "password"
+const.CONF_USERNAME = "username"
+const.PERCENTAGE = "%"
+const.EntityCategory = _AttrEnum()
+const.UnitOfDataRate = _AttrEnum()
+const.UnitOfInformation = _AttrEnum()
+const.UnitOfTemperature = _AttrEnum()
+const.UnitOfTime = _AttrEnum()
+
 issue_registry = types.ModuleType("homeassistant.helpers.issue_registry")
 
 
@@ -138,6 +194,8 @@ homeassistant.exceptions = exceptions
 homeassistant.config_entries = config_entries
 homeassistant.core = core
 homeassistant.helpers = helpers
+homeassistant.components = components
+homeassistant.const = const
 
 sys.modules.setdefault("homeassistant", homeassistant)
 sys.modules.setdefault("homeassistant.exceptions", exceptions)
@@ -146,5 +204,10 @@ sys.modules.setdefault("homeassistant.core", core)
 sys.modules.setdefault("homeassistant.helpers", helpers)
 sys.modules.setdefault("homeassistant.helpers.aiohttp_client", aiohttp_client)
 sys.modules.setdefault("homeassistant.helpers.config_validation", config_validation)
+sys.modules.setdefault("homeassistant.helpers.entity_platform", entity_platform)
 sys.modules.setdefault("homeassistant.helpers.update_coordinator", update_coordinator)
 sys.modules.setdefault("homeassistant.helpers.device_registry", device_registry)
+sys.modules.setdefault("homeassistant.components", components)
+sys.modules.setdefault("homeassistant.components.sensor", sensor)
+sys.modules.setdefault("homeassistant.components.diagnostics", diagnostics)
+sys.modules.setdefault("homeassistant.const", const)

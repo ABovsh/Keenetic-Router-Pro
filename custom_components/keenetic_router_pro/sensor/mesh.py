@@ -112,7 +112,7 @@ class KeeneticMeshUptimeSensor(MeshEntity, SensorEntity):
     _attr_translation_key = "uptime"
     _attr_icon = "mdi:timer-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry, node_cid: str) -> None:
@@ -120,7 +120,7 @@ class KeeneticMeshUptimeSensor(MeshEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        return f"{self._safe_cid}_uptime_v2"
+        return self._mesh_unique_id("uptime_v2")
 
     @property
     def native_unit_of_measurement(self) -> str:
@@ -147,7 +147,7 @@ class KeeneticMeshClientsSensor(MeshEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        return f"{self._safe_cid}_clients_v2"
+        return self._mesh_unique_id("clients_v2")
 
     @property
     def native_value(self) -> int:
@@ -195,7 +195,7 @@ class KeeneticMeshLocalIpSensor(MeshEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        return f"{self._safe_cid}_local_ip_v2"
+        return self._mesh_unique_id("local_ip_v2")
 
     @property
     def native_value(self) -> str | None:
@@ -219,7 +219,7 @@ class KeeneticMeshCpuLoadSensor(MeshEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        return f"{self._safe_cid}_cpu_load_v2"
+        return self._mesh_unique_id("cpu_load_v2")
 
     @property
     def native_value(self) -> float | None:
@@ -248,7 +248,7 @@ class KeeneticMeshMemorySensor(MeshEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        return f"{self._safe_cid}_memory_v2"
+        return self._mesh_unique_id("memory_v2")
 
     @property
     def native_value(self) -> float | None:
@@ -279,7 +279,7 @@ class KeeneticMeshFirmwareVersionSensor(MeshEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        return f"{self._safe_cid}_firmware_version_v2"
+        return self._mesh_unique_id("firmware_version_v2")
 
     @property
     def native_value(self) -> str | None:
@@ -327,7 +327,7 @@ class KeeneticMeshPortSensor(MeshEntity, SensorEntity):
     @property
     def unique_id(self) -> str:
         """Return unique ID for the sensor."""
-        return f"{self._safe_cid}_port_{self._port_label}_v2"
+        return self._mesh_unique_id(f"port_{self._port_label}_v2")
 
     @property
     def native_value(self) -> str:

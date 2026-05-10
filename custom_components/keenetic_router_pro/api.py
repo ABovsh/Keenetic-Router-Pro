@@ -35,6 +35,7 @@ _SENSITIVE_RESPONSE_RE = re.compile(
     r'(?i)("?(?:authorization|cookie|key|pass|password|psk|secret)"?\s*[:=]\s*)'
     r'("[^"]*"|\'[^\']*\'|[^,\s;}\]]+)'
 )
+_CLI_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.:/@+-]+$")
 _DNS_PROXY_STAT_RE = re.compile(
     r"^\s*(?P<ip>\S+)\s+"
     r"(?P<port>\d+)\s+"
@@ -119,10 +120,15 @@ def normalize_connection_target(host: str, port: int, ssl: bool) -> KeeneticConn
 
 def _validate_cli_arg(value: str, label: str) -> str:
     """Return a safe Keenetic CLI token or raise for command injection input."""
-    candidate = str(value).strip()
+    if value is None:
+        raise KeeneticApiError(f"Empty {label}")
+    raw_value = str(value)
+    candidate = raw_value.strip()
     if not candidate:
         raise KeeneticApiError(f"Empty {label}")
-    if any(ch in candidate for ch in ("\r", "\n", ";")):
+    if candidate != raw_value:
+        raise KeeneticApiError(f"Unsafe {label}")
+    if not _CLI_TOKEN_RE.fullmatch(candidate):
         raise KeeneticApiError(f"Unsafe {label}")
     return candidate
 
@@ -299,41 +305,41 @@ class KeeneticClient:
         except aiohttp.ClientError as err:
             raise KeeneticAuthError(f"Challenge GET failed: {err}") from err
 
-        _LOGGER.debug(
-            "NDW2 challenge GET response: status=%s has_challenge=%s has_cookie=%s",
-            get_resp.status,
-            bool(get_resp.headers.get("X-NDM-Challenge")),
-            bool(get_resp.headers.get("Set-Cookie")),
-        )
-
-        if get_resp.status not in (200, 401):
-            text = await get_resp.text()
-            raise KeeneticAuthError(
-                f"Unexpected status during challenge GET ({get_resp.status}): "
-                f"{_response_summary(text)}"
+        async with get_resp:
+            _LOGGER.debug(
+                "NDW2 challenge GET response: status=%s has_challenge=%s has_cookie=%s",
+                get_resp.status,
+                bool(get_resp.headers.get("X-NDM-Challenge")),
+                bool(get_resp.headers.get("Set-Cookie")),
             )
 
-        challenge = get_resp.headers.get("X-NDM-Challenge")
-        realm = get_resp.headers.get("X-NDM-Realm", "")
+            if get_resp.status not in (200, 401):
+                text = await get_resp.text()
+                raise KeeneticAuthError(
+                    f"Unexpected status during challenge GET ({get_resp.status}): "
+                    f"{_response_summary(text)}"
+                )
 
-        if not challenge:
-            raise KeeneticAuthError(
-                "Router did not return X-NDM-Challenge header. "
-                "This model may not support Challenge Auth — "
-                "try disabling 'Challenge Auth' and use Basic Auth instead."
-            )
+            challenge = get_resp.headers.get("X-NDM-Challenge")
+            realm = get_resp.headers.get("X-NDM-Realm", "")
 
-        _LOGGER.debug("NDW2 challenge received for realm=%s", realm)
+            if not challenge:
+                raise KeeneticAuthError(
+                    "Router did not return X-NDM-Challenge header. "
+                    "This model may not support Challenge Auth — "
+                    "try disabling 'Challenge Auth' and use Basic Auth instead."
+                )
 
-        # Extract session cookie from Set-Cookie header
-        session_cookie: str | None = None
-        # Extract session cookie manually — HA's shared CookieJar(unsafe=False)
-        # silently ignores cookies from bare IP addresses.
-        raw_cookie = get_resp.headers.get("Set-Cookie", "")
-        if raw_cookie:
-            cookie_kv = raw_cookie.split(";")[0].strip()
-            if "=" in cookie_kv:
-                session_cookie = cookie_kv
+            _LOGGER.debug("NDW2 challenge received for realm=%s", realm)
+
+            # Extract session cookie manually — HA's shared CookieJar(unsafe=False)
+            # silently ignores cookies from bare IP addresses.
+            session_cookie: str | None = None
+            raw_cookie = get_resp.headers.get("Set-Cookie", "")
+            if raw_cookie:
+                cookie_kv = raw_cookie.split(";")[0].strip()
+                if "=" in cookie_kv:
+                    session_cookie = cookie_kv
 
         # --- Step 2: Compute NDW2 hashes ---
         # ha1      = md5(username:realm:password)   [hex digest]
@@ -363,23 +369,24 @@ class KeeneticClient:
         except aiohttp.ClientError as err:
             raise KeeneticAuthError(f"Challenge POST failed: {err}") from err
 
-        post_text = await post_resp.text()
-        _LOGGER.debug(
-            "NDW2 challenge POST response: status=%s body_length=%s",
-            post_resp.status,
-            len(post_text),
-        )
+        async with post_resp:
+            post_text = await post_resp.text()
+            _LOGGER.debug(
+                "NDW2 challenge POST response: status=%s body_length=%s",
+                post_resp.status,
+                len(post_text),
+            )
 
-        if post_resp.status == 401:
-            raise KeeneticAuthError(
-                "Challenge auth rejected. Check the username, password and "
-                "challenge-auth setting."
-            )
-        if post_resp.status not in (200, 204):
-            raise KeeneticAuthError(
-                "Challenge auth failed "
-                f"(status={post_resp.status}, body={_response_summary(post_text)!r})"
-            )
+            if post_resp.status == 401:
+                raise KeeneticAuthError(
+                    "Challenge auth rejected. Check the username, password and "
+                    "challenge-auth setting."
+                )
+            if post_resp.status not in (200, 204):
+                raise KeeneticAuthError(
+                    "Challenge auth failed "
+                    f"(status={post_resp.status}, body={_response_summary(post_text)!r})"
+                )
 
         # Store cookie in _auth_header so every subsequent RCI request includes it.
         self._auth_header = {"Cookie": session_cookie} if session_cookie else {}
@@ -2747,9 +2754,17 @@ class KeeneticClient:
                 url = f"{base}{RCI_ROOT}/show/version"
                 async with asyncio.timeout(self._request_timeout):
                     resp = await self._session.get(url, headers=node_headers)
-                if resp.status == 200:
-                    version_data = await resp.json()
-                    ndw_components = version_data.get("ndw", {}).get("components", "")
+                async with resp:
+                    if resp.status == 200:
+                        version_data = await resp.json()
+                        ndw_components = version_data.get("ndw", {}).get("components", "")
+                    elif resp.status == 401:
+                        _LOGGER.debug("Auth rejected on node %s port %s", label, port)
+                        self._node_auth_headers.pop((node_ip, port), None)
+                        continue
+                    else:
+                        ndw_components = ""
+
                     if ndw_components:
                         current_components = [
                             c.strip() for c in ndw_components.split(",") if c.strip()
@@ -2775,12 +2790,13 @@ class KeeneticClient:
                                 json=payload,
                                 headers=node_headers,
                             )
-                        if resp.status not in (200, 204):
-                            text = await resp.text()
-                            _LOGGER.warning(
-                                "Node %s component staging returned %s: %s",
-                                label, resp.status, _response_summary(text),
-                            )
+                        async with resp:
+                            if resp.status not in (200, 204):
+                                text = await resp.text()
+                                _LOGGER.warning(
+                                    "Node %s component staging returned %s: %s",
+                                    label, resp.status, _response_summary(text),
+                                )
 
                         # Step 3: Commit
                         url = f"{base}{RCI_ROOT}/components/commit"
@@ -2793,28 +2809,25 @@ class KeeneticClient:
                                 json={"reason": "manual"},
                                 headers=node_headers,
                             )
-                        if resp.status in (200, 204):
-                            _LOGGER.info(
-                                "Node %s firmware update started via "
-                                "components/commit",
-                                label,
-                            )
-                            return True
+                        async with resp:
+                            if resp.status in (200, 204):
+                                _LOGGER.info(
+                                    "Node %s firmware update started via "
+                                    "components/commit",
+                                    label,
+                                )
+                                return True
 
-                        text = await resp.text()
-                        _LOGGER.warning(
-                            "Node %s commit returned %s: %s",
-                            label, resp.status, _response_summary(text),
-                        )
+                            text = await resp.text()
+                            _LOGGER.warning(
+                                "Node %s commit returned %s: %s",
+                                label, resp.status, _response_summary(text),
+                            )
                     else:
                         _LOGGER.debug(
                             "Node %s has no ndw.components in version info",
                             label,
                         )
-                elif resp.status == 401:
-                    _LOGGER.debug("Auth rejected on node %s port %s", label, port)
-                    self._node_auth_headers.pop((node_ip, port), None)
-                    continue
             except asyncio.TimeoutError:
                 _LOGGER.debug("Timeout connecting to node %s port %s", label, port)
                 continue
@@ -2835,17 +2848,18 @@ class KeeneticClient:
                         json={"confirm": True},
                         headers=node_headers,
                     )
-                if resp.status in (200, 204):
-                    _LOGGER.info(
-                        "Node %s firmware update started via system/update", label
-                    )
-                    return True
-                if resp.status != 404:
-                    text = await resp.text()
-                    _LOGGER.debug(
-                        "Node %s system/update returned %s: %s",
-                        label, resp.status, _response_summary(text),
-                    )
+                async with resp:
+                    if resp.status in (200, 204):
+                        _LOGGER.info(
+                            "Node %s firmware update started via system/update", label
+                        )
+                        return True
+                    if resp.status != 404:
+                        text = await resp.text()
+                        _LOGGER.debug(
+                            "Node %s system/update returned %s: %s",
+                            label, resp.status, _response_summary(text),
+                        )
             except asyncio.TimeoutError:
                 _LOGGER.debug("Timeout on system/update for node %s", label)
             except asyncio.CancelledError:
@@ -2884,34 +2898,36 @@ class KeeneticClient:
                     auth_url, allow_redirects=False
                 )
 
-            challenge = get_resp.headers.get("X-NDM-Challenge")
-            realm = get_resp.headers.get("X-NDM-Realm", "")
+            async with get_resp:
+                challenge = get_resp.headers.get("X-NDM-Challenge")
+                realm = get_resp.headers.get("X-NDM-Realm", "")
 
-            if not challenge:
-                _LOGGER.debug(
-                    "Node %s did not return challenge header, "
-                    "using basic auth fallback",
-                    node_ip,
-                )
-                headers = self._basic_auth_headers()
-                self._node_auth_headers[(node_ip, port)] = headers
-                return dict(headers)
+                if not challenge:
+                    _LOGGER.debug(
+                        "Node %s did not return challenge header, "
+                        "using basic auth fallback",
+                        node_ip,
+                    )
+                    await get_resp.read()
+                    headers = self._basic_auth_headers()
+                    self._node_auth_headers[(node_ip, port)] = headers
+                    return dict(headers)
 
-            # Step 2: Compute hash
-            ha1 = hashlib.md5(
-                f"{self._username}:{realm}:{self._password}".encode()
-            ).hexdigest()
-            response_hash = hashlib.sha256(
-                (challenge + ha1).encode()
-            ).hexdigest()
+                # Step 2: Compute hash
+                ha1 = hashlib.md5(
+                    f"{self._username}:{realm}:{self._password}".encode()
+                ).hexdigest()
+                response_hash = hashlib.sha256(
+                    (challenge + ha1).encode()
+                ).hexdigest()
 
-            # Extract session cookie
-            raw_cookie = get_resp.headers.get("Set-Cookie", "")
-            session_cookie = None
-            if raw_cookie:
-                cookie_kv = raw_cookie.split(";")[0].strip()
-                if "=" in cookie_kv:
-                    session_cookie = cookie_kv
+                # Extract session cookie
+                raw_cookie = get_resp.headers.get("Set-Cookie", "")
+                session_cookie = None
+                if raw_cookie:
+                    cookie_kv = raw_cookie.split(";")[0].strip()
+                    if "=" in cookie_kv:
+                        session_cookie = cookie_kv
 
             # Step 3: POST /auth with credentials
             post_headers: Dict[str, str] = {}
@@ -2925,19 +2941,21 @@ class KeeneticClient:
                     headers=post_headers,
                 )
 
-            if post_resp.status in (200, 204):
-                _LOGGER.debug(
-                    "Challenge auth to node %s:%s succeeded", node_ip, port
-                )
-                headers = {"Cookie": session_cookie} if session_cookie else {}
-                self._node_auth_headers[(node_ip, port)] = headers
-                return dict(headers)
+            async with post_resp:
+                await post_resp.read()
+                if post_resp.status in (200, 204):
+                    _LOGGER.debug(
+                        "Challenge auth to node %s:%s succeeded", node_ip, port
+                    )
+                    headers = {"Cookie": session_cookie} if session_cookie else {}
+                    self._node_auth_headers[(node_ip, port)] = headers
+                    return dict(headers)
 
-            _LOGGER.debug(
-                "Challenge auth to node %s:%s returned status %s",
-                node_ip, port, post_resp.status,
-            )
-            return None
+                _LOGGER.debug(
+                    "Challenge auth to node %s:%s returned status %s",
+                    node_ip, port, post_resp.status,
+                )
+                return None
 
         except asyncio.TimeoutError:
             _LOGGER.debug("Timeout during auth to node %s:%s", node_ip, port)

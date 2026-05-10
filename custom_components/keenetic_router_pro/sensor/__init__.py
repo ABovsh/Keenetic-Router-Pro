@@ -161,23 +161,17 @@ async def async_setup_entry(
     entities.append(KeeneticMeshSystemStateSensor(coordinator, entry))
 
     # Mesh node sensors
-    mesh_nodes = coordinator.data.get("mesh_nodes", [])
-    for node in mesh_nodes:
-        node_cid = node.get("cid") or node.get("id")
-        node_ip = node.get("ip")
-        if node_cid:
-            entities.append(KeeneticMeshCpuLoadSensor(coordinator, entry, node_cid))
-            entities.append(KeeneticMeshMemorySensor(coordinator, entry, node_cid))
-            entities.append(KeeneticMeshUptimeSensor(coordinator, entry, node_cid))
-            entities.append(KeeneticMeshClientsSensor(coordinator, entry, node_cid))
-            entities.append(KeeneticMeshFirmwareVersionSensor(coordinator, entry, node_cid))
-            if node_ip:
-                entities.append(KeeneticMeshLocalIpSensor(coordinator, entry, node_cid, node_ip))
-            ports = node.get("port", [])
-            for port in ports:
-                port_label = port.get("label")
-                if port_label is not None:
-                    entities.append(KeeneticMeshPortSensor(coordinator, entry, node_cid, port_label))
+    known_mesh_ids: set[str] = set()
+    known_mesh_local_ip_ids: set[str] = set()
+    known_mesh_port_keys: set[tuple[str, str]] = set()
+    _add_mesh_sensors(
+        entities,
+        coordinator,
+        entry,
+        known_mesh_ids,
+        known_mesh_local_ip_ids,
+        known_mesh_port_keys,
+    )
 
     # Per-tracked-client sensors
     tracked_clients = entry.data.get(CONF_TRACKED_CLIENTS, [])
@@ -269,6 +263,14 @@ async def async_setup_entry(
     @callback
     def _async_add_new_dynamic_entities() -> None:
         new_entities: list[SensorEntity] = []
+        _add_mesh_sensors(
+            new_entities,
+            coordinator,
+            entry,
+            known_mesh_ids,
+            known_mesh_local_ip_ids,
+            known_mesh_port_keys,
+        )
         for wan in coordinator.data.get("wan_interfaces", []) or []:
             wan_id = wan.get("id")
             if not wan_id or wan_id in known_wan_ids:
@@ -286,3 +288,42 @@ async def async_setup_entry(
     entry.async_on_unload(
         coordinator.async_add_listener(_async_add_new_dynamic_entities)
     )
+
+
+def _add_mesh_sensors(
+    entities: list[SensorEntity],
+    coordinator: KeeneticCoordinator,
+    entry: ConfigEntry,
+    known_mesh_ids: set[str],
+    known_mesh_local_ip_ids: set[str],
+    known_mesh_port_keys: set[tuple[str, str]],
+) -> None:
+    """Append sensors for newly discovered mesh nodes and ports."""
+    for node in coordinator.data.get("mesh_nodes", []) or []:
+        node_cid = node.get("cid") or node.get("id")
+        if not node_cid:
+            continue
+
+        node_id = str(node_cid)
+        if node_id not in known_mesh_ids:
+            known_mesh_ids.add(node_id)
+            entities.append(KeeneticMeshCpuLoadSensor(coordinator, entry, node_id))
+            entities.append(KeeneticMeshMemorySensor(coordinator, entry, node_id))
+            entities.append(KeeneticMeshUptimeSensor(coordinator, entry, node_id))
+            entities.append(KeeneticMeshClientsSensor(coordinator, entry, node_id))
+            entities.append(KeeneticMeshFirmwareVersionSensor(coordinator, entry, node_id))
+
+        node_ip = node.get("ip")
+        if node_ip and node_id not in known_mesh_local_ip_ids:
+            known_mesh_local_ip_ids.add(node_id)
+            entities.append(KeeneticMeshLocalIpSensor(coordinator, entry, node_id, node_ip))
+
+        for port in node.get("port", []) or []:
+            port_label = port.get("label") if isinstance(port, dict) else None
+            if port_label is None:
+                continue
+            port_key = (node_id, str(port_label))
+            if port_key in known_mesh_port_keys:
+                continue
+            known_mesh_port_keys.add(port_key)
+            entities.append(KeeneticMeshPortSensor(coordinator, entry, node_id, str(port_label)))

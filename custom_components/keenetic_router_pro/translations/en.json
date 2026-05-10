@@ -3,7 +3,14 @@
     "step": {
       "user": {
         "title": "Keenetic Router Pro",
-        "description": "Enter your Keenetic router credentials",
+        "description": "Choose how Home Assistant should reach your Keenetic router.",
+        "data": {
+          "connection_mode": "Connection mode"
+        }
+      },
+      "connection": {
+        "title": "Keenetic Router Pro",
+        "description": "Enter the connection details for the selected mode.",
         "data": {
           "host": "Host",
           "port": "Port",
@@ -31,7 +38,14 @@
       },
       "reconfigure": {
         "title": "Reconfigure Keenetic Router Pro",
-        "description": "Update the connection settings for your Keenetic router.",
+        "description": "Choose how Home Assistant should reach this Keenetic router.",
+        "data": {
+          "connection_mode": "Connection mode"
+        }
+      },
+      "reconfigure_connection": {
+        "title": "Reconfigure Keenetic Router Pro",
+        "description": "Update the connection details for the selected mode.",
         "data": {
           "host": "Host",
           "port": "Port",
@@ -49,6 +63,8 @@
     },
     "abort": {
       "already_configured": "Device is already configured",
+      "already_in_progress": "Configuration flow is already in progress",
+      "no_host": "No host found in discovery data",
       "no_clients": "No clients found on the network",
       "reauth_successful": "Reauthentication was successful",
       "reconfigure_successful": "Reconfiguration was successful"

@@ -11,7 +11,7 @@ from homeassistant.components.update import (
     UpdateEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -60,15 +60,42 @@ async def async_setup_entry(
     ]
 
     # Mesh node firmware update entities
-    mesh_nodes = coordinator.data.get("mesh_nodes", [])
-    for node in mesh_nodes:
-        node_cid = node.get("cid") or node.get("id")
-        if node_cid:
-            entities.append(
-                KeeneticMeshFirmwareUpdate(coordinator, entry, node_cid, client)
-            )
+    known_mesh_ids: set[str] = set()
+    _add_mesh_update_entities(entities, coordinator, entry, client, known_mesh_ids)
 
     async_add_entities(entities)
+
+    @callback
+    def _async_add_new_mesh_update_entities() -> None:
+        new_entities: list[UpdateEntity] = []
+        _add_mesh_update_entities(
+            new_entities, coordinator, entry, client, known_mesh_ids
+        )
+        if new_entities:
+            async_add_entities(new_entities)
+
+    entry.async_on_unload(
+        coordinator.async_add_listener(_async_add_new_mesh_update_entities)
+    )
+
+
+def _add_mesh_update_entities(
+    entities: list[UpdateEntity],
+    coordinator: KeeneticCoordinator,
+    entry: ConfigEntry,
+    client: KeeneticClient,
+    known_mesh_ids: set[str],
+) -> None:
+    """Append update entities for newly discovered mesh nodes."""
+    for node in coordinator.data.get("mesh_nodes", []) or []:
+        node_cid = node.get("cid") or node.get("id")
+        if not node_cid:
+            continue
+        node_id = str(node_cid)
+        if node_id in known_mesh_ids:
+            continue
+        known_mesh_ids.add(node_id)
+        entities.append(KeeneticMeshFirmwareUpdate(coordinator, entry, node_id, client))
 
 
 class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
@@ -263,8 +290,7 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
 
     @property
     def unique_id(self) -> str:
-        safe_cid = self._node_cid.replace("-", "_").replace(":", "_")[:16]
-        return f"{safe_cid}_firmware_update_v2"
+        return self._mesh_unique_id("firmware_update_v2")
 
     @property
     def installed_version(self) -> str | None:

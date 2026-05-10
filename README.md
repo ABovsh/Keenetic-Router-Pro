@@ -1,7 +1,7 @@
 # Keenetic Router Pro
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![Version](https://img.shields.io/badge/version-1.7.1-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
+[![Version](https://img.shields.io/badge/version-1.7.2-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
 
 Home Assistant custom integration for Keenetic routers. It focuses on local polling, router diagnostics, mesh monitoring, presence tracking, WAN status, traffic counters, firmware updates, and selected client controls.
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -26,6 +27,7 @@ from .const import (
     EVENT_NEW_DEVICE,
 )
 from .coordinator import KeeneticCoordinator, KeeneticPingCoordinator
+from .utils import mesh_unique_id
 
 
 @dataclass
@@ -82,6 +84,87 @@ def _async_update_insecure_http_issue(
         )
     else:
         ir.async_delete_issue(hass, DOMAIN, issue_id)
+
+
+@callback
+def _async_migrate_mesh_unique_ids(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    mesh_nodes: list[dict[str, Any]],
+) -> None:
+    """Migrate old truncated mesh unique IDs to entry-scoped full IDs."""
+    try:
+        from homeassistant.helpers import entity_registry as er
+    except ImportError:
+        return
+
+    registry = er.async_get(hass)
+
+    def _move(platform: str, old_uid: str, new_uid: str) -> None:
+        if old_uid == new_uid:
+            return
+        old_entity_id = registry.async_get_entity_id(platform, DOMAIN, old_uid)
+        if old_entity_id is None:
+            return
+        if registry.async_get_entity_id(platform, DOMAIN, new_uid) is not None:
+            return
+        with suppress(ValueError):
+            registry.async_update_entity(old_entity_id, new_unique_id=new_uid)
+
+    for node in mesh_nodes or []:
+        node_cid = node.get("cid") or node.get("id")
+        if not node_cid:
+            continue
+
+        node_id = str(node_cid)
+        old_safe = node_id.replace("-", "_").replace(":", "_")[:16]
+        old_compact = node_id.replace("-", "").replace(":", "")[:16]
+
+        mesh_suffixes = {
+            "uptime_v2": "uptime_v2",
+            "clients_v2": "clients_v2",
+            "local_ip_v2": "local_ip_v2",
+            "cpu_load_v2": "cpu_load_v2",
+            "memory_v2": "memory_v2",
+            "firmware_version_v2": "firmware_version_v2",
+        }
+        for old_suffix, new_suffix in mesh_suffixes.items():
+            _move(
+                "sensor",
+                f"{old_safe}_{old_suffix}",
+                mesh_unique_id(entry.entry_id, node_id, new_suffix),
+            )
+
+        for port in node.get("port", []) or []:
+            port_label = port.get("label") if isinstance(port, dict) else None
+            if port_label is None:
+                continue
+            _move(
+                "sensor",
+                f"{old_safe}_port_{port_label}_v2",
+                mesh_unique_id(entry.entry_id, node_id, f"port_{port_label}_v2"),
+            )
+
+        _move(
+            "binary_sensor",
+            f"{old_safe}_connect_v2",
+            mesh_unique_id(entry.entry_id, node_id, "connect_v2"),
+        )
+        _move(
+            "binary_sensor",
+            f"{entry.entry_id}_mesh_{old_compact}_update_v2",
+            mesh_unique_id(entry.entry_id, node_id, "update_v2"),
+        )
+        _move(
+            "button",
+            f"{old_safe}_reboot_button_v2",
+            mesh_unique_id(entry.entry_id, node_id, "reboot_button_v2"),
+        )
+        _move(
+            "update",
+            f"{old_safe}_firmware_update_v2",
+            mesh_unique_id(entry.entry_id, node_id, "firmware_update_v2"),
+        )
 
 # Hassfest requires every integration that defines async_setup to declare
 # a CONFIG_SCHEMA. We only configure via the UI (config_flow), so the
@@ -140,6 +223,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     coordinator = KeeneticCoordinator(hass, client)
     await coordinator.async_config_entry_first_refresh()
+    _async_migrate_mesh_unique_ids(
+        hass,
+        entry,
+        coordinator.data.get("mesh_nodes", []) if coordinator.data else [],
+    )
 
     tracked_clients = data.get(CONF_TRACKED_CLIENTS, [])
 

@@ -1,46 +1,57 @@
-"""Regression guard: uptime sensors must use TOTAL_INCREASING.
-
-Storing a monotonic uptime counter as ``MEASUREMENT`` produces a
-sawtooth in HA long-term-statistics graphs because every poll inserts
-a fresh sample. ``TOTAL_INCREASING`` is the right state class for a
-counter that resets to zero on reboot/reconnect.
-"""
+"""Regression guards for monotonic uptime state classes."""
 
 from __future__ import annotations
 
-import sys
+import ast
+import pathlib
 
 import pytest
 
-# These sensor modules import HA's ``homeassistant.components.sensor``
-# directly which is not available in the lightweight unit-test stubs.
-# Skip cleanly if HA is not importable rather than failing the suite.
-pytest.importorskip("homeassistant.components.sensor")
+ROOT = pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "keenetic_router_pro"
+
+
+def _class_assignments(path: pathlib.Path, class_name: str) -> dict[str, str]:
+    tree = ast.parse(path.read_text())
+    cls = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ClassDef) and node.name == class_name
+    )
+    assignments: dict[str, str] = {}
+    for node in cls.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                assignments[target.id] = ast.unparse(node.value)
+    return assignments
 
 
 @pytest.mark.parametrize(
-    "module_path,class_name",
+    ("relative_path", "class_name"),
     [
-        (
-            "custom_components.keenetic_router_pro.sensor.system",
-            "KeeneticUptimeSensor",
-        ),
-        (
-            "custom_components.keenetic_router_pro.sensor.network",
-            "KeeneticPppoeUptimeSensor",
-        ),
-        (
-            "custom_components.keenetic_router_pro.sensor.wireguard",
-            "KeeneticWgUptimeSensor",
-        ),
+        ("sensor/system.py", "KeeneticUptimeSensor"),
+        ("sensor/network.py", "KeeneticPppoeUptimeSensor"),
+        ("sensor/wireguard.py", "KeeneticWgUptimeSensor"),
+        ("sensor/mesh.py", "KeeneticMeshUptimeSensor"),
+        ("sensor/client.py", "KeeneticClientUptimeSensor"),
     ],
 )
-def test_uptime_sensor_uses_total_increasing(module_path: str, class_name: str) -> None:
-    from homeassistant.components.sensor import SensorStateClass
+def test_uptime_sensors_use_total_increasing(
+    relative_path: str,
+    class_name: str,
+) -> None:
+    assignments = _class_assignments(ROOT / relative_path, class_name)
 
-    module = __import__(module_path, fromlist=[class_name])
-    cls = getattr(module, class_name)
-    assert cls._attr_state_class is SensorStateClass.TOTAL_INCREASING, (
-        f"{class_name} should use TOTAL_INCREASING for monotonic uptime, "
-        f"got {cls._attr_state_class!r}"
+    assert (
+        assignments.get("_attr_state_class") == "SensorStateClass.TOTAL_INCREASING"
+    ), f"{class_name} must use TOTAL_INCREASING for monotonic uptime"
+
+
+def test_client_last_seen_remains_measurement() -> None:
+    assignments = _class_assignments(
+        ROOT / "sensor/client.py",
+        "KeeneticClientLastSeenSensor",
     )
+
+    assert assignments.get("_attr_state_class") == "SensorStateClass.MEASUREMENT"

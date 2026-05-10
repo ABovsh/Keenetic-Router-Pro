@@ -14,6 +14,8 @@ from .utils import (
     get_wan_device_info,
     get_vpn_interface_device_info,
     get_crypto_map_device_info,
+    mesh_unique_id,
+    sanitize_mesh_id,
 )
 
 
@@ -100,7 +102,11 @@ class MeshEntity(CoordinatorEntity):
         self._entry_id = entry_id
         self._title = title
         self._node_cid = node_cid
-        self._safe_cid = node_cid.replace("-", "_").replace(":", "_")[:16]
+        self._safe_cid = sanitize_mesh_id(node_cid)
+
+    def _mesh_unique_id(self, suffix: str) -> str:
+        """Return the entry-scoped unique ID for this mesh entity."""
+        return mesh_unique_id(self._entry_id, self._node_cid, suffix)
 
     @property
     def _node(self) -> dict[str, Any] | None:

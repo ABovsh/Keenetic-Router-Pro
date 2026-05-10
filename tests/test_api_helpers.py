@@ -21,18 +21,43 @@ from custom_components.keenetic_router_pro.api import (
     ("raw", "expected"),
     [
         ("GigabitEthernet0", "GigabitEthernet0"),
-        (" WifiMaster0/AccessPoint0 ", "WifiMaster0/AccessPoint0"),
+        ("WifiMaster0/AccessPoint0", "WifiMaster0/AccessPoint0"),
         ("aa:bb:cc:dd:ee:ff", "aa:bb:cc:dd:ee:ff"),
+        ("Crypto.Map_01+backup@site", "Crypto.Map_01+backup@site"),
     ],
 )
 def test_validate_cli_arg_accepts_router_tokens(raw: str, expected: str) -> None:
-    """Normal Keenetic identifiers are accepted and trimmed."""
+    """Normal single-token Keenetic identifiers are accepted."""
     assert _validate_cli_arg(raw, "token") == expected
 
 
-@pytest.mark.parametrize("raw", ["", "   ", "ISP\nsystem reboot", "ISP; reboot"])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "",
+        "   ",
+        " WifiMaster0/AccessPoint0 ",
+        "ISP\nsystem reboot",
+        "ISP\tsystem",
+        "ISP; reboot",
+        "ISP reboot",
+        "ISP|reboot",
+        "ISP&reboot",
+        "ISP$(reboot)",
+        "ISP`reboot`",
+        "ISP'reboot'",
+        'ISP"reboot"',
+        "ISP<reboot",
+        "ISP>reboot",
+        "ISP\\reboot",
+        "ISP*",
+        "ISP?",
+        "ISP\x1f",
+        None,
+    ],
+)
 def test_validate_cli_arg_rejects_injection(raw: str) -> None:
-    """Newlines and shell-like separators cannot reach /rci/parse."""
+    """Whitespace, controls, and shell-like tokens cannot reach /rci/parse."""
     with pytest.raises(KeeneticApiError):
         _validate_cli_arg(raw, "token")
 

@@ -1,10 +1,12 @@
 """Utilities for Keenetic Router Pro integration."""
 from __future__ import annotations
 
+import re
 from typing import Any
 from .const import DOMAIN
 
 UNKNOWN_SECONDS_VALUES = (None, "", "unknown", "Unknown")
+_MESH_ID_SAFE_RE = re.compile(r"[^A-Za-z0-9_]+")
 
 
 def coerce_seconds(value: Any, default: int | None = 0) -> int | None:
@@ -47,6 +49,18 @@ def parse_memory_fraction(value: Any) -> float | None:
     if total <= 0:
         return None
     return round(used * 100.0 / total, 1)
+
+
+def sanitize_mesh_id(value: Any) -> str:
+    """Return a full, stable mesh-node token for unique IDs."""
+    token = str(value or "").strip().replace("-", "_").replace(":", "_")
+    token = _MESH_ID_SAFE_RE.sub("_", token).strip("_")
+    return token or "unknown"
+
+
+def mesh_unique_id(entry_id: str, node_id: Any, suffix: str) -> str:
+    """Build an entry-scoped unique ID for a mesh-node entity."""
+    return f"{entry_id}_mesh_{sanitize_mesh_id(node_id)}_{sanitize_mesh_id(suffix)}"
 
 
 def get_main_device_info(
@@ -102,7 +116,7 @@ def get_mesh_device_info(
             configuration_url = f"{scheme}://{node_ip}" if node_ip else None
 
         return {
-            "identifiers": {(DOMAIN, f"mesh_{node_cid}")},
+            "identifiers": {(DOMAIN, f"{entry_id}_mesh_{sanitize_mesh_id(node_cid)}")},
             "name": node_name,
             "manufacturer": "Keenetic",
             "model": node.get("model") or "Extender",

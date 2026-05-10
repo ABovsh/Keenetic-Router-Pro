@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .api import KeeneticClient
 from .const import DOMAIN
@@ -23,13 +23,42 @@ async def async_setup_entry(
     entities: list[ButtonEntity] = [KeeneticRebootButton(coordinator, entry, client)]
 
     # Mesh node reboot butonları
-    mesh_nodes = coordinator.data.get("mesh_nodes", [])
-    for node in mesh_nodes:
-        node_cid = node.get("cid") or node.get("id")
-        if node_cid:
-            entities.append(KeeneticMeshRebootButton(coordinator, entry, client, node_cid))
+    known_mesh_ids: set[str] = set()
+    _add_mesh_reboot_buttons(entities, coordinator, entry, client, known_mesh_ids)
 
     async_add_entities(entities)
+
+    @callback
+    def _async_add_new_mesh_buttons() -> None:
+        new_entities: list[ButtonEntity] = []
+        _add_mesh_reboot_buttons(
+            new_entities, coordinator, entry, client, known_mesh_ids
+        )
+        if new_entities:
+            async_add_entities(new_entities)
+
+    entry.async_on_unload(
+        coordinator.async_add_listener(_async_add_new_mesh_buttons)
+    )
+
+
+def _add_mesh_reboot_buttons(
+    entities: list[ButtonEntity],
+    coordinator: KeeneticCoordinator,
+    entry: ConfigEntry,
+    client: KeeneticClient,
+    known_mesh_ids: set[str],
+) -> None:
+    """Append reboot buttons for newly discovered mesh nodes."""
+    for node in coordinator.data.get("mesh_nodes", []) or []:
+        node_cid = node.get("cid") or node.get("id")
+        if not node_cid:
+            continue
+        node_id = str(node_cid)
+        if node_id in known_mesh_ids:
+            continue
+        known_mesh_ids.add(node_id)
+        entities.append(KeeneticMeshRebootButton(coordinator, entry, client, node_id))
 
 
 class KeeneticRebootButton(ControllerEntity, ButtonEntity):
@@ -72,8 +101,7 @@ class KeeneticMeshRebootButton(MeshEntity, ButtonEntity):
 
     @property
     def unique_id(self) -> str:
-        safe_cid = self._node_cid.replace("-", "_").replace(":", "_")[:16]
-        return f"{safe_cid}_reboot_button_v2"
+        return self._mesh_unique_id("reboot_button_v2")
 
     @property
     def name(self) -> str:

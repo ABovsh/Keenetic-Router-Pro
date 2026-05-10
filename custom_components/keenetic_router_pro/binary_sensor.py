@@ -27,12 +27,8 @@ async def async_setup_entry(
     entities.append(KeeneticControllerUpdateSensor(coordinator, entry))
 
     # Mesh node'lar için binary sensor
-    mesh_nodes = coordinator.data.get("mesh_nodes", [])
-    for node in mesh_nodes:
-        node_cid = node.get("cid") or node.get("id")
-        if node_cid:
-            entities.append(KeeneticMeshNodeSensor(coordinator, entry, node_cid))
-            entities.append(KeeneticMeshUpdateSensor(coordinator, entry, node_cid))
+    known_mesh_ids: set[str] = set()
+    _add_mesh_binary_sensors(entities, coordinator, entry, known_mesh_ids)
 
     # Per-WAN binary sensors: one "Connected" (internet reachability) and
     # one "Enabled" (UI toggle) per uplink.
@@ -69,6 +65,7 @@ async def async_setup_entry(
     @callback
     def _async_add_new_sub_devices() -> None:
         new_entities: list[BinarySensorEntity] = []
+        _add_mesh_binary_sensors(new_entities, coordinator, entry, known_mesh_ids)
         for wan in coordinator.data.get("wan_interfaces", []) or []:
             wan_id = wan.get("id")
             if not wan_id or wan_id in known_wan_ids:
@@ -95,6 +92,25 @@ async def async_setup_entry(
     entry.async_on_unload(
         coordinator.async_add_listener(_async_add_new_sub_devices)
     )
+
+
+def _add_mesh_binary_sensors(
+    entities: list[BinarySensorEntity],
+    coordinator: KeeneticCoordinator,
+    entry: ConfigEntry,
+    known_mesh_ids: set[str],
+) -> None:
+    """Append binary sensors for newly discovered mesh nodes."""
+    for node in coordinator.data.get("mesh_nodes", []) or []:
+        node_cid = node.get("cid") or node.get("id")
+        if not node_cid:
+            continue
+        node_id = str(node_cid)
+        if node_id in known_mesh_ids:
+            continue
+        known_mesh_ids.add(node_id)
+        entities.append(KeeneticMeshNodeSensor(coordinator, entry, node_id))
+        entities.append(KeeneticMeshUpdateSensor(coordinator, entry, node_id))
 
 
 class KeeneticWanConnectedSensor(WanEntity, BinarySensorEntity):
@@ -302,8 +318,7 @@ class KeeneticMeshNodeSensor(MeshEntity, BinarySensorEntity):
 
     @property
     def unique_id(self) -> str:
-        safe_cid = self._node_cid.replace("-", "_").replace(":", "_")[:16]
-        return f"{safe_cid}_connect_v2"
+        return self._mesh_unique_id("connect_v2")
 
     @property
     def name(self) -> str:
@@ -429,8 +444,7 @@ class KeeneticMeshUpdateSensor(MeshEntity, BinarySensorEntity):
 
     @property
     def unique_id(self) -> str:
-        safe_cid = self._node_cid.replace("-", "").replace(":", "")[:16]
-        return f"{self._entry_id}_mesh_{safe_cid}_update_v2"
+        return self._mesh_unique_id("update_v2")
 
     @property
     def name(self) -> str:
