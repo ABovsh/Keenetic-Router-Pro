@@ -45,7 +45,7 @@ git log.
 - **Shared router-value normalization helpers added.** String/int/bool
   coercion used by API parsing now lives in one utility surface so future
   firmware payload variants are easier to cover consistently.
-- **Regression coverage increased to 156 lightweight tests.** New tests cover
+- **Regression coverage increased to 174 lightweight tests.** New tests cover
   coordinator staged updates, tracked-client policy/presence entities,
   WireGuard sensors, dynamic mesh platform helpers, RCI payload shapes, MWS
   payload variants, update progress parsing, Ping Check semantics, config and

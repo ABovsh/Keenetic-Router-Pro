@@ -1,7 +1,7 @@
 # Keenetic Router Pro
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![Version](https://img.shields.io/badge/version-1.7.3-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
+[![Version](https://img.shields.io/badge/version-1.7.4-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
 
 Home Assistant custom integration for Keenetic routers. It focuses on local polling, router diagnostics, mesh monitoring, presence tracking, WAN status, traffic counters, firmware updates, and selected client controls.
 
@@ -9,39 +9,48 @@ Home Assistant custom integration for Keenetic routers. It focuses on local poll
 
 A maintained, hardened fork of the original Keenetic Router Pro integration. It keeps the domain name (`keenetic_router_pro`) so your existing dashboards, automations, and entity history carry over without changes.
 
-### Bugs fixed
+### Practical reasons to use it
 
-**Re-authentication and reconfigure never completed.** After changing router credentials in HA, the flow showed a broken form instead of finishing. The helper function returned the same type on both success and failure, making the success branch unreachable. This is fixed — credential updates now work correctly.
+- **Works with current Home Assistant patterns.** The integration uses
+  config-entry `runtime_data`, modern reauth/reconfigure helpers, unload-safe
+  listeners, and cancellation-safe async paths, so reloads, shutdowns and
+  credential changes behave like a maintained HA integration.
+- **Safer by default.** Diagnostics, debug logs, API response excerpts and
+  client object representations redact router passwords, cookies, Basic Auth
+  headers, MACs, SSIDs, BSSIDs and Wi-Fi PSKs. Password fields are masked, old
+  passwords are not pre-filled, and plaintext-HTTP setups raise a Repair issue.
+- **More reliable authentication.** Direct connections support Basic Auth and
+  NDW2 challenge auth with session-cookie reuse, one-shot reauth after expired
+  cookies, and automatic mesh-node cookie refresh after 401 responses.
+- **KeenDNS protected web app support.** You can connect through a protected
+  KeenDNS hostname over HTTPS/443 when Home Assistant cannot reach the router
+  directly over LAN or VPN.
+- **Lower router load.** Slow data such as mesh topology, firmware info,
+  host policies, NDNS and IPsec diagnostics is cached across ticks. Client
+  totals reuse already-fetched client data, and interface stats are polled
+  only for interfaces that back enabled entities.
+- **Better WAN and VPN visibility.** Per-uplink devices expose status,
+  enabled state, role, public IP, uptime, counters and throughput. VLAN WAN
+  interfaces and IPsec crypto-map throughput are handled, and VPN controls are
+  grouped with the interface or WAN device they belong to.
+- **Mesh is treated as a first-class surface.** Mesh nodes and ports can appear
+  dynamically without restarting Home Assistant, removed nodes become
+  unavailable instead of stale, firmware update entities support controller and
+  extender flows, and mesh unique IDs are scoped to the HA config entry.
+- **Useful diagnostics, not just raw counters.** The fork adds DNS proxy
+  health and failed-request sensors, IPsec VICI out-of-memory diagnostics,
+  ping-check aware WAN interpretation, WireGuard/IPsec state sensors, and
+  long-term-statistics-friendly uptime classes.
+- **Presence and client controls are less noisy.** Client lookups use a
+  precomputed MAC index, per-client entities skip no-op state writes, selected
+  ping tracking is configurable, and tracked-client uptime/last-seen sensors
+  update on their own cadence.
+- **Actively regression-tested.** The repository ships a lightweight pytest
+  suite covering API parsing, auth/resource lifecycle, config/options helpers,
+  mesh/entity helpers, dynamic platform listeners, translations, statistics
+  classes, diagnostics redaction and cancellation safety.
 
-**Mesh nodes could lock up until HA restarted.** Auth headers for each mesh node were cached but never cleared on a 401 response. A credential rotation or a node session reset left the coordinator permanently locked out with a stale token. The cache is now evicted on 401 so the next poll re-authenticates automatically.
-
-**Throughput displayed in bits instead of bytes.** The upstream reported WAN and IPsec throughput in B/s. All networking equipment and ISP plans use Mbit/s. Sensors now report in bits/s and HA offers automatic unit conversion to kbit/s or Gbit/s from the entity settings — no dashboard template tricks needed.
-
-**VLAN WAN throughput could stay at zero.** Some Keenetic WANs are VLAN
-interfaces such as `GigabitEthernet0/Vlan5`. Those interfaces were skipped by
-the generic stats collector, so their per-WAN throughput stayed at zero even
-when the router reported live `rxbytes`, `txbytes`, `rxspeed` and `txspeed`.
-VLAN WANs are now included and queried through the Keenetic CLI stat form that
-works for them.
-
-**Device URLs could render as `http://None`.** Fixed. Configuration URLs are only set when a valid address is available.
-
-### Reliability and security improvements
-
-- Credentials and session tokens are **redacted from all log output** — passwords, PSKs, cookies, and authorization headers never appear in debug logs.
-- Authentication failures are correctly mapped to **`ConfigEntryAuthFailed`** so HA prompts for re-authentication instead of marking the entry as unavailable indefinitely.
-- Mesh node authentication uses **NDW2-first with Basic Auth fallback**, matching actual Keenetic firmware behavior.
-- **One-shot re-authentication** on expired session cookies before surfacing errors to HA.
-- CLI arguments sent to `/rci/parse` are **validated** to prevent injection-style inputs.
-- Existing passwords are **not pre-filled** in reconfigure forms.
-
-### Reduced router load
-
-- Slow-changing data (mesh topology, firmware info, host policies, NDNS) is **cached across ticks** — fetched every 60 s or 300 s instead of every 10 s.
-- Client connection, disconnection, and extender counts are **derived from already-fetched client data** instead of separate API calls.
-- Interface stats are **only polled for interfaces** that back enabled sensors.
-
-### Leaner footprint
+### Removed surface area
 
 - **QR-code image platform removed** (449 lines, `pyqrcode`/`pypng` dependencies dropped) — generating Wi-Fi QR codes from HA is rarely useful when the router already shows them.
 - **USB storage polling removed** — this required frequent polling of optional components that may not be present, adding load and noise.
