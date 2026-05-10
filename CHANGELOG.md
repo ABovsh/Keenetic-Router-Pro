@@ -8,6 +8,24 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.1 - HACS validation fixes for 1.7.0
+
+Hotfix for two HACS validation errors that 1.7.0 tripped:
+
+- **`min_ha_version` is not a valid `manifest.json` key** — that field
+  is reserved for HA core's internal integration manifests, not custom
+  components. The minimum HA version is now declared in `hacs.json`
+  via the standard `homeassistant: "2024.5.0"` key, which is what
+  HACS actually reads.
+- **`CONFIG_SCHEMA` warning** — hassfest requires every integration
+  that defines `async_setup` to declare a config schema, even when
+  it has no YAML support. The integration root now exposes
+  `CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)` — the
+  canonical "UI-only, no YAML" helper.
+
+No user-visible behaviour change vs 1.7.0; this release exists so the
+HACS marketplace stops rejecting installs.
+
 ## 1.7.0 - Hardening, modern HA APIs, and statistics fixes
 
 > ⚠️ **Minimum Home Assistant version bumped to 2024.5.0.** This release

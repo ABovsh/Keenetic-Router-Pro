@@ -10,7 +10,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers import config_validation as cv, issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import KeeneticApiError, KeeneticAuthError, KeeneticClient
@@ -82,6 +82,11 @@ def _async_update_insecure_http_issue(
         )
     else:
         ir.async_delete_issue(hass, DOMAIN, issue_id)
+
+# Hassfest requires every integration that defines async_setup to declare
+# a CONFIG_SCHEMA. We only configure via the UI (config_flow), so the
+# canonical helper for "no YAML support" is exactly what we want here.
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 PLATFORMS: list[str] = [
     "sensor",

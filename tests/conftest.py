@@ -49,6 +49,26 @@ aiohttp_client = types.ModuleType("homeassistant.helpers.aiohttp_client")
 aiohttp_client.async_get_clientsession = lambda hass: None
 helpers.aiohttp_client = aiohttp_client
 
+# Stub homeassistant.helpers.config_validation just enough for the
+# integration root's CONFIG_SCHEMA helper to import. Real validation is
+# never exercised in these unit tests.
+config_validation = types.ModuleType("homeassistant.helpers.config_validation")
+config_validation.config_entry_only_config_schema = lambda domain: None
+helpers.config_validation = config_validation
+
+issue_registry = types.ModuleType("homeassistant.helpers.issue_registry")
+
+
+class _IssueSeverity:
+    WARNING = "warning"
+    ERROR = "error"
+
+
+issue_registry.IssueSeverity = _IssueSeverity
+issue_registry.async_create_issue = lambda *a, **kw: None
+issue_registry.async_delete_issue = lambda *a, **kw: None
+helpers.issue_registry = issue_registry
+
 
 class _DataUpdateCoordinator:
     def __class_getitem__(cls, item):  # support Generic subscript
@@ -125,5 +145,6 @@ sys.modules.setdefault("homeassistant.config_entries", config_entries)
 sys.modules.setdefault("homeassistant.core", core)
 sys.modules.setdefault("homeassistant.helpers", helpers)
 sys.modules.setdefault("homeassistant.helpers.aiohttp_client", aiohttp_client)
+sys.modules.setdefault("homeassistant.helpers.config_validation", config_validation)
 sys.modules.setdefault("homeassistant.helpers.update_coordinator", update_coordinator)
 sys.modules.setdefault("homeassistant.helpers.device_registry", device_registry)
