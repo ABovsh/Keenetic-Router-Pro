@@ -5,6 +5,5 @@ __pycache__/
 .venv/
 venv/
 .coverage
-graphify-out/.graphify_root
-graphify-out/.rebuild.lock
-graphify-out/cache/
+.DS_Store
+graphify-out/
