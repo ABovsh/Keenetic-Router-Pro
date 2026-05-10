@@ -233,8 +233,11 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
 
     @property
     def _client_from_main(self) -> dict[str, Any] | None:
-        clients = self._main_coordinator.data.get("clients", []) or []
-        for item in clients:
+        data = self._main_coordinator.data or {}
+        index = data.get("clients_by_mac")
+        if isinstance(index, dict):
+            return index.get(self._mac)
+        for item in data.get("clients", []) or []:
             if str(item.get("mac") or "").lower() == self._mac:
                 return item
         return None

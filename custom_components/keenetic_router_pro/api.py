@@ -8,14 +8,22 @@ from urllib.parse import urlparse
 from homeassistant.exceptions import HomeAssistantError
 
 import aiohttp
-import async_timeout
 import asyncio
 import base64
 import hashlib
 import logging
 import re
 
-from .const import DOMAIN
+from .const import (
+    DOMAIN,
+    IPSEC_STATE_ESTABLISHED,
+    RCI_HOTSPOT_HOST_PATHS,
+    RCI_SHOW_VERSION,
+    TRUTHY_STRINGS,
+    WAN_STATUS_CONNECTED,
+    WAN_STATUS_DOWN,
+    WAN_STATUS_LINK_UP,
+)
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.api")
 
@@ -243,7 +251,7 @@ class KeeneticClient:
         _LOGGER.debug("Authenticating to Keenetic via %s", url)
 
         try:
-            async with async_timeout.timeout(self._request_timeout):
+            async with asyncio.timeout(self._request_timeout):
                 resp = await self._session.get(url, headers=headers)
                 async with resp:
                     if resp.status != 200:
@@ -284,7 +292,7 @@ class KeeneticClient:
         # --- Step 1: GET /auth to obtain challenge & session cookie ---
         _LOGGER.debug("NDW2 challenge auth: GET %s", auth_url)
         try:
-            async with async_timeout.timeout(self._request_timeout):
+            async with asyncio.timeout(self._request_timeout):
                 get_resp = await self._session.get(auth_url, allow_redirects=False)
         except asyncio.TimeoutError as err:
             raise KeeneticAuthError("Challenge GET timed out") from err
@@ -344,7 +352,7 @@ class KeeneticClient:
         _LOGGER.debug("NDW2 challenge: POST %s payload_login_set=%s", auth_url, bool(self._username))
 
         try:
-            async with async_timeout.timeout(self._request_timeout):
+            async with asyncio.timeout(self._request_timeout):
                 post_resp = await self._session.post(
                     auth_url,
                     json=payload,
@@ -418,7 +426,7 @@ class KeeneticClient:
         )
 
         try:
-            async with async_timeout.timeout(self._request_timeout):
+            async with asyncio.timeout(self._request_timeout):
                 resp = await self._session.request(
                     method,
                     url,
@@ -537,6 +545,62 @@ class KeeneticClient:
             return _dict_items(raw)
         return []
 
+    async def async_ping_ip(self, ip_address: str, timeout: float = 2.0) -> bool:
+        """Ping an IP address using the router's ping functionality.
+        
+        Returns True if the host is reachable, False otherwise.
+        """
+        try:
+            ip_address = _validate_cli_arg(ip_address, "IP address")
+
+            result = await self._rci_parse(f"ip ping {ip_address} count 1")
+
+            if result is None:
+                return False
+
+            result_str = str(result).lower()
+
+            if "1 received" in result_str or "bytes from" in result_str:
+                return True
+
+            # Check for failure patterns
+            if "0 received" in result_str or "100% packet loss" in result_str:
+                return False
+
+            if "timeout" not in result_str and "unreachable" not in result_str:
+                return True
+
+            return False
+
+        except Exception as err:
+            _LOGGER.debug("Ping to %s failed: %s", ip_address, err)
+            return False
+
+    async def async_ping_multiple(
+        self, 
+        ip_addresses: List[str], 
+        timeout: float = 2.0
+    ) -> Dict[str, bool]:
+        """Ping multiple IP addresses concurrently.
+        
+        Returns a dict mapping IP address to reachability status.
+        """
+        if not ip_addresses:
+            return {}
+
+        tasks = [self.async_ping_ip(ip, timeout) for ip in ip_addresses]
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        ping_results: Dict[str, bool] = {}
+        for ip, result in zip(ip_addresses, results):
+            if isinstance(result, Exception):
+                ping_results[ip] = False
+            else:
+                ping_results[ip] = bool(result)
+
+        return ping_results
+
     async def async_get_system_info(self) -> Dict[str, Any]:
         """Return basic system info: hostname, version, cpu, memory, uptime, etc."""
         data = await self._rci_get("show/system")
@@ -544,7 +608,7 @@ class KeeneticClient:
 
     async def async_get_current_version_info(self) -> Dict[str, Any]:
         """Return version info"""
-        data = await self._rci_get("show/version")
+        data = await self._rci_get(RCI_SHOW_VERSION)
         return data or {}
     
     async def async_get_available_version_info(self) -> Dict[str, Any]:
@@ -675,15 +739,16 @@ class KeeneticClient:
         ) or {}
 
     async def async_get_clients(self) -> List[Dict[str, Any]]:
+
         last_data: Any = None
 
-        for subpath in ("show/ip/hotspot/host", "ip/hotspot/host"):
+        for subpath in RCI_HOTSPOT_HOST_PATHS:
             try:
                 data = await self._rci_get(subpath)
+                last_data = data
             except KeeneticApiError as err:
-                _LOGGER.debug("Hotspot host fetch via %s failed: %s", subpath, err)
+                _LOGGER.debug("hotspot subpath %s failed: %s", subpath, err)
                 continue
-            last_data = data
 
             items = _nested_dict_items(data, "hosts", "host", "items")
 
@@ -698,12 +763,15 @@ class KeeneticClient:
 
 
     async def async_get_wireguard_status(
-        self, interfaces: Dict[str, Any] | None = None
+        self,
+        interfaces: Dict[str, Any] | None = None,
+        iface_list: List[Dict[str, Any]] | None = None,
     ) -> Dict[str, Any]:
         """Return WireGuard interfaces and their status."""
-        if interfaces is None:
-            interfaces = await self.async_get_interfaces()
-        iface_list = self._normalize_interfaces(interfaces)
+        if iface_list is None:
+            if interfaces is None:
+                interfaces = await self.async_get_interfaces()
+            iface_list = self._normalize_interfaces(interfaces)
 
         profiles: Dict[str, Any] = {}
 
@@ -766,13 +834,16 @@ class KeeneticClient:
 
 
     async def async_get_wifi_networks(
-        self, interfaces: Dict[str, Any] | None = None
+        self,
+        interfaces: Dict[str, Any] | None = None,
+        iface_list: List[Dict[str, Any]] | None = None,
     ) -> List[Dict[str, Any]]:
 
 
-        if interfaces is None:
-            interfaces = await self.async_get_interfaces()
-        iface_list = self._normalize_interfaces(interfaces)
+        if iface_list is None:
+            if interfaces is None:
+                interfaces = await self.async_get_interfaces()
+            iface_list = self._normalize_interfaces(interfaces)
 
         bridge_labels: Dict[str, str] = {}
         for item in iface_list:
@@ -951,7 +1022,19 @@ class KeeneticClient:
 
 
     async def async_set_wifi_enabled(self, interface_name: str, enabled: bool) -> None:
-        """Enable or disable a Wi-Fi interface (alias for set_interface_enabled)."""
+        """Enable or disable a Wi-Fi interface via RCI parse."""
+        interface_name = _validate_cli_arg(interface_name, "interface name")
+        cmd = f"interface {interface_name} {'up' if enabled else 'down'}"
+        _LOGGER.debug("Set Wi-Fi %s enabled=%s via: %s", interface_name, enabled, cmd)
+        await self._rci_parse(cmd)
+
+    async def async_set_wireguard_enabled(self, interface_name: str, enabled: bool) -> None:
+        """Enable or disable a WireGuard interface via RCI parse.
+
+        Kept for backwards compatibility; delegates to the generic
+        async_set_interface_enabled which works for any interface type
+        (WireGuard, OpenVPN, SSTP, IPsec, ...).
+        """
         await self.async_set_interface_enabled(interface_name, enabled)
 
     async def async_set_interface_enabled(self, interface_name: str, enabled: bool) -> None:
@@ -973,7 +1056,9 @@ class KeeneticClient:
         await self._rci_parse(cmd)
 
     async def async_get_vpn_tunnels(
-        self, interfaces: Dict[str, Any] | None = None
+        self,
+        interfaces: Dict[str, Any] | None = None,
+        iface_list: List[Dict[str, Any]] | None = None,
     ) -> dict[str, dict[str, Any]]:
         """Auto-discover VPN-like interfaces (WireGuard, OpenVPN, IPsec, ...).
 
@@ -987,9 +1072,10 @@ class KeeneticClient:
               }
             }
         """
-        if interfaces is None:
-            interfaces = await self.async_get_interfaces()
-        iface_list = self._normalize_interfaces(interfaces)
+        if iface_list is None:
+            if interfaces is None:
+                interfaces = await self.async_get_interfaces()
+            iface_list = self._normalize_interfaces(interfaces)
 
         VPN_TYPES = {
             "wireguard",
@@ -1041,7 +1127,9 @@ class KeeneticClient:
         return {"profiles": profiles}
 
     async def async_get_wan_status(
-        self, interfaces: Dict[str, Any] | None = None
+        self,
+        interfaces: Dict[str, Any] | None = None,
+        iface_list: List[Dict[str, Any]] | None = None,
     ) -> Dict[str, Any]:
         """Get WAN interface status including external IP address.
 
@@ -1052,9 +1140,10 @@ class KeeneticClient:
           - "link_up"    → interface up AMA IP yok (ISP sorunu vb.)
           - "down"       → interface bulunamadı veya down
         """
-        if interfaces is None:
-            interfaces = await self.async_get_interfaces()
-        iface_list = self._normalize_interfaces(interfaces)
+        if iface_list is None:
+            if interfaces is None:
+                interfaces = await self.async_get_interfaces()
+            iface_list = self._normalize_interfaces(interfaces)
 
         # ---------- yardımcı: interface'den IP çıkar ----------
         def _extract_ip(iface: Dict[str, Any]) -> str | None:
@@ -1097,8 +1186,8 @@ class KeeneticClient:
         ) -> Dict[str, Any]:
             wan_ip = _extract_ip(iface)
             link_state = str(iface.get("state") or "").lower()
-            status = "connected" if (link_state == "up" and wan_ip) else (
-                "link_up" if link_state == "up" else "down"
+            status = WAN_STATUS_CONNECTED if (link_state == "up" and wan_ip) else (
+                WAN_STATUS_LINK_UP if link_state == "up" else WAN_STATUS_DOWN
             )
             return {
                 "status": status,
@@ -1157,10 +1246,12 @@ class KeeneticClient:
             if _is_wan_iface(iface):
                 return _build_result(iface, "ethernet")
 
-        return {"status": "down", "ip": None, "link": "down"}
+        return {"status": WAN_STATUS_DOWN, "ip": None, "link": "down"}
 
     async def async_get_wan_interfaces(
-        self, interfaces: Dict[str, Any] | None = None
+        self,
+        interfaces: Dict[str, Any] | None = None,
+        iface_list: List[Dict[str, Any]] | None = None,
     ) -> List[Dict[str, Any]]:
         """Return per-uplink info for every configured WAN interface.
 
@@ -1210,9 +1301,10 @@ class KeeneticClient:
             raw                the untouched interface dict, for consumers
                                that want a field we didn't pull out
         """
-        if interfaces is None:
-            interfaces = await self.async_get_interfaces()
-        iface_list = self._normalize_interfaces(interfaces)
+        if iface_list is None:
+            if interfaces is None:
+                interfaces = await self.async_get_interfaces()
+            iface_list = self._normalize_interfaces(interfaces)
 
         def _is_wan(iface: Dict[str, Any]) -> bool:
             # Explicit uplink role is the strongest signal.
@@ -1945,7 +2037,7 @@ class KeeneticClient:
                 tx_packets += _to_int(sa.get("out_packets"))
 
             state = _clean_str(status.get("state"))
-            connected = state == "PHASE2_ESTABLISHED"
+            connected = state == IPSEC_STATE_ESTABLISHED
             local_endpoint = _clean_addr(status.get("local-endpoint-address"))
             remote_endpoint = _clean_addr(status.get("remote-endpoint-address"))
 
@@ -2016,7 +2108,9 @@ class KeeneticClient:
             )
 
 
-    async def async_get_mesh_nodes(self) -> List[Dict[str, Any]]:
+    async def async_get_mesh_nodes(
+        self, clients: List[Dict[str, Any]] | None = None
+    ) -> List[Dict[str, Any]]:
         """Get mesh/extender nodes status from mws/member endpoint.
 
         Bu endpoint tüm mesh üyelerini detaylı bilgileriyle döndürür.
@@ -2036,8 +2130,9 @@ class KeeneticClient:
 
         # 1) Önce fallback ile "evde extender var mı?" tespit et
         try:
-            fallback_nodes = await self._get_mesh_nodes_from_clients()
-        except Exception:
+            fallback_nodes = await self._get_mesh_nodes_from_clients(clients=clients)
+        except Exception as err:
+            _LOGGER.debug("mesh fallback from clients failed: %s", err)
             fallback_nodes = []
 
         # Extender yoksa MWS endpoint'ine hiç dokunma (log spam sıfır)
@@ -2120,9 +2215,16 @@ class KeeneticClient:
 
         return nodes
 
-    async def _get_mesh_nodes_from_clients(self) -> List[Dict[str, Any]]:
-        """Fallback: Get mesh nodes from client list if mws/member fails."""
-        clients = await self.async_get_clients()
+    async def _get_mesh_nodes_from_clients(
+        self, clients: List[Dict[str, Any]] | None = None
+    ) -> List[Dict[str, Any]]:
+        """Fallback: Get mesh nodes from client list if mws/member fails.
+
+        Accepts a pre-fetched ``clients`` list so the coordinator can
+        avoid an extra ``show/ip/hotspot`` round-trip on mesh routers.
+        """
+        if clients is None:
+            clients = await self.async_get_clients()
         nodes: List[Dict[str, Any]] = []
 
         for client in clients:
@@ -2163,7 +2265,9 @@ class KeeneticClient:
         await self._rci_parse(cmd)
 
     async def async_get_traffic_stats(
-        self, interfaces: Dict[str, Any] | None = None
+        self,
+        interfaces: Dict[str, Any] | None = None,
+        iface_list: List[Dict[str, Any]] | None = None,
     ) -> Dict[str, Any]:
         """Get traffic statistics (speed, totals).
         
@@ -2178,10 +2282,10 @@ class KeeneticClient:
         }
 
         try:
-            if interfaces is None:
-                interfaces = await self.async_get_interfaces()
-
-            iface_list = self._normalize_interfaces(interfaces)
+            if iface_list is None:
+                if interfaces is None:
+                    interfaces = await self.async_get_interfaces()
+                iface_list = self._normalize_interfaces(interfaces)
             WAN_KEYWORDS = ("wan", "internet", "pppoe", "isp", "provider")
 
             for iface in iface_list:
@@ -2243,28 +2347,30 @@ class KeeneticClient:
         return stats
 
     async def async_get_all_interface_stats(
-        self, interfaces: Dict[str, Any] | None = None
+        self,
+        interfaces: Dict[str, Any] | None = None,
+        iface_list: List[Dict[str, Any]] | None = None,
     ) -> Dict[str, Dict[str, Any]]:
         """Get traffic statistics for all interfaces.
         
         Returns dict mapping interface name to stats (rxbytes, txbytes, etc.)
         """
-        if interfaces is None:
-            interfaces = await self.async_get_interfaces()
-        iface_list = self._normalize_interfaces(interfaces)
+        if iface_list is None:
+            if interfaces is None:
+                interfaces = await self.async_get_interfaces()
+            iface_list = self._normalize_interfaces(interfaces)
 
-        all_stats: Dict[str, Dict[str, Any]] = {}
         wan_ids = {
             str(wan.get("id"))
-            for wan in await self.async_get_wan_interfaces(interfaces=interfaces)
+            for wan in await self.async_get_wan_interfaces(interfaces=interfaces, iface_list=iface_list)
             if wan.get("id")
         }
 
+        targets: List[Dict[str, Any]] = []
         for iface in iface_list:
             iface_name = iface.get("id") or iface.get("interface-name")
             if not iface_name:
                 continue
-
             iface_type = iface.get("type", "").lower()
             if iface_name not in wan_ids and iface_type in (
                 "bridge",
@@ -2272,17 +2378,30 @@ class KeeneticClient:
                 "accesspoint",
             ):
                 continue
+            targets.append({
+                "name": iface_name,
+                "type": iface_type,
+                "link": iface.get("link"),
+                "state": iface.get("state"),
+            })
 
-            try:
-                stats = await self.async_get_interface_stat(iface_name)
-                if stats:
-                    stats["interface_name"] = iface_name
-                    stats["interface_type"] = iface_type
-                    stats["link"] = iface.get("link")
-                    stats["state"] = iface.get("state")
-                    all_stats[iface_name] = stats
-            except Exception as err:
-                _LOGGER.debug("Failed to get stats for %s: %s", iface_name, err)
+        results = await asyncio.gather(
+            *(self.async_get_interface_stat(t["name"]) for t in targets),
+            return_exceptions=True,
+        )
+
+        all_stats: Dict[str, Dict[str, Any]] = {}
+        for target, stats in zip(targets, results):
+            if isinstance(stats, Exception):
+                _LOGGER.debug("Failed to get stats for %s: %s", target["name"], stats)
+                continue
+            if not stats:
+                continue
+            stats["interface_name"] = target["name"]
+            stats["interface_type"] = target["type"]
+            stats["link"] = target["link"]
+            stats["state"] = target["state"]
+            all_stats[target["name"]] = stats
 
         return all_stats
 
@@ -2316,7 +2435,7 @@ class KeeneticClient:
                 if isinstance(value, bool):
                     is_active = value
                 elif isinstance(value, str):
-                    is_active = value.lower() in ("true", "yes", "1", "up", "online")
+                    is_active = value.lower() in TRUTHY_STRINGS
                 else:
                     is_active = bool(value)
             elif "link" in client:
@@ -2348,6 +2467,13 @@ class KeeneticClient:
             "extenders": extenders,
             "extender_count": len(extenders),
         }
+
+    async def async_get_client_stats(self) -> Dict[str, Any]:
+        """Get connected/disconnected client counts and per-AP stats.
+        
+        Extender/repeater cihazları client sayısından çıkarılır.
+        """
+        return self.summarize_client_stats(await self.async_get_clients())
 
     async def async_get_policies(self) -> Dict[str, str]:
         """Get available connection policies.
@@ -2441,6 +2567,39 @@ class KeeneticClient:
         """Unblock a client's internet access."""
         await self.async_set_client_policy(mac, "default")
 
+    async def async_check_firmware_update(self) -> Dict[str, Any]:
+        """Check for available firmware update via /rci/show/version."""
+        try:
+            data = await self._rci_get(RCI_SHOW_VERSION)
+            if not data:
+                return {}
+
+            current = data.get("title") or data.get("release")
+            available = data.get("fw-available") or data.get("release-available")
+
+            has_update = (
+                current and available and 
+                current != available and
+                data.get("fw-update-sandbox") == "stable"
+            )
+
+            return {
+                "current": {
+                    "title": current,
+                    "release": data.get("release"),
+                },
+                "available": {
+                    "title": available,
+                    "release": data.get("release-available"),
+                } if has_update else None,
+                "channel": data.get("fw-update-sandbox"),
+                "has_update": has_update,
+            }
+        except Exception as err:
+            _LOGGER.debug("Error checking firmware update: %s", err)
+            return {}
+
+
     async def async_start_firmware_update(self) -> bool:
         """Start firmware update for the controller (main router) ONLY.
 
@@ -2451,7 +2610,7 @@ class KeeneticClient:
         """
         # Try KeeneticOS 5.x: stage components then commit
         try:
-            version_data = await self._rci_get("show/version")
+            version_data = await self._rci_get(RCI_SHOW_VERSION)
             ndw_components = ""
             if isinstance(version_data, dict):
                 ndw_components = version_data.get("ndw", {}).get("components", "")
@@ -2560,7 +2719,7 @@ class KeeneticClient:
             # Step 1: Get current components from show/version
             try:
                 url = f"{base}{RCI_ROOT}/show/version"
-                async with async_timeout.timeout(self._request_timeout):
+                async with asyncio.timeout(self._request_timeout):
                     resp = await self._session.get(url, headers=node_headers)
                 if resp.status == 200:
                     version_data = await resp.json()
@@ -2584,7 +2743,7 @@ class KeeneticClient:
                         _LOGGER.info(
                             "Staging component update on node %s", label
                         )
-                        async with async_timeout.timeout(self._request_timeout):
+                        async with asyncio.timeout(self._request_timeout):
                             resp = await self._session.post(
                                 url,
                                 json=payload,
@@ -2602,7 +2761,7 @@ class KeeneticClient:
                         _LOGGER.info(
                             "Committing update on node %s", label
                         )
-                        async with async_timeout.timeout(self._request_timeout):
+                        async with asyncio.timeout(self._request_timeout):
                             resp = await self._session.post(
                                 url,
                                 json={"reason": "manual"},
@@ -2642,7 +2801,7 @@ class KeeneticClient:
             try:
                 url = f"{base}{RCI_ROOT}/system/update"
                 _LOGGER.info("Attempting update on node %s via %s", label, url)
-                async with async_timeout.timeout(self._request_timeout):
+                async with asyncio.timeout(self._request_timeout):
                     resp = await self._session.post(
                         url,
                         json={"confirm": True},
@@ -2690,7 +2849,7 @@ class KeeneticClient:
 
         try:
             # Step 1: GET /auth to get challenge
-            async with async_timeout.timeout(self._request_timeout):
+            async with asyncio.timeout(self._request_timeout):
                 get_resp = await self._session.get(
                     auth_url, allow_redirects=False
                 )
@@ -2729,7 +2888,7 @@ class KeeneticClient:
             if session_cookie:
                 post_headers["Cookie"] = session_cookie
 
-            async with async_timeout.timeout(self._request_timeout):
+            async with asyncio.timeout(self._request_timeout):
                 post_resp = await self._session.post(
                     auth_url,
                     json={"login": self._username, "password": response_hash},
@@ -2776,7 +2935,8 @@ class KeeneticClient:
                 "stage": data.get("stage"),
                 "eta_seconds": data.get("eta"),
             }
-        except Exception:
+        except Exception as err:
+            _LOGGER.debug("firmware progress fetch failed: %s", err)
             return {}
         
     async def async_get_ndns_info(self) -> Dict[str, Any]:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -12,6 +13,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime, UnitOfInformation, UnitOfDataRate, EntityCategory
 
+from ..const import WAN_STATUS_CONNECTED, WAN_STATUS_LINK_UP
 from ..coordinator import KeeneticCoordinator
 from ..entity import ControllerEntity, WanEntity
 from ..utils import coerce_seconds
@@ -37,9 +39,9 @@ class KeeneticWanStatusSensor(ControllerEntity, SensorEntity):
     @property
     def icon(self) -> str:
         status = self.native_value
-        if status == "connected":
+        if status == WAN_STATUS_CONNECTED:
             return "mdi:web-check"
-        if status == "link_up":
+        if status == WAN_STATUS_LINK_UP:
             return "mdi:web-remove"
         return "mdi:web-off"
 

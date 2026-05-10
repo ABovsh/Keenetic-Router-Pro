@@ -215,6 +215,137 @@ def test_parse_ipsec_vici_diagnostics_reports_ok_without_errors() -> None:
     assert summary["last_vici_out_of_memory"] is None
 
 
+def test_iface_list_kwarg_skips_redundant_normalization() -> None:
+    """Stage-2 calls accept a pre-normalized iface_list and must not re-normalize."""
+    client = KeeneticClient("192.0.2.1", "admin", "secret")
+
+    normalized = [
+        {"id": "Wireguard0", "type": "WireGuard", "state": "up"},
+        {"id": "GigabitEthernet0", "type": "Ethernet"},
+    ]
+
+    calls = 0
+    real_normalize = client._normalize_interfaces
+
+    def counting_normalize(raw):
+        nonlocal calls
+        calls += 1
+        return real_normalize(raw)
+
+    client._normalize_interfaces = counting_normalize  # type: ignore[assignment]
+
+    result = asyncio.run(client.async_get_wireguard_status(iface_list=normalized))
+
+    assert calls == 0, "iface_list path must skip _normalize_interfaces"
+    assert isinstance(result, dict)
+    assert "profiles" in result
+
+
+def test_get_mesh_nodes_from_clients_uses_prefetched_clients() -> None:
+    """The fallback accepts a pre-fetched client list to avoid a duplicate fetch."""
+    client = KeeneticClient("192.0.2.1", "admin", "secret")
+
+    async def fail_get_clients():  # pragma: no cover - must not be invoked
+        raise AssertionError("async_get_clients should not be called when clients are supplied")
+
+    client.async_get_clients = fail_get_clients  # type: ignore[assignment]
+
+    clients = [
+        {"mac": "AA:BB:CC:00:00:01", "system-mode": "extender", "active": True, "name": "Ext-1", "ip": "10.0.0.2"},
+        {"mac": "AA:BB:CC:00:00:02", "system-mode": "client", "active": True},
+        {"mac": "", "system-mode": "extender", "active": True},  # missing mac → skipped
+    ]
+
+    nodes = asyncio.run(client._get_mesh_nodes_from_clients(clients=clients))
+
+    assert len(nodes) == 1
+    node = nodes[0]
+    assert node["mac"] == "AA:BB:CC:00:00:01"
+    assert node["mode"] == "extender"
+    assert node["state"] == "up"
+    assert node["connected"] is True
+
+
+def test_get_mesh_nodes_from_clients_falls_back_to_fetch_when_no_arg() -> None:
+    """Without a supplied list the helper still calls async_get_clients."""
+    client = KeeneticClient("192.0.2.1", "admin", "secret")
+
+    fetched = [{"mac": "AA:BB:CC:00:00:09", "system-mode": "repeater", "active": False, "name": "Rep"}]
+
+    async def fake_get_clients():
+        return fetched
+
+    client.async_get_clients = fake_get_clients  # type: ignore[assignment]
+
+    nodes = asyncio.run(client._get_mesh_nodes_from_clients())
+
+    assert [n["mac"] for n in nodes] == ["AA:BB:CC:00:00:09"]
+    assert nodes[0]["state"] == "down"
+
+
+def test_async_get_all_interface_stats_runs_in_parallel() -> None:
+    """Per-interface stat fetches run via asyncio.gather, not sequentially."""
+    client = KeeneticClient("192.0.2.1", "admin", "secret")
+
+    interfaces = {
+        "GigabitEthernet0": {"id": "GigabitEthernet0", "type": "Ethernet", "link": "up", "state": "up"},
+        "PPPoE0": {"id": "PPPoE0", "type": "PPPoE", "link": "up", "state": "up"},
+        "Bridge0": {"id": "Bridge0", "type": "Bridge", "link": "up", "state": "up"},  # filtered
+    }
+
+    async def fake_wan(interfaces=None, iface_list=None):
+        return [{"id": "PPPoE0"}]
+
+    in_flight = 0
+    max_in_flight = 0
+
+    async def fake_stat(name):
+        nonlocal in_flight, max_in_flight
+        in_flight += 1
+        max_in_flight = max(max_in_flight, in_flight)
+        try:
+            await asyncio.sleep(0.01)
+            return {"rxbytes": 100, "txbytes": 200}
+        finally:
+            in_flight -= 1
+
+    client.async_get_wan_interfaces = fake_wan  # type: ignore[assignment]
+    client.async_get_interface_stat = fake_stat  # type: ignore[assignment]
+
+    stats = asyncio.run(client.async_get_all_interface_stats(interfaces=interfaces))
+
+    assert "GigabitEthernet0" in stats
+    assert "PPPoE0" in stats
+    assert "Bridge0" not in stats  # bridge filtered when not in wan_ids
+    assert max_in_flight >= 2, "interface stat fetches must run concurrently"
+
+
+def test_async_get_all_interface_stats_swallows_per_interface_errors() -> None:
+    """One failing interface must not poison the whole result set."""
+    client = KeeneticClient("192.0.2.1", "admin", "secret")
+
+    interfaces = {
+        "ISP": {"id": "ISP", "type": "Ethernet", "link": "up"},
+        "Backup": {"id": "Backup", "type": "Ethernet", "link": "up"},
+    }
+
+    async def fake_wan(interfaces=None, iface_list=None):
+        return [{"id": "ISP"}, {"id": "Backup"}]
+
+    async def fake_stat(name):
+        if name == "Backup":
+            raise RuntimeError("boom")
+        return {"rxbytes": 1}
+
+    client.async_get_wan_interfaces = fake_wan  # type: ignore[assignment]
+    client.async_get_interface_stat = fake_stat  # type: ignore[assignment]
+
+    stats = asyncio.run(client.async_get_all_interface_stats(interfaces=interfaces))
+
+    assert "ISP" in stats
+    assert "Backup" not in stats
+
+
 def test_summarize_client_stats_excludes_extenders() -> None:
     """Client stats count user devices separately from mesh extenders."""
     clients = [

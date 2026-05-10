@@ -18,6 +18,37 @@ def coerce_seconds(value: Any, default: int | None = 0) -> int | None:
         return default
 
 
+def normalize_mac(value: Any) -> str:
+    """Lowercase string form of a MAC, empty string for falsy/None."""
+    return str(value or "").lower()
+
+
+def find_client_by_mac(clients: Any, mac: str) -> dict[str, Any] | None:
+    """Linear-scan fallback used when no clients_by_mac index is available."""
+    if not mac or not clients:
+        return None
+    target = mac.lower()
+    for client in clients:
+        if isinstance(client, dict) and normalize_mac(client.get("mac")) == target:
+            return client
+    return None
+
+
+def parse_memory_fraction(value: Any) -> float | None:
+    """Parse Keenetic ``"used/total"`` memory string into a 0–100 percentage."""
+    if not isinstance(value, str) or "/" not in value:
+        return None
+    try:
+        part_used, part_total = value.split("/", 1)
+        used = float(part_used)
+        total = float(part_total)
+    except (ValueError, TypeError):
+        return None
+    if total <= 0:
+        return None
+    return round(used * 100.0 / total, 1)
+
+
 def get_main_device_info(
         title: str,
         entry_id: str,
