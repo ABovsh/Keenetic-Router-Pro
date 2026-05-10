@@ -160,6 +160,17 @@ def _payload_summary(payload: Any) -> Any:
     return type(payload).__name__
 
 
+def _cookie_header_from_response(resp: aiohttp.ClientResponse) -> str | None:
+    """Extract a Cookie header value from a Set-Cookie response header."""
+    raw_cookie = resp.headers.get("Set-Cookie", "")
+    if not raw_cookie:
+        return None
+    cookie_kv = raw_cookie.split(";", 1)[0].strip()
+    if "=" not in cookie_kv:
+        return None
+    return cookie_kv
+
+
 def _dict_items(value: Any) -> List[Dict[str, Any]]:
     """Return dict entries from a Keenetic list/dict payload."""
     if isinstance(value, list):
@@ -334,12 +345,7 @@ class KeeneticClient:
 
             # Extract session cookie manually — HA's shared CookieJar(unsafe=False)
             # silently ignores cookies from bare IP addresses.
-            session_cookie: str | None = None
-            raw_cookie = get_resp.headers.get("Set-Cookie", "")
-            if raw_cookie:
-                cookie_kv = raw_cookie.split(";")[0].strip()
-                if "=" in cookie_kv:
-                    session_cookie = cookie_kv
+            session_cookie = _cookie_header_from_response(get_resp)
 
         # --- Step 2: Compute NDW2 hashes ---
         # ha1      = md5(username:realm:password)   [hex digest]
@@ -387,6 +393,7 @@ class KeeneticClient:
                     "Challenge auth failed "
                     f"(status={post_resp.status}, body={_response_summary(post_text)!r})"
                 )
+            session_cookie = _cookie_header_from_response(post_resp) or session_cookie
 
         # Store cookie in _auth_header so every subsequent RCI request includes it.
         self._auth_header = {"Cookie": session_cookie} if session_cookie else {}
@@ -2791,6 +2798,15 @@ class KeeneticClient:
                                 headers=node_headers,
                             )
                         async with resp:
+                            if resp.status == 401:
+                                _LOGGER.debug(
+                                    "Auth rejected while staging update on node "
+                                    "%s port %s",
+                                    label,
+                                    port,
+                                )
+                                self._node_auth_headers.pop((node_ip, port), None)
+                                continue
                             if resp.status not in (200, 204):
                                 text = await resp.text()
                                 _LOGGER.warning(
@@ -2817,6 +2833,15 @@ class KeeneticClient:
                                     label,
                                 )
                                 return True
+                            if resp.status == 401:
+                                _LOGGER.debug(
+                                    "Auth rejected while committing update on node "
+                                    "%s port %s",
+                                    label,
+                                    port,
+                                )
+                                self._node_auth_headers.pop((node_ip, port), None)
+                                continue
 
                             text = await resp.text()
                             _LOGGER.warning(
@@ -2854,6 +2879,14 @@ class KeeneticClient:
                             "Node %s firmware update started via system/update", label
                         )
                         return True
+                    if resp.status == 401:
+                        _LOGGER.debug(
+                            "Auth rejected on node %s port %s during system/update",
+                            label,
+                            port,
+                        )
+                        self._node_auth_headers.pop((node_ip, port), None)
+                        continue
                     if resp.status != 404:
                         text = await resp.text()
                         _LOGGER.debug(
@@ -2922,12 +2955,7 @@ class KeeneticClient:
                 ).hexdigest()
 
                 # Extract session cookie
-                raw_cookie = get_resp.headers.get("Set-Cookie", "")
-                session_cookie = None
-                if raw_cookie:
-                    cookie_kv = raw_cookie.split(";")[0].strip()
-                    if "=" in cookie_kv:
-                        session_cookie = cookie_kv
+                session_cookie = _cookie_header_from_response(get_resp)
 
             # Step 3: POST /auth with credentials
             post_headers: Dict[str, str] = {}
@@ -2946,6 +2974,9 @@ class KeeneticClient:
                 if post_resp.status in (200, 204):
                     _LOGGER.debug(
                         "Challenge auth to node %s:%s succeeded", node_ip, port
+                    )
+                    session_cookie = (
+                        _cookie_header_from_response(post_resp) or session_cookie
                     )
                     headers = {"Cookie": session_cookie} if session_cookie else {}
                     self._node_auth_headers[(node_ip, port)] = headers

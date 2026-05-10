@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from custom_components.keenetic_router_pro.entity import ClientEntity
+from custom_components.keenetic_router_pro.sensor.client import (
+    KeeneticClientLastSeenSensor,
+    KeeneticClientUptimeSensor,
+)
 
 
 class _DummyCoordinator:
@@ -36,6 +40,58 @@ def test_fingerprint_excludes_last_seen_and_uptime() -> None:
 
     assert fp1 == fp2
     assert "last-seen" not in fp1
+    assert "uptime" not in fp1
+
+
+def test_dedicated_uptime_sensor_fingerprint_includes_uptime() -> None:
+    """The uptime sensor must still update when only uptime changes."""
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "ip": "10.0.0.5",
+        "link": "up",
+        "last-seen": 100,
+        "uptime": 50,
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+    entity = KeeneticClientUptimeSensor(
+        coord,
+        entry,
+        "AA:BB:CC:00:00:01",
+        "phone",
+    )
+
+    fp1 = entity._client_fingerprint(client)
+    fp2 = entity._client_fingerprint({**client, "last-seen": 200, "uptime": 75})
+
+    assert fp1 != fp2
+    assert "uptime" in fp1
+    assert "last-seen" not in fp1
+
+
+def test_dedicated_last_seen_sensor_fingerprint_includes_last_seen() -> None:
+    """The last-seen sensor must still update when only last-seen changes."""
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "ip": "10.0.0.5",
+        "link": "up",
+        "last-seen": 100,
+        "uptime": 50,
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+    entity = KeeneticClientLastSeenSensor(
+        coord,
+        entry,
+        "AA:BB:CC:00:00:01",
+        "phone",
+    )
+
+    fp1 = entity._client_fingerprint(client)
+    fp2 = entity._client_fingerprint({**client, "last-seen": 200, "uptime": 75})
+
+    assert fp1 != fp2
+    assert "last-seen" in fp1
     assert "uptime" not in fp1
 
 

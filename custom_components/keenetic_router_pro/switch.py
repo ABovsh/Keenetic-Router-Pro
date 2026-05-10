@@ -208,6 +208,13 @@ class KeeneticWifiSwitch(BaseKeeneticSwitch):
         return f"{self._entry_id}_wifi_{self._interface_id}"
 
     @property
+    def available(self) -> bool:
+        return any(
+            (net.get("id") or net.get("name")) == self._interface_id
+            for net in self.coordinator.data.get("wifi", []) or []
+        )
+
+    @property
     def is_on(self) -> bool:
         for net in self.coordinator.data.get("wifi", []):
             nid = net.get("id") or net.get("name")
@@ -307,6 +314,12 @@ class KeeneticVpnSwitch(InterfaceEntity, SwitchEntity):
         vpn = self.coordinator.data.get("vpn_tunnels", {}) or {}
         profiles = vpn.get("profiles", {}) or {}
         return profiles.get(self._iface_id, {}) or {}
+
+    @property
+    def available(self) -> bool:
+        return bool(getattr(super(), "available", True)) and bool(
+            self._current_profile()
+        )
 
     @property
     def is_on(self) -> bool:

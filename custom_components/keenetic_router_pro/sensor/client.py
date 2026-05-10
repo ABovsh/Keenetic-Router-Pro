@@ -126,6 +126,7 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_suggested_display_precision = 0
+    _CLIENT_FINGERPRINT_IGNORE = frozenset({"last-seen"})
 
     def __init__(
         self,
@@ -202,6 +203,7 @@ class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_suggested_display_precision = 0
+    _CLIENT_FINGERPRINT_IGNORE = frozenset({"uptime"})
 
     def __init__(
         self,

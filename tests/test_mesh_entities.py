@@ -5,6 +5,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from custom_components.keenetic_router_pro.sensor import _add_mesh_sensors
+from custom_components.keenetic_router_pro.sensor.mesh import KeeneticMeshUptimeSensor
+from custom_components.keenetic_router_pro.switch import KeeneticWanEnabledSwitch
 from custom_components.keenetic_router_pro.utils import mesh_unique_id, sanitize_mesh_id
 
 
@@ -89,3 +91,53 @@ def test_dynamic_mesh_sensor_helper_adds_new_nodes_and_ports_once() -> None:
         "ff_ee_dd_cc_bb_aa_99_88_77_uptime_v2" in entity.unique_id
         for entity in entities
     )
+
+
+def test_mesh_entity_unavailable_when_node_disappears() -> None:
+    """Removed mesh nodes should remain as unavailable entities, not stale data."""
+    entry = SimpleNamespace(entry_id="entry_123", title="Router", data={})
+    coordinator = SimpleNamespace(
+        data={
+            "mesh_nodes": [
+                {
+                    "cid": "aa:bb:cc:dd:ee:ff:11:22:33",
+                    "uptime": 100,
+                }
+            ]
+        }
+    )
+    entity = KeeneticMeshUptimeSensor(
+        coordinator,
+        entry,
+        "aa:bb:cc:dd:ee:ff:11:22:33",
+    )
+
+    assert entity.available is True
+
+    coordinator.data["mesh_nodes"] = []
+
+    assert entity.available is False
+
+
+def test_wan_entity_unavailable_when_wan_disappears() -> None:
+    """Removed WAN sub-devices should stop exposing stale enabled state."""
+    entry = SimpleNamespace(entry_id="entry_123", title="Router", data={})
+    client = SimpleNamespace()
+    coordinator = SimpleNamespace(
+        data={
+            "wan_interfaces": [
+                {
+                    "id": "ISP",
+                    "enabled": True,
+                }
+            ]
+        }
+    )
+    entity = KeeneticWanEnabledSwitch(coordinator, entry, client, "ISP")
+
+    assert entity.available is True
+    assert entity.is_on is True
+
+    coordinator.data["wan_interfaces"] = []
+
+    assert entity.available is False

@@ -143,6 +143,10 @@ sensor.SensorDeviceClass = _AttrEnum()
 sensor.SensorStateClass = _AttrEnum()
 components.sensor = sensor
 
+switch = types.ModuleType("homeassistant.components.switch")
+switch.SwitchEntity = _Entity
+components.switch = switch
+
 
 def _async_redact_data(data, to_redact):
     """Recursive redactor matching HA's behaviour for test inputs."""
@@ -209,5 +213,6 @@ sys.modules.setdefault("homeassistant.helpers.update_coordinator", update_coordi
 sys.modules.setdefault("homeassistant.helpers.device_registry", device_registry)
 sys.modules.setdefault("homeassistant.components", components)
 sys.modules.setdefault("homeassistant.components.sensor", sensor)
+sys.modules.setdefault("homeassistant.components.switch", switch)
 sys.modules.setdefault("homeassistant.components.diagnostics", diagnostics)
 sys.modules.setdefault("homeassistant.const", const)

@@ -8,6 +8,29 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.3 - State freshness and direct mesh update hardening
+
+### Bug fixes
+
+- **Tracked-client uptime and last-seen sensors now update on their own ticks.**
+  The client entity base still suppresses noisy uptime/last-seen-only writes
+  for unrelated tracked-client entities, but the dedicated uptime and last-seen
+  sensors now opt back into those fields.
+- **Removed mesh and WAN sub-devices now become unavailable instead of stale.**
+  Dynamically created mesh and WAN entities stay in Home Assistant after the
+  router removes them, but their availability now correctly reflects that the
+  underlying node/uplink is gone.
+- **Direct mesh firmware updates recover from stale node cookies.** If a mesh
+  node rotates its auth cookie during challenge auth, the integration now keeps
+  the final cookie. If a cached cookie expires during direct node update calls,
+  the cache is invalidated so the next attempt can authenticate cleanly.
+
+### Internal
+
+- **Graphify refreshed after the second review pass.** The current graph is
+  1427 nodes, 2277 edges, and 188 communities.
+- **Regression coverage increased to 118 lightweight tests.**
+
 ## 1.7.2 - Stability fixes for mesh, auth, and translations
 
 ### Bug fixes

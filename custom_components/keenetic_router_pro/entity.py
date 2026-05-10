@@ -115,6 +115,11 @@ class MeshEntity(CoordinatorEntity):
             if (node.get("cid") or node.get("id")) == self._node_cid:
                 return node
         return None
+
+    @property
+    def available(self) -> bool:
+        """Return whether this mesh node still exists in coordinator data."""
+        return bool(getattr(super(), "available", True)) and self._node is not None
     
     @property
     def device_info(self) -> DeviceInfo:
@@ -157,6 +162,11 @@ class WanEntity(CoordinatorEntity):
             if w.get("id") == self._wan_id:
                 return w
         return None
+
+    @property
+    def available(self) -> bool:
+        """Return whether this WAN still exists in coordinator data."""
+        return bool(getattr(super(), "available", True)) and self._wan is not None
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -309,8 +319,13 @@ class ClientEntity(CoordinatorEntity):
             return None
         return {
             k: v for k, v in client.items()
-            if k not in self._CLIENT_FINGERPRINT_IGNORE
+            if k not in self._client_fingerprint_ignore
         }
+
+    @property
+    def _client_fingerprint_ignore(self) -> frozenset[str]:
+        """Return client fields ignored for this entity's state writes."""
+        return self._CLIENT_FINGERPRINT_IGNORE
 
     @callback
     def _handle_coordinator_update(self) -> None:
