@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from contextlib import suppress
 import logging
 from dataclasses import dataclass
@@ -21,12 +20,9 @@ from .const import (
     DEFAULT_SSL,
     CONF_TRACKED_CLIENTS,
     CONF_USE_CHALLENGE_AUTH,
-    CONF_PING_INTERVAL,
-    DEFAULT_PING_INTERVAL,
-    MIN_PING_INTERVAL,
     EVENT_NEW_DEVICE,
 )
-from .coordinator import KeeneticCoordinator, KeeneticPingCoordinator
+from .coordinator import KeeneticCoordinator
 from .utils import mesh_unique_id
 
 
@@ -40,7 +36,6 @@ class KeeneticRuntimeData:
 
     client: KeeneticClient
     coordinator: KeeneticCoordinator
-    ping_coordinator: "KeeneticPingCoordinator"
 
 
 # Type alias used by platform code: ``entry: KeeneticConfigEntry``
@@ -239,38 +234,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator.data.get("mesh_nodes", []) if coordinator.data else [],
     )
 
-    tracked_clients = data.get(CONF_TRACKED_CLIENTS, [])
-
-    # Ping interval: options flow takes precedence over data, falls back to default.
-    ping_interval = entry.options.get(
-        CONF_PING_INTERVAL,
-        data.get(CONF_PING_INTERVAL, DEFAULT_PING_INTERVAL),
-    )
-    try:
-        ping_interval = int(ping_interval)
-    except (TypeError, ValueError):
-        ping_interval = DEFAULT_PING_INTERVAL
-    if ping_interval < MIN_PING_INTERVAL:
-        ping_interval = DEFAULT_PING_INTERVAL
-
-    ping_coordinator = KeeneticPingCoordinator(
-        hass, client, tracked_clients, interval=ping_interval
-    )
-
-    if tracked_clients:
-        # async_config_entry_first_refresh yerine async_refresh kullanıyoruz.
-        # Ping sırasında CancelledError veya başka bir hata olursa setup
-        # iptal edilmesin; coordinator boş veriyle başlasın, sonraki
-        # döngüde tekrar denensin.
-        try:
-            await ping_coordinator.async_refresh()
-        except asyncio.CancelledError:
-            raise
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.debug(
-                "Initial ping refresh failed (non-fatal), will retry on next cycle: %s", err
-            )
-
     _async_update_insecure_http_issue(hass, entry, host, use_ssl)
 
     # Modern HA pattern: stash strongly-typed runtime data on the entry
@@ -279,7 +242,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.runtime_data = KeeneticRuntimeData(
         client=client,
         coordinator=coordinator,
-        ping_coordinator=ping_coordinator,
     )
 
     @callback

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
@@ -157,52 +158,12 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
         return coerce_seconds(client.get("uptime"), default=0) or 0
 
 
-class KeeneticClientFirstSeenSensor(ClientEntity, SensorEntity):
-    """First seen timestamp sensor."""
-    _attr_has_entity_name = True
-    _attr_icon = "mdi:calendar-clock"
-    _attr_device_class = SensorDeviceClass.DURATION
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_suggested_display_precision = 0
-
-    def __init__(
-        self,
-        coordinator: KeeneticCoordinator,
-        entry: ConfigEntry,
-        mac: str,
-        label: str,
-    ) -> None:
-        ClientEntity.__init__(self, coordinator, entry.entry_id, entry.title, mac, label)
-
-    @property
-    def unique_id(self) -> str:
-        return f"{self._entry_id}_client_{self._mac}_first_seen"
-
-    @property
-    def name(self) -> str:
-        return "First Seen"
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        return UnitOfTime.SECONDS
-
-    @property
-    def native_value(self) -> int:
-        client = self._client
-        if not client:
-            return 0
-        return coerce_seconds(client.get("first-seen"), default=0) or 0
-
-
 class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
-    """Last seen seconds ago sensor."""
+    """Timestamp when the router last saw the client."""
     _attr_has_entity_name = True
     _attr_icon = "mdi:clock"
-    _attr_device_class = SensorDeviceClass.DURATION
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_suggested_display_precision = 0
     _CLIENT_FINGERPRINT_IGNORE = frozenset({"uptime"})
 
     def __init__(
@@ -223,15 +184,14 @@ class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
         return "Last Seen"
 
     @property
-    def native_unit_of_measurement(self) -> str:
-        return UnitOfTime.SECONDS
-
-    @property
-    def native_value(self) -> int:
+    def native_value(self) -> datetime | None:
         client = self._client
         if not client:
-            return 0
-        return coerce_seconds(client.get("last-seen"), default=0) or 0
+            return None
+        seconds = coerce_seconds(client.get("last-seen"), default=None)
+        if seconds is None:
+            return None
+        return datetime.now(timezone.utc) - timedelta(seconds=seconds)
 
 
 class KeeneticClientRxSensor(ClientEntity, SensorEntity):
@@ -314,80 +274,6 @@ class KeeneticClientTxSensor(ClientEntity, SensorEntity):
             except (TypeError, ValueError):
                 pass
         return 0.0
-
-
-class KeeneticClientSpeedSensor(ClientEntity, SensorEntity):
-    """Link speed sensor (Mbps)."""
-    _attr_has_entity_name = True
-    _attr_icon = "mdi:speedometer"
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(
-        self,
-        coordinator: KeeneticCoordinator,
-        entry: ConfigEntry,
-        mac: str,
-        label: str,
-    ) -> None:
-        ClientEntity.__init__(self, coordinator, entry.entry_id, entry.title, mac, label)
-
-    @property
-    def unique_id(self) -> str:
-        return f"{self._entry_id}_client_{self._mac}_speed"
-
-    @property
-    def name(self) -> str:
-        return "Link Speed"
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        return "Mbps"
-
-    @property
-    def native_value(self) -> int | None:
-        client = self._client
-        if client:
-            speed = client.get("speed")
-            if speed is not None:
-                try:
-                    return int(speed)
-                except (TypeError, ValueError):
-                    pass
-        return None
-
-
-class KeeneticClientPortSensor(ClientEntity, SensorEntity):
-    """Port number for wired connections."""
-    _attr_has_entity_name = True
-    _attr_icon = "mdi:ethernet-cable"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(
-        self,
-        coordinator: KeeneticCoordinator,
-        entry: ConfigEntry,
-        mac: str,
-        label: str,
-    ) -> None:
-        ClientEntity.__init__(self, coordinator, entry.entry_id, entry.title, mac, label)
-
-    @property
-    def unique_id(self) -> str:
-        return f"{self._entry_id}_client_{self._mac}_port"
-
-    @property
-    def name(self) -> str:
-        return "Port"
-
-    @property
-    def native_value(self) -> str | None:
-        client = self._client
-        if client:
-            port = client.get("port")
-            if port is not None:
-                return str(port)
-        return None
 
 
 class KeeneticClientRssiSensor(ClientEntity, SensorEntity):

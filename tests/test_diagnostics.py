@@ -94,7 +94,7 @@ def test_redaction_strips_credentials_and_network_identifiers() -> None:
                 "ssl": False,
                 "use_challenge_auth": True,
             },
-            "options": {"ping_interval": 10},
+            "options": {},
         },
         "coordinator_data": {
             "clients": [

@@ -8,6 +8,38 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.5 - Router-based tracked-client presence
+
+### Bug fixes
+
+- **Tracked clients no longer depend on ICMP ping from Home Assistant.** Device
+  trackers now use the Keenetic client table directly: `link=up` or
+  `active=true` means `home`, which works for clients in isolated or routed
+  networks where HA cannot ping the device.
+- **Tracked-client presence attributes are easier to understand.** Device
+  trackers now expose `tracking_method: router_link` and `presence_source`
+  (`link`, `active`, `inactive`, or `missing`) so the reason for `home`/`away`
+  is visible.
+- **Last Seen is now a timestamp.** The tracked-client `Last Seen` sensor shows
+  when the router last saw the device instead of a raw “seconds ago” duration.
+
+### Improvements
+
+- **Removed the unused ICMP dependency.** The integration no longer installs
+  `icmplib`, reducing setup complexity and avoiding host/container ICMP
+  permission issues.
+- **Reduced tracked-client sensor noise.** New setups no longer create the
+  low-value `First Seen`, `Link Speed`, or `Port` tracked-client sensors by
+  default, because they commonly showed raw seconds or `unknown` for Wi-Fi
+  clients.
+
+### Internal
+
+- **Regression coverage updated to 172 lightweight tests.** New tests cover
+  router-link presence, `active=true` fallback, missing-client away state,
+  timestamp `Last Seen`, removal of ping runtime state, and the simplified
+  tracked-client sensor set.
+
 ## 1.7.4 - Payload parsing, options, and Ping Check hardening
 
 ### Bug fixes

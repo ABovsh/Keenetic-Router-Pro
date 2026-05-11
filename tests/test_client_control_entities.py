@@ -84,15 +84,13 @@ def test_client_policy_select_maps_options_and_refreshes_after_change() -> None:
     assert entity.current_option == "Deny (Blocked)"
 
 
-def test_client_tracker_uses_ping_for_non_apple_and_link_for_apple() -> None:
-    """Presence tracking keeps Apple link-state behavior separate from ping tracking."""
+def test_client_tracker_uses_router_link_for_all_clients() -> None:
+    """Presence tracking is based on the router's own client link state."""
     entry = _entry()
     coordinator = _coordinator()
-    ping = SimpleNamespace(data={"aa:bb:cc:dd:ee:ff": True})
 
     tracker = KeeneticClientTracker(
         coordinator=coordinator,
-        ping_coordinator=ping,
         entry=entry,
         mac="aa:bb:cc:dd:ee:ff",
         label="Kitchen tablet",
@@ -104,11 +102,11 @@ def test_client_tracker_uses_ping_for_non_apple_and_link_for_apple() -> None:
     assert tracker.ip_address == "192.0.2.40"
     assert tracker.hostname == "Kitchen tablet"
     assert tracker.is_connected is True
-    assert tracker.extra_state_attributes["tracking_method"] == "ping"
+    assert tracker.extra_state_attributes["tracking_method"] == "router_link"
+    assert tracker.extra_state_attributes["presence_source"] == "link"
 
     apple_tracker = KeeneticClientTracker(
         coordinator=coordinator,
-        ping_coordinator=SimpleNamespace(data={"aa:bb:cc:dd:ee:ff": False}),
         entry=entry,
         mac="aa:bb:cc:dd:ee:ff",
         label="Anton iPhone",
@@ -116,34 +114,41 @@ def test_client_tracker_uses_ping_for_non_apple_and_link_for_apple() -> None:
     )
 
     assert apple_tracker.is_connected is True
-    assert apple_tracker.extra_state_attributes["tracking_method"] == "link_state"
+    assert apple_tracker.extra_state_attributes["tracking_method"] == "router_link"
 
 
-def test_client_tracker_clears_stale_ping_ip_on_main_update() -> None:
-    """When a client disappears, the tracker must purge stale ping IP state."""
+def test_client_tracker_uses_active_flag_when_link_is_missing() -> None:
+    """Keenetic payloads that expose active=true but no link are still home."""
     entry = _entry()
     coordinator = _coordinator()
-    coordinator.data["clients_by_mac"] = {}
-    updates = []
-    writes = []
-
-    class PingCoordinator:
-        data = {}
-
-        def update_client_ip(self, mac: str, ip: str) -> None:
-            updates.append((mac, ip))
+    coordinator.data["clients_by_mac"]["aa:bb:cc:dd:ee:ff"].pop("link")
+    coordinator.data["clients_by_mac"]["aa:bb:cc:dd:ee:ff"]["active"] = True
 
     tracker = KeeneticClientTracker(
         coordinator=coordinator,
-        ping_coordinator=PingCoordinator(),
+        entry=entry,
+        mac="aa:bb:cc:dd:ee:ff",
+        label="Kitchen tablet",
+        initial_ip="192.0.2.10",
+    )
+
+    assert tracker.is_connected is True
+    assert tracker.extra_state_attributes["presence_source"] == "active"
+
+
+def test_client_tracker_marks_missing_client_away() -> None:
+    """When a client disappears from the router table, it is away."""
+    entry = _entry()
+    coordinator = _coordinator()
+    coordinator.data["clients_by_mac"] = {}
+
+    tracker = KeeneticClientTracker(
+        coordinator=coordinator,
         entry=entry,
         mac="aa:bb:cc:dd:ee:ff",
         label="Tablet",
         initial_ip="192.0.2.10",
     )
-    tracker.async_write_ha_state = lambda: writes.append("write")  # type: ignore[method-assign]
 
-    tracker._handle_coordinator_update()
-
-    assert updates == [("aa:bb:cc:dd:ee:ff", "")]
-    assert writes == ["write"]
+    assert tracker.is_connected is False
+    assert tracker.extra_state_attributes["presence_source"] == "missing"

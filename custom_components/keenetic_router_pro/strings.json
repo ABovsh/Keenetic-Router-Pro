@@ -76,8 +76,7 @@
         "title": "Configure Tracked Clients",
         "description": "Select which clients to track for presence detection. Found {client_count} clients.",
         "data": {
-          "tracked_clients": "Clients to track",
-          "ping_interval": "Presence ping interval (seconds)"
+          "tracked_clients": "Clients to track"
         }
       }
     },

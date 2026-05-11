@@ -14,7 +14,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "k
 
 
 def test_runtime_data_class_defined() -> None:
-    """The dataclass must exist with the three expected fields."""
+    """The dataclass must expose only the live runtime dependencies."""
     import ast
 
     tree = ast.parse((ROOT / "__init__.py").read_text())
@@ -32,8 +32,9 @@ def test_runtime_data_class_defined() -> None:
         for node in runtime.body
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
     }
-    for field in ("client", "coordinator", "ping_coordinator"):
+    for field in ("client", "coordinator"):
         assert field in field_names, f"KeeneticRuntimeData is missing field '{field}'"
+    assert "ping_coordinator" not in field_names
 
 
 def test_async_setup_entry_assigns_runtime_data() -> None:

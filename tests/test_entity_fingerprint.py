@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from custom_components.keenetic_router_pro.entity import ClientEntity
 from custom_components.keenetic_router_pro.sensor.client import (
     KeeneticClientLastSeenSensor,
@@ -93,6 +95,28 @@ def test_dedicated_last_seen_sensor_fingerprint_includes_last_seen() -> None:
     assert fp1 != fp2
     assert "last-seen" in fp1
     assert "uptime" not in fp1
+
+
+def test_last_seen_sensor_returns_timestamp() -> None:
+    """Last Seen should be a human-friendly timestamp, not seconds ago."""
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "last-seen": 30,
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+    entity = KeeneticClientLastSeenSensor(
+        coord,
+        entry,
+        "AA:BB:CC:00:00:01",
+        "phone",
+    )
+
+    value = entity.native_value
+
+    assert value is not None
+    assert value.tzinfo is timezone.utc
+    assert 20 <= (datetime.now(timezone.utc) - value).total_seconds() <= 40
 
 
 def test_fingerprint_picks_up_link_and_ip_changes() -> None:

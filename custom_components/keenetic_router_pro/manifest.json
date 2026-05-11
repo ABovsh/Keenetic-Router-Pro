@@ -8,7 +8,7 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/abovsh/Keenetic-Router-Pro/issues",
   "loggers": ["custom_components.keenetic_router_pro"],
-  "requirements": ["icmplib>=3.0"],
+  "requirements": [],
   "ssdp": [
     {
       "st": "urn:schemas-upnp-org:device:InternetGatewayDevice:1",
@@ -19,5 +19,5 @@
       "manufacturer": "ZyXEL Communications Corp."
     }
   ],
-  "version": "1.7.4"
+  "version": "1.7.5"
 }

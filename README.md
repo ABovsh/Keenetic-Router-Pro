@@ -1,7 +1,7 @@
 # Keenetic Router Pro
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![Version](https://img.shields.io/badge/version-1.7.4-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
+[![Version](https://img.shields.io/badge/version-1.7.5-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
 
 Home Assistant custom integration for Keenetic routers. It focuses on local polling, router diagnostics, mesh monitoring, presence tracking, WAN status, traffic counters, firmware updates, and selected client controls.
 
@@ -43,8 +43,8 @@ A maintained, hardened fork of the original Keenetic Router Pro integration. It 
   long-term-statistics-friendly uptime classes.
 - **Presence and client controls are less noisy.** Client lookups use a
   precomputed MAC index, per-client entities skip no-op state writes, selected
-  ping tracking is configurable, and tracked-client uptime/last-seen sensors
-  update on their own cadence.
+  client presence is based on Keenetic's own link/active state, and
+  tracked-client uptime/last-seen sensors update on their own cadence.
 - **Actively regression-tested.** The repository ships a lightweight pytest
   suite covering API parsing, auth/resource lifecycle, config/options helpers,
   mesh/entity helpers, dynamic platform listeners, translations, statistics
@@ -64,7 +64,7 @@ A maintained, hardened fork of the original Keenetic Router Pro integration. It 
 - Config flow, reauthentication, and reconfigure support.
 - Main router sensors for CPU, memory, uptime, firmware, WAN state, IP, PPPoE uptime, active connections, ports, Wi-Fi radio temperature, and traffic.
 - Mesh node sensors for state, CPU, memory, uptime, firmware, clients, local IP, ports, and traffic.
-- Optional ping-based device tracking for selected clients.
+- Router-based device tracking for selected clients.
 - Wi-Fi, VPN, and client policy controls where supported by the router firmware.
 - Firmware update entities for the controller and mesh nodes.
 - WireGuard and IPsec diagnostic sensors.
@@ -204,7 +204,7 @@ Common entity groups:
 - Selects: client connection policy where supported.
 - Buttons: router and mesh node reboot.
 - Update entities: controller and mesh firmware updates.
-- Device trackers: selected client presence via ICMP ping.
+- Device trackers: selected client presence via Keenetic link/active state.
 
 Exact entity availability depends on router model, firmware version, enabled Keenetic components, and selected tracked clients.
 

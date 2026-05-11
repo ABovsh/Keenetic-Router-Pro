@@ -9,7 +9,6 @@ import pytest
 
 from custom_components.keenetic_router_pro.config_flow import (
     KeeneticOptionsFlow,
-    _clamp_ping_interval,
     _client_options_with_offline_tracked,
     _normalize_connection_data,
     _tracked_client_lookup,
@@ -24,13 +23,9 @@ from homeassistant.const import (
 )
 from custom_components.keenetic_router_pro.const import (
     CONF_CONNECTION_MODE,
-    CONF_PING_INTERVAL,
     CONF_TRACKED_CLIENTS,
     CONNECTION_MODE_DIRECT,
     CONNECTION_MODE_KEENDNS_PROTECTED,
-    DEFAULT_PING_INTERVAL,
-    MAX_PING_INTERVAL,
-    MIN_PING_INTERVAL,
 )
 
 
@@ -85,21 +80,6 @@ def test_connection_data_preserves_direct_url_port_and_scheme() -> None:
     assert data[CONF_SSL] is True
 
 
-@pytest.mark.parametrize(
-    ("raw", "expected"),
-    [
-        (None, DEFAULT_PING_INTERVAL),
-        ("not-a-number", DEFAULT_PING_INTERVAL),
-        (1, MIN_PING_INTERVAL),
-        ("999", MAX_PING_INTERVAL),
-        ("30", 30),
-    ],
-)
-def test_ping_interval_clamps_options_input(raw, expected: int) -> None:
-    """Options flow stores only valid presence ping intervals."""
-    assert _clamp_ping_interval(raw) == expected
-
-
 def test_offline_tracked_clients_remain_selectable() -> None:
     """Options flow must not drop a tracked device just because it is offline."""
     available = [{"mac": "aa:bb:cc:dd:ee:ff", "ip": "192.0.2.10", "name": "Phone"}]
@@ -138,7 +118,7 @@ def test_options_flow_prefers_runtime_client() -> None:
             CONF_PASSWORD: "secret",
             CONF_TRACKED_CLIENTS: [],
         },
-        options={CONF_PING_INTERVAL: 15},
+        options={"ping_interval": 15},
         runtime_data=SimpleNamespace(client=RuntimeClient()),
     )
     flow = KeeneticOptionsFlow(entry)
@@ -149,3 +129,4 @@ def test_options_flow_prefers_runtime_client() -> None:
 
     assert calls == ["runtime"]
     assert result["step_id"] == "init"
+    assert "ping_interval" not in str(result["data_schema"])

@@ -40,10 +40,6 @@ from .const import (
     CONNECTION_MODE_KEENDNS_PROTECTED,
     CONF_TRACKED_CLIENTS,
     CONF_USE_CHALLENGE_AUTH,
-    CONF_PING_INTERVAL,
-    DEFAULT_PING_INTERVAL,
-    MIN_PING_INTERVAL,
-    MAX_PING_INTERVAL,
 )
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.config_flow")
@@ -68,16 +64,6 @@ _CONNECTION_MODE_SELECTOR = selector.SelectSelector(
         mode=selector.SelectSelectorMode.DROPDOWN,
     )
 )
-
-
-def _clamp_ping_interval(value: Any) -> int:
-    """Return a valid presence ping interval in seconds."""
-    try:
-        interval = int(value)
-    except (TypeError, ValueError):
-        return DEFAULT_PING_INTERVAL
-    return max(MIN_PING_INTERVAL, min(MAX_PING_INTERVAL, interval))
-
 
 def _normalize_client(client_info: dict[str, Any]) -> dict[str, str] | None:
     """Return the compact tracked-client representation used in config data."""
@@ -679,9 +665,6 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
         
         if user_input is not None:
             selected_macs = user_input.get("tracked_clients", [])
-            ping_interval = _clamp_ping_interval(
-                user_input.get(CONF_PING_INTERVAL, DEFAULT_PING_INTERVAL)
-            )
             current_tracked = self._config_entry.data.get(CONF_TRACKED_CLIENTS, [])
             tracked_clients = _tracked_clients_from_selection(
                 selected_macs,
@@ -698,7 +681,7 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
             _LOGGER.debug("Updated configuration with new tracked clients: %s", tracked_clients)
             return self.async_create_entry(
                 title="",
-                data={CONF_PING_INTERVAL: ping_interval},
+                data={},
             )
         
         # Get current tracked clients
@@ -742,22 +725,12 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
                 if isinstance(tracked, dict) and tracked.get("mac")
             }
         
-        # Current ping interval (options > data > default)
-        current_ping_interval = self._config_entry.options.get(
-            CONF_PING_INTERVAL,
-            self._config_entry.data.get(CONF_PING_INTERVAL, DEFAULT_PING_INTERVAL),
-        )
-
         # Show form
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
                     vol.Optional("tracked_clients", default=list(current_macs)): cv.multi_select(client_options),
-                    vol.Optional(
-                        CONF_PING_INTERVAL,
-                        default=current_ping_interval,
-                    ): vol.All(vol.Coerce(int), vol.Range(min=MIN_PING_INTERVAL, max=MAX_PING_INTERVAL)),
                 }
             ),
             description_placeholders={

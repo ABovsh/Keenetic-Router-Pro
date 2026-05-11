@@ -64,16 +64,11 @@ async def async_get_config_entry_diagnostics(
     """Return redacted diagnostics for a Keenetic config entry."""
     runtime = getattr(entry, "runtime_data", None)
     coordinator = getattr(runtime, "coordinator", None) if runtime else None
-    ping_coordinator = getattr(runtime, "ping_coordinator", None) if runtime else None
     client = getattr(runtime, "client", None) if runtime else None
 
     coordinator_data: Any = None
     if coordinator is not None:
         coordinator_data = getattr(coordinator, "data", None)
-
-    ping_data: Any = None
-    if ping_coordinator is not None:
-        ping_data = getattr(ping_coordinator, "data", None)
 
     payload: dict[str, Any] = {
         "entry": {
@@ -90,7 +85,6 @@ async def async_get_config_entry_diagnostics(
             "repr": repr(client) if client is not None else None,
         },
         "coordinator_data": coordinator_data,
-        "ping_coordinator_data": ping_data,
     }
 
     return async_redact_data(payload, TO_REDACT)

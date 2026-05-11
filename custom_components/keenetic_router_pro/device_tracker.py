@@ -7,8 +7,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN, CONF_TRACKED_CLIENTS
-from .coordinator import KeeneticCoordinator, KeeneticPingCoordinator
+from .coordinator import KeeneticCoordinator
 from .entity import ClientEntity
+from .utils import coerce_bool
 
 
 async def async_setup_entry(
@@ -19,7 +20,6 @@ async def async_setup_entry(
     """Set up Keenetic Router Pro device trackers from a config entry."""
     runtime = entry.runtime_data
     coordinator: KeeneticCoordinator = runtime.coordinator
-    ping_coordinator: KeeneticPingCoordinator = runtime.ping_coordinator  # Note: get, might not exist
     entities: list[KeeneticClientTracker] = []
 
     tracked_clients = entry.data.get(CONF_TRACKED_CLIENTS, [])
@@ -43,7 +43,6 @@ async def async_setup_entry(
         entities.append(
             KeeneticClientTracker(
                 coordinator=coordinator,
-                ping_coordinator=ping_coordinator,
                 entry=entry,
                 mac=mac,
                 label=label,
@@ -64,7 +63,6 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
     def __init__(
         self,
         coordinator: KeeneticCoordinator,
-        ping_coordinator: KeeneticPingCoordinator | None,
         entry: ConfigEntry,
         mac: str,
         label: str,
@@ -78,7 +76,6 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
             mac,
             label,
             initial_ip,
-            ping_coordinator
         )
         self._main_coordinator = coordinator
 
@@ -90,43 +87,8 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
                 self._handle_coordinator_update
             )
         )
-        # Subscribe to ping updates so the state refreshes on every ping cycle.
-        if self._ping_coordinator is not None:
-            self.async_on_remove(
-                self._ping_coordinator.async_add_listener(
-                    self._handle_ping_update
-                )
-            )
-
     @callback
     def _handle_coordinator_update(self) -> None:
-        client = self._client_from_main
-        # Always push the current IP (or empty string) to the ping
-        # coordinator. Two cases we must handle correctly:
-        #
-        #   1. client exists, ip is "0.0.0.0" or "" — router has
-        #      cleared the lease. Forwarding the placeholder causes
-        #      update_client_ip to DROP the stale entry from the
-        #      ping map (because _is_valid_ip rejects it).
-        #
-        #   2. client row has disappeared entirely from the router
-        #      response — the hotspot table no longer lists this MAC.
-        #      Same cleanup path: pass an empty string and the stale
-        #      IP is purged.
-        #
-        # Without both of these, the old address lingers in the ping
-        # loop forever and the device tracker flips back to "home"
-        # when some kernels answer ICMP to 0.0.0.0 or when the stale
-        # IP happens to be owned by a different device now.
-        ip = client.get("ip") if client else ""
-        if self._ping_coordinator is not None:
-            self._ping_coordinator.update_client_ip(self._mac, str(ip or ""))
-
-        self.async_write_ha_state()
-
-    @callback
-    def _handle_ping_update(self) -> None:
-        """Write state on every ping cycle update."""
         self.async_write_ha_state()
 
     @property
@@ -165,39 +127,29 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
     def source_type(self) -> SourceType:
         return SourceType.ROUTER
 
-    @property
-    def _is_apple_device(self) -> bool:
-        name = self._label or ""
-        name_lower = name.lower()
-        return any(kw in name_lower for kw in ("apple", "iphone", "ipad"))
+    def _presence_source(self, client: dict[str, Any] | None) -> str:
+        """Return the router field that currently proves client presence."""
+        if not client:
+            return "missing"
+        if str(client.get("link", "")).lower() == "up":
+            return "link"
+        if coerce_bool(client.get("active")):
+            return "active"
+        return "inactive"
 
     @property
     def is_connected(self) -> bool:
-        if self._is_apple_device:
-            client = self._client_from_main
-            if client:
-                return str(client.get("link", "")).lower() == "up"
-            return False
-        else:
-            ping_results = self._ping_coordinator.data if self._ping_coordinator else {}
-            return ping_results.get(self._mac, False) 
+        return self._presence_source(self._client_from_main) in {"link", "active"}
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         client = self._client_from_main
-        ping_results = self._ping_coordinator.data if self._ping_coordinator else {}
-        
-        if self._is_apple_device:
-            client_link = (client or {}).get("link", "unknown")
-            tracking_info: dict[str, Any] = {
-                "tracking_method": "link_state",
-                "link_status": client_link,
-            }
-        else:
-            tracking_info = {
-                "tracking_method": "ping",
-                "ping_status": "reachable" if ping_results.get(self._mac, False) else "unreachable",
-            }
+        presence_source = self._presence_source(client)
+        tracking_info: dict[str, Any] = {
+            "tracking_method": "router_link",
+            "presence_source": presence_source,
+            "link_status": (client or {}).get("link", "unknown"),
+        }
 
         attrs: dict[str, Any] = {
             "label": self._label,

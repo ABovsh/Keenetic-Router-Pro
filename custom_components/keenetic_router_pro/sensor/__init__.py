@@ -71,12 +71,9 @@ from .client import (
     KeeneticClientRegisteredSensor,
     KeeneticClientLinkSensor,
     KeeneticClientUptimeSensor,
-    KeeneticClientFirstSeenSensor,
     KeeneticClientLastSeenSensor,
     KeeneticClientRxSensor,
     KeeneticClientTxSensor,
-    KeeneticClientSpeedSensor,
-    KeeneticClientPortSensor,
     KeeneticClientRssiSensor,
     KeeneticClientTxRateSensor,
     KeeneticClientConnectionTypeSensor,
@@ -193,12 +190,9 @@ async def async_setup_entry(
         entities.append(KeeneticClientRegisteredSensor(coordinator, entry, mac, label))
         entities.append(KeeneticClientLinkSensor(coordinator, entry, mac, label))
         entities.append(KeeneticClientUptimeSensor(coordinator, entry, mac, label))
-        entities.append(KeeneticClientFirstSeenSensor(coordinator, entry, mac, label))
         entities.append(KeeneticClientLastSeenSensor(coordinator, entry, mac, label))
         entities.append(KeeneticClientRxSensor(coordinator, entry, mac, label))
         entities.append(KeeneticClientTxSensor(coordinator, entry, mac, label))
-        entities.append(KeeneticClientSpeedSensor(coordinator, entry, mac, label))
-        entities.append(KeeneticClientPortSensor(coordinator, entry, mac, label))
         entities.append(KeeneticClientRssiSensor(coordinator, entry, mac, label))
         entities.append(KeeneticClientTxRateSensor(coordinator, entry, mac, label))
         entities.append(KeeneticClientConnectionTypeSensor(coordinator, entry, mac, label))

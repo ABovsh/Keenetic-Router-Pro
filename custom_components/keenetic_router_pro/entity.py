@@ -6,8 +6,9 @@ from homeassistant.core import callback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
 from .const import DOMAIN
-from .coordinator import KeeneticCoordinator, KeeneticPingCoordinator
+from .coordinator import KeeneticCoordinator
 from .utils import (
+    coerce_bool,
     get_main_device_info,
     get_mesh_device_info,
     get_client_device_info,
@@ -303,7 +304,6 @@ class ClientEntity(CoordinatorEntity):
         mac: str,
         label: str,
         initial_ip: str | None = None,
-        ping_coordinator=None,
     ) -> None:
         super().__init__(coordinator)
         self._entry_id = entry_id
@@ -311,7 +311,6 @@ class ClientEntity(CoordinatorEntity):
         self._mac = mac.lower()
         self._label = label
         self._initial_ip = initial_ip
-        self._ping_coordinator = ping_coordinator
         self._last_fingerprint: dict[str, Any] | None = None
 
     def _client_fingerprint(self, client: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -381,18 +380,10 @@ class ClientEntity(CoordinatorEntity):
         return self._label
 
     @property
-    def _is_apple_device(self) -> bool:
-        name = self._label or ""
-        name_lower = name.lower()
-        return any(kw in name_lower for kw in ("apple", "iphone", "ipad", "macbook", "imac"))
-
-    @property
     def is_connected(self) -> bool:
-        if self._ping_coordinator and hasattr(self._ping_coordinator, 'data') and not self._is_apple_device:
-            ping_results = self._ping_coordinator.data or {}
-            return ping_results.get(self._mac, False)
-        else:
-            client = self._client
-            if client:
-                return str(client.get("link", "")).lower() == "up"
+        client = self._client
+        if not client:
             return False
+        if str(client.get("link", "")).lower() == "up":
+            return True
+        return coerce_bool(client.get("active"))
