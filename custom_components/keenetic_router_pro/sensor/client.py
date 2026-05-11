@@ -81,44 +81,6 @@ class KeeneticClientRegisteredSensor(ClientEntity, SensorEntity):
         return "mdi:bookmark-outline"
 
 
-class KeeneticClientLinkSensor(ClientEntity, SensorEntity):
-    """Link status sensor (up/down)."""
-    _attr_has_entity_name = True
-    _attr_icon = "mdi:ethernet"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(
-        self,
-        coordinator: KeeneticCoordinator,
-        entry: ConfigEntry,
-        mac: str,
-        label: str,
-    ) -> None:
-        ClientEntity.__init__(self, coordinator, entry.entry_id, entry.title, mac, label)
-
-    @property
-    def unique_id(self) -> str:
-        return f"{self._entry_id}_client_{self._mac}_link"
-
-    @property
-    def name(self) -> str:
-        return "Link Status"
-
-    @property
-    def native_value(self) -> str:
-        client = self._client
-        if client:
-            return client.get("link", "down")
-        return "unknown"
-
-    @property
-    def icon(self) -> str:
-        status = self.native_value
-        if status == "up":
-            return "mdi:link"
-        return "mdi:link-off"
-
-
 class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
     """Uptime sensor for client."""
     _attr_has_entity_name = True
@@ -319,9 +281,9 @@ class KeeneticClientRssiSensor(ClientEntity, SensorEntity):
 
 
 class KeeneticClientTxRateSensor(ClientEntity, SensorEntity):
-    """WiFi transmission rate sensor."""
+    """Current Wi-Fi link speed reported by the router."""
     _attr_has_entity_name = True
-    _attr_icon = "mdi:transmission-tower"
+    _attr_icon = "mdi:speedometer"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
@@ -340,7 +302,7 @@ class KeeneticClientTxRateSensor(ClientEntity, SensorEntity):
 
     @property
     def name(self) -> str:
-        return "TX Rate"
+        return "Link Speed"
 
     @property
     def native_unit_of_measurement(self) -> str:

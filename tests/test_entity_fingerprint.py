@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from custom_components.keenetic_router_pro.entity import ClientEntity
 from custom_components.keenetic_router_pro.sensor.client import (
     KeeneticClientLastSeenSensor,
+    KeeneticClientTxRateSensor,
     KeeneticClientUptimeSensor,
 )
 
@@ -117,6 +118,26 @@ def test_last_seen_sensor_returns_timestamp() -> None:
     assert value is not None
     assert value.tzinfo is timezone.utc
     assert 20 <= (datetime.now(timezone.utc) - value).total_seconds() <= 40
+
+
+def test_txrate_sensor_is_presented_as_link_speed() -> None:
+    """The router's txrate value is the useful Wi-Fi link speed signal."""
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "txrate": 87,
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+    entity = KeeneticClientTxRateSensor(
+        coord,
+        entry,
+        "AA:BB:CC:00:00:01",
+        "phone",
+    )
+
+    assert entity.name == "Link Speed"
+    assert entity.native_unit_of_measurement == "Mbps"
+    assert entity.native_value == 87
 
 
 def test_fingerprint_picks_up_link_and_ip_changes() -> None:

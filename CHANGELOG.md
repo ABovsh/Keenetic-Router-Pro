@@ -8,6 +8,22 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.6 - Cleaner tracked-client diagnostics
+
+### Improvements
+
+- **Removed the separate tracked-client Link Status sensor from new setups.**
+  Presence already uses the same Keenetic `link=up` signal, so the extra sensor
+  was redundant.
+- **Renamed tracked-client TX Rate to Link Speed.** For Wi-Fi clients,
+  Keenetic's `txrate` is the useful current link-speed signal shown in Mbps, so
+  the entity now uses the clearer dashboard label.
+
+### Internal
+
+- **Regression coverage updated to 173 lightweight tests.** New tests guard the
+  simplified tracked-client sensor set and the Link Speed presentation.
+
 ## 1.7.5 - Router-based tracked-client presence
 
 ### Bug fixes
