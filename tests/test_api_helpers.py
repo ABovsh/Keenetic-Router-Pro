@@ -372,7 +372,7 @@ def test_async_get_clients_parses_single_host_dict_payload() -> None:
 
 
 def test_async_get_all_interface_stats_runs_in_parallel() -> None:
-    """Per-interface stat fetches run via asyncio.gather, not sequentially."""
+    """Per-interface stat fetches still run concurrently."""
     client = KeeneticClient("192.0.2.1", "admin", "secret")
 
     interfaces = {
@@ -406,6 +406,49 @@ def test_async_get_all_interface_stats_runs_in_parallel() -> None:
     assert "PPPoE0" in stats
     assert "Bridge0" not in stats  # bridge filtered when not in wan_ids
     assert max_in_flight >= 2, "interface stat fetches must run concurrently"
+
+
+def test_async_get_all_interface_stats_caps_per_interface_concurrency() -> None:
+    """Large interface batches must honor the local RCI concurrency cap."""
+    client = KeeneticClient("192.0.2.1", "admin", "secret")
+
+    interfaces = {
+        f"GigabitEthernet{i}": {
+            "id": f"GigabitEthernet{i}",
+            "type": "Ethernet",
+            "link": "up",
+            "state": "up",
+        }
+        for i in range(12)
+    }
+
+    async def fake_wan(interfaces=None, iface_list=None):
+        return []
+
+    in_flight = 0
+    max_in_flight = 0
+    calls: list[str] = []
+
+    async def fake_stat(name):
+        nonlocal in_flight, max_in_flight
+        calls.append(name)
+        in_flight += 1
+        max_in_flight = max(max_in_flight, in_flight)
+        try:
+            await asyncio.sleep(0.01)
+            return {"rxbytes": 100, "txbytes": 200}
+        finally:
+            in_flight -= 1
+
+    client.async_get_wan_interfaces = fake_wan  # type: ignore[assignment]
+    client.async_get_interface_stat = fake_stat  # type: ignore[assignment]
+
+    stats = asyncio.run(client.async_get_all_interface_stats(interfaces=interfaces))
+
+    assert len(stats) == len(interfaces)
+    assert len(calls) == len(interfaces)
+    assert max_in_flight <= 4
+    assert max_in_flight > 1
 
 
 def test_async_get_all_interface_stats_swallows_per_interface_errors() -> None:

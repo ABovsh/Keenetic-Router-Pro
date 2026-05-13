@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -12,6 +13,7 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.keenetic_router_pro.api import KeeneticAuthError, KeeneticClient
 from custom_components.keenetic_router_pro.coordinator import KeeneticCoordinator
+from custom_components.keenetic_router_pro.device_tracker import KeeneticClientTracker
 
 
 class FakeKeeneticClient:
@@ -203,6 +205,38 @@ def test_coordinator_fast_refresh_reuses_slow_cached_data_and_rates() -> None:
     assert second["crypto_maps"]["SITE"]["_sample_ts"] == 1.0
     assert second["crypto_maps"]["SITE"]["rx_throughput"] == 7.0
     assert second["crypto_maps"]["SITE"]["tx_throughput"] == 8.0
+
+
+def test_coordinator_preserves_tracked_client_presence_on_fetch_failure() -> None:
+    """A transient client-table failure must not emit false away events."""
+    client = FakeKeeneticClient()
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+
+    first = asyncio.run(coordinator._async_update_data())
+    coordinator.data = first
+
+    async def fail_clients() -> list[dict[str, Any]]:
+        raise RuntimeError("hotspot table unavailable")
+
+    client.async_get_clients = fail_clients  # type: ignore[assignment]
+
+    tracker = KeeneticClientTracker(
+        coordinator=coordinator,
+        entry=SimpleNamespace(entry_id="entry_123", title="Router"),
+        mac="aa:bb:cc:dd:ee:ff",
+        label="Kitchen tablet",
+        initial_ip="192.0.2.10",
+    )
+    assert tracker.is_connected is True
+
+    second = asyncio.run(coordinator._async_update_data())
+    coordinator.data = second
+
+    assert second["clients_stale"] is True
+    assert second["clients"] == first["clients"]
+    assert second["clients_by_mac"] == first["clients_by_mac"]
+    assert tracker.is_connected is True
+    assert tracker.extra_state_attributes["presence_source"] == "active"
 
 
 @pytest.mark.parametrize(

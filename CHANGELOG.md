@@ -8,6 +8,23 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.7 - Presence and polling safety fixes
+
+### Bug fixes
+
+- **Tracked clients no longer flip to away on a transient client-table
+  failure.** If the Keenetic hotspot client table fails after a successful
+  refresh, the coordinator keeps the previous client snapshot for that tick and
+  marks it stale instead of publishing an empty table.
+- **Interface statistics now respect the router polling concurrency cap.**
+  Large interface batches are limited to four in-flight per-interface stat
+  requests, matching the coordinator's RCI concurrency guard.
+
+### Internal
+
+- **Regression coverage added for stale client snapshots and interface-stat
+  concurrency limits.**
+
 ## 1.7.6 - Cleaner tracked-client diagnostics
 
 ### Improvements

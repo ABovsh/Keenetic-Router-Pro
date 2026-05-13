@@ -2455,8 +2455,14 @@ class KeeneticClient:
                 "state": iface.get("state"),
             })
 
+        sem = asyncio.Semaphore(4)
+
+        async def _bounded_interface_stat(name: str) -> Dict[str, Any]:
+            async with sem:
+                return await self.async_get_interface_stat(name)
+
         results = await asyncio.gather(
-            *(self.async_get_interface_stat(t["name"]) for t in targets),
+            *(_bounded_interface_stat(t["name"]) for t in targets),
             return_exceptions=True,
         )
 

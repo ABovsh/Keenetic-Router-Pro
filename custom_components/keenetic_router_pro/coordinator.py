@@ -199,7 +199,21 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         version = _ok("current_version", version, {})
         version_available = _ok("available_version", version_available, {})
         interfaces = _ok("interfaces", interfaces, [])
-        clients = _ok("clients", clients, [])
+        clients_stale = False
+        if isinstance(clients, BaseException):
+            previous_clients = _prev.get("clients", [])
+            if previous_clients:
+                failed_fetches.append(("clients", clients))
+                _LOGGER.debug(
+                    "Coordinator fetch clients failed; preserving previous client snapshot: %s",
+                    clients,
+                )
+                clients = previous_clients
+                clients_stale = True
+            else:
+                clients = _ok("clients", clients, [])
+        else:
+            clients = _ok("clients", clients, [])
         mesh_nodes = _ok("mesh_nodes", mesh_nodes, [])
         host_policies = _ok("host_policies", host_policies, {})
         ndns_info = _ok("ndns_info", ndns_info, {})
@@ -483,6 +497,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "wireguard": wireguard,
             "vpn_tunnels": vpn_tunnels,
             "clients": clients,
+            "clients_stale": clients_stale,
             "clients_by_mac": {
                 normalize_mac(c.get("mac")): c
                 for c in clients
