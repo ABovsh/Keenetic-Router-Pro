@@ -62,3 +62,26 @@ def test_client_entity_returns_none_for_unknown_mac() -> None:
     entity = _make_entity(coord)
 
     assert entity._client is None
+
+
+def test_client_device_info_is_router_scoped() -> None:
+    """The same phone tracked on two routers must not collapse into one HA device."""
+    coord = _DummyCoordinator({"clients_by_mac": {}})
+    first = _make_entity(coord, mac="AA-BB-CC-00-00-01")
+    second = ClientEntity(
+        coordinator=coord,
+        entry_id="entry_other",
+        title="Other Router",
+        mac="aa:bb:cc:00:00:01",
+        label="phone",
+    )
+
+    assert first.device_info["identifiers"] == {
+        ("keenetic_router_pro", "entry_client_aa_bb_cc_00_00_01")
+    }
+    assert second.device_info["identifiers"] == {
+        ("keenetic_router_pro", "entry_other_client_aa_bb_cc_00_00_01")
+    }
+    assert "connections" not in first.device_info
+    assert first.device_info["name"] == "phone (router)"
+    assert second.device_info["name"] == "phone (Other Router)"

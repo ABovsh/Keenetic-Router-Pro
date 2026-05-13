@@ -16,7 +16,9 @@ from .utils import (
     get_vpn_interface_device_info,
     get_crypto_map_device_info,
     mesh_unique_id,
+    normalize_mac,
     sanitize_mesh_id,
+    usable_ip,
 )
 
 
@@ -308,7 +310,7 @@ class ClientEntity(CoordinatorEntity):
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._title = title
-        self._mac = mac.lower()
+        self._mac = normalize_mac(mac)
         self._label = label
         self._initial_ip = initial_ip
         self._last_fingerprint: dict[str, Any] | None = None
@@ -341,7 +343,7 @@ class ClientEntity(CoordinatorEntity):
         if isinstance(index, dict):
             return index.get(self._mac)
         for client in data.get("clients", []) or []:
-            if str(client.get("mac") or "").lower() == self._mac:
+            if normalize_mac(client.get("mac")) == self._mac:
                 return client
         return None
 
@@ -350,6 +352,7 @@ class ClientEntity(CoordinatorEntity):
         client = self._client
         return get_client_device_info(
             entry_id=self._entry_id,
+            title=self._title,
             mac=self._mac,
             label=self._label,
             client=client,
@@ -360,10 +363,10 @@ class ClientEntity(CoordinatorEntity):
     def ip_address(self) -> str | None:
         client = self._client
         if client:
-            ip = client.get("ip")
+            ip = usable_ip(client.get("ip"))
             if ip:
-                return str(ip)
-        return self._initial_ip
+                return ip
+        return usable_ip(self._initial_ip)
 
     @property
     def hostname(self) -> str | None:

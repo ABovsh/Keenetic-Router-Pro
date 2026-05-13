@@ -9,6 +9,7 @@ from .api import KeeneticClient
 from .const import DOMAIN, CONF_TRACKED_CLIENTS
 from .coordinator import KeeneticCoordinator
 from .entity import ClientEntity
+from .utils import normalize_mac
 
 
 async def async_setup_entry(
@@ -27,14 +28,16 @@ async def async_setup_entry(
 
     # Tracked client'lar için policy select entity'leri
     tracked_clients = entry.data.get(CONF_TRACKED_CLIENTS, [])
+    seen_macs: set[str] = set()
 
     for client_info in tracked_clients:
         if not isinstance(client_info, dict):
             continue
         
-        mac = str(client_info.get("mac") or "").lower()
-        if not mac:
+        mac = normalize_mac(client_info.get("mac"))
+        if not mac or mac in seen_macs:
             continue
+        seen_macs.add(mac)
         
         name = client_info.get("name") or mac.upper()
         initial_ip = client_info.get("ip")

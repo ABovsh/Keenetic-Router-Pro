@@ -102,6 +102,22 @@ def test_offline_tracked_clients_remain_selectable() -> None:
     ]
 
 
+def test_tracked_client_selection_normalizes_mac_and_ignores_placeholder_ip() -> None:
+    """The same client must not duplicate when routers report different MAC formats."""
+    available = [{"mac": "80-07-94-46-AB-AB", "ip": "0.0.0.0", "name": "Phone"}]
+    tracked = [{"mac": "80079446abab", "ip": "192.0.2.10", "name": "Phone"}]
+
+    lookup = _tracked_client_lookup(available, tracked)
+    selected = _tracked_clients_from_selection(
+        ["80:07:94:46:ab:ab", "80079446abab"],
+        lookup,
+    )
+
+    assert selected == [
+        {"mac": "80:07:94:46:ab:ab", "ip": "", "name": "Phone"},
+    ]
+
+
 def test_options_flow_prefers_runtime_client() -> None:
     """Opening options should reuse the running client instead of re-authenticating."""
     calls: list[str] = []

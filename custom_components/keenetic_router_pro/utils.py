@@ -7,6 +7,7 @@ from .const import DOMAIN, TRUTHY_STRINGS
 
 UNKNOWN_SECONDS_VALUES = (None, "", "unknown", "Unknown")
 _MESH_ID_SAFE_RE = re.compile(r"[^A-Za-z0-9_]+")
+PLACEHOLDER_IPS = frozenset({"", "0.0.0.0", "::"})
 
 
 def coerce_seconds(value: Any, default: int | None = 0) -> int | None:
@@ -40,15 +41,27 @@ def coerce_bool(value: Any) -> bool:
 
 
 def normalize_mac(value: Any) -> str:
-    """Lowercase string form of a MAC, empty string for falsy/None."""
-    return str(value or "").lower()
+    """Return a stable lower-case MAC address token."""
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    compact = re.sub(r"[^0-9a-f]", "", text)
+    if len(compact) == 12:
+        return ":".join(compact[i : i + 2] for i in range(0, 12, 2))
+    return text
+
+
+def usable_ip(value: Any) -> str | None:
+    """Return an IP-like value unless it is a router placeholder."""
+    text = str(value or "").strip()
+    return None if text in PLACEHOLDER_IPS else text
 
 
 def find_client_by_mac(clients: Any, mac: str) -> dict[str, Any] | None:
     """Linear-scan fallback used when no clients_by_mac index is available."""
     if not mac or not clients:
         return None
-    target = mac.lower()
+    target = normalize_mac(mac)
     for client in clients:
         if isinstance(client, dict) and normalize_mac(client.get("mac")) == target:
             return client
@@ -236,6 +249,7 @@ def get_crypto_map_device_info(
 
 def get_client_device_info(
     entry_id: str,
+    title: str,
     mac: str,
     label: str,
     client: dict[str, Any] | None = None,
@@ -259,16 +273,17 @@ def get_client_device_info(
             if ssdp.get("model"):
                 model = ssdp.get("model")
 
-    ip_address = initial_ip
-    if client and client.get("ip"):
-        ip_address = client.get("ip")
+    ip_address = usable_ip(initial_ip)
+    if client and usable_ip(client.get("ip")):
+        ip_address = usable_ip(client.get("ip"))
+
+    display_name = f"{device_name} ({title})" if title else device_name
 
     return {
-        "identifiers": {(DOMAIN, f"client_{mac.replace(':', '_')}")},
-        "name": device_name,
+        "identifiers": {(DOMAIN, f"{entry_id}_client_{mac.replace(':', '_')}")},
+        "name": display_name,
         "manufacturer": manufacturer,
         "model": model,
         "via_device": (DOMAIN, entry_id),
         "configuration_url": f"http://{ip_address}" if ip_address else None,
-        "connections": {("mac", mac.upper())},
     }

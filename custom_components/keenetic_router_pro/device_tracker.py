@@ -9,7 +9,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN, CONF_TRACKED_CLIENTS
 from .coordinator import KeeneticCoordinator
 from .entity import ClientEntity
-from .utils import coerce_bool
+from .utils import coerce_bool, normalize_mac, usable_ip
 
 
 async def async_setup_entry(
@@ -33,7 +33,7 @@ async def async_setup_entry(
         if not isinstance(client_info, dict):
             continue
             
-        mac = str(client_info.get("mac") or "").lower()
+        mac = normalize_mac(client_info.get("mac"))
         if not mac or mac in seen_macs:
             continue
         seen_macs.add(mac)
@@ -103,11 +103,11 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
     def ip_address(self) -> str | None:
         client = self._client_from_main
         if client:
-            ip = client.get("ip")
+            ip = usable_ip(client.get("ip"))
             if ip:
-                return str(ip)
+                return ip
         
-        return self._initial_ip
+        return usable_ip(self._initial_ip)
 
     @property
     def hostname(self) -> str | None:
@@ -169,7 +169,7 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
             iface_name = iface
 
         attrs.update({
-            "ip": client.get("ip") or self._initial_ip,
+            "ip": usable_ip(client.get("ip")) or usable_ip(self._initial_ip),
             "hostname": client.get("hostname"),
             "interface": iface_name,
             "ssid": client.get("ssid"),

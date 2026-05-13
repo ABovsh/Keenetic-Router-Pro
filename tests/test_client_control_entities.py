@@ -6,7 +6,10 @@ import asyncio
 from types import SimpleNamespace
 
 from custom_components.keenetic_router_pro.device_tracker import KeeneticClientTracker
-from custom_components.keenetic_router_pro.select import KeeneticClientPolicySelect
+from custom_components.keenetic_router_pro.select import (
+    KeeneticClientPolicySelect,
+    async_setup_entry as async_setup_select_entry,
+)
 
 
 def _entry() -> SimpleNamespace:
@@ -82,6 +85,33 @@ def test_client_policy_select_maps_options_and_refreshes_after_change() -> None:
     coordinator.data["host_policies"]["aa:bb:cc:dd:ee:ff"] = {"access": "deny"}
 
     assert entity.current_option == "Deny (Blocked)"
+
+
+def test_client_policy_setup_deduplicates_same_mac_variants() -> None:
+    """One client tracked on one router should create one policy select."""
+    coordinator = _coordinator()
+
+    class ApiClient:
+        async def async_get_policies(self):
+            return {"Policy1": "VPN"}
+
+    entry = SimpleNamespace(
+        entry_id="entry_123",
+        title="Router",
+        data={
+            "tracked_clients": [
+                {"mac": "AA-BB-CC-DD-EE-FF", "name": "Phone"},
+                {"mac": "aa:bb:cc:dd:ee:ff", "name": "Phone duplicate"},
+            ]
+        },
+        runtime_data=SimpleNamespace(coordinator=coordinator, client=ApiClient()),
+    )
+    added = []
+
+    asyncio.run(async_setup_select_entry(SimpleNamespace(), entry, added.extend))
+
+    assert len(added) == 1
+    assert added[0].unique_id == "entry_123_client_aa:bb:cc:dd:ee:ff_policy"
 
 
 def test_client_tracker_uses_router_link_for_all_clients() -> None:

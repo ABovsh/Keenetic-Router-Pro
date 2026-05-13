@@ -18,6 +18,9 @@ from custom_components.keenetic_router_pro.utils import (
     ("raw", "expected"),
     [
         ("AA:BB:CC:DD:EE:FF", "aa:bb:cc:dd:ee:ff"),
+        ("AA-BB-CC-DD-EE-FF", "aa:bb:cc:dd:ee:ff"),
+        ("aabb.ccdd.eeff", "aa:bb:cc:dd:ee:ff"),
+        ("aabbccddeeff", "aa:bb:cc:dd:ee:ff"),
         ("aa:bb:cc:dd:ee:ff", "aa:bb:cc:dd:ee:ff"),
         ("", ""),
         (None, ""),

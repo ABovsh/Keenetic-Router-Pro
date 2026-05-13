@@ -41,6 +41,7 @@ from .const import (
     CONF_TRACKED_CLIENTS,
     CONF_USE_CHALLENGE_AUTH,
 )
+from .utils import normalize_mac
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.config_flow")
 
@@ -67,12 +68,15 @@ _CONNECTION_MODE_SELECTOR = selector.SelectSelector(
 
 def _normalize_client(client_info: dict[str, Any]) -> dict[str, str] | None:
     """Return the compact tracked-client representation used in config data."""
-    mac = str(client_info.get("mac") or "").lower()
+    mac = normalize_mac(client_info.get("mac"))
     if not mac:
         return None
+    ip = str(client_info.get("ip") or "")
+    if ip in {"0.0.0.0", "::"}:
+        ip = ""
     return {
         "mac": mac,
-        "ip": str(client_info.get("ip") or ""),
+        "ip": ip,
         "name": str(client_info.get("name") or client_info.get("hostname") or ""),
     }
 
@@ -89,7 +93,11 @@ def _client_label(client: dict[str, Any], *, offline: bool = False) -> str:
 
 def _client_options(clients: list[dict[str, Any]]) -> dict[str, str]:
     """Return sorted MAC -> label options for a client multi-select."""
-    options = {c["mac"]: _client_label(c) for c in clients if c.get("mac")}
+    options = {
+        normalize_mac(c["mac"]): _client_label({**c, "mac": normalize_mac(c["mac"])})
+        for c in clients
+        if c.get("mac") and normalize_mac(c["mac"])
+    }
     return dict(sorted(options.items(), key=lambda item: item[1].lower()))
 
 
@@ -99,13 +107,15 @@ def _tracked_client_lookup(
 ) -> dict[str, dict[str, str]]:
     """Return MAC-keyed client records, preserving tracked offline clients."""
     mac_lookup: dict[str, dict[str, str]] = {
-        client["mac"].lower(): client
+        normalized["mac"]: normalized
         for client in available_clients
-        if isinstance(client, dict) and client.get("mac")
+        if isinstance(client, dict) and (normalized := _normalize_client(client))
     }
     for client in tracked_clients:
         if isinstance(client, dict) and client.get("mac"):
-            mac_lookup.setdefault(client["mac"].lower(), client)
+            normalized = _normalize_client(client)
+            if normalized:
+                mac_lookup.setdefault(normalized["mac"], normalized)
     return mac_lookup
 
 
@@ -114,10 +124,17 @@ def _tracked_clients_from_selection(
     mac_lookup: dict[str, dict[str, str]],
 ) -> list[dict[str, str]]:
     """Return config-entry client records for selected MAC addresses."""
-    return [
-        mac_lookup.get(mac.lower(), {"mac": mac.lower(), "ip": "", "name": ""})
-        for mac in selected_macs
-    ]
+    tracked_clients: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for mac in selected_macs:
+        normalized = normalize_mac(mac)
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        tracked_clients.append(
+            mac_lookup.get(normalized, {"mac": normalized, "ip": "", "name": ""})
+        )
+    return tracked_clients
 
 
 def _client_options_with_offline_tracked(
@@ -128,9 +145,9 @@ def _client_options_with_offline_tracked(
     client_options = _client_options(available_clients)
     for tracked in tracked_clients:
         if isinstance(tracked, dict) and tracked.get("mac"):
-            mac = tracked["mac"].lower()
+            mac = normalize_mac(tracked["mac"])
             if mac not in client_options:
-                client_options[mac] = _client_label(tracked, offline=True)
+                client_options[mac] = _client_label({**tracked, "mac": mac}, offline=True)
     return dict(sorted(client_options.items(), key=lambda item: item[1].lower()))
 
 
@@ -686,7 +703,11 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
         
         # Get current tracked clients
         current_tracked = self._config_entry.data.get(CONF_TRACKED_CLIENTS, [])
-        current_macs = {c["mac"] for c in current_tracked if isinstance(c, dict) and c.get("mac")}
+        current_macs = {
+            mac
+            for c in current_tracked
+            if isinstance(c, dict) and (mac := normalize_mac(c.get("mac")))
+        }
         _LOGGER.debug("Current tracked MACs: %s", current_macs)
         
         # Try to get current clients from router

@@ -12,6 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from ..const import DOMAIN, CONF_TRACKED_CLIENTS
 from ..coordinator import KeeneticCoordinator
 from .. import KeeneticClient
+from ..utils import normalize_mac
 
 from .system import (
     KeeneticCpuLoadSensor,
@@ -178,7 +179,7 @@ async def async_setup_entry(
         if not isinstance(client_info, dict):
             continue
 
-        mac = str(client_info.get("mac") or "").lower()
+        mac = normalize_mac(client_info.get("mac"))
         if not mac or mac in seen_macs:
             continue
         seen_macs.add(mac)

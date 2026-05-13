@@ -8,6 +8,28 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.9 - Router-scoped tracked clients
+
+### Bug fixes
+
+- **The same tracked client can now be added to multiple Keenetic routers
+  without merging into one Home Assistant device.** Client devices are now
+  scoped by config entry plus MAC address, so a phone tracked on Orange and
+  Yakhny appears as two independent devices instead of one mixed device with
+  `_2` entity IDs.
+- **Tracked-client MAC formats are canonicalized everywhere.** `80:07:...`,
+  `80-07-...`, and `8007...` now resolve to the same tracked client key within
+  one router, preventing duplicate sensors and duplicate Connection Policy
+  controls.
+- **Placeholder IP addresses are no longer treated as real client IPs.**
+  `0.0.0.0` and `::` are ignored for tracked-client setup, entity IP values,
+  and configuration URLs.
+
+### Internal
+
+- **Regression coverage added for router-scoped client device identity and
+  duplicate tracked-client policy setup.**
+
 ## 1.7.8 - Better tracked-client seen times
 
 ### Improvements
