@@ -48,10 +48,16 @@ def test_uptime_sensors_use_total_increasing(
     ), f"{class_name} must use TOTAL_INCREASING for monotonic uptime"
 
 
-def test_client_last_seen_is_timestamp_not_duration_measurement() -> None:
+@pytest.mark.parametrize(
+    "class_name",
+    ["KeeneticClientFirstSeenSensor", "KeeneticClientLastSeenSensor"],
+)
+def test_client_seen_sensors_are_timestamps_not_duration_measurements(
+    class_name: str,
+) -> None:
     assignments = _class_assignments(
         ROOT / "sensor/client.py",
-        "KeeneticClientLastSeenSensor",
+        class_name,
     )
 
     assert assignments.get("_attr_device_class") == "SensorDeviceClass.TIMESTAMP"

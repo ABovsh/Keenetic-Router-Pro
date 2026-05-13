@@ -371,6 +371,41 @@ def test_async_get_clients_parses_single_host_dict_payload() -> None:
     ]
 
 
+def test_async_get_ip_neighbours_parses_numbered_payload() -> None:
+    """Neighbour responses can be keyed by numeric discovery ids."""
+    client = KeeneticClient("192.0.2.1", "admin", "secret")
+
+    async def fake_get(subpath):
+        assert subpath == "show/ip/neighbour"
+        return {
+            "neighbour": {
+                "35": {
+                    "id": 35,
+                    "mac": "80:07:94:46:ab:ab",
+                    "address-family": "ipv4",
+                    "address": "192.168.1.146",
+                    "last-seen": 672,
+                    "expired": True,
+                }
+            }
+        }
+
+    client._rci_get = fake_get  # type: ignore[assignment]
+
+    neighbours = asyncio.run(client.async_get_ip_neighbours())
+
+    assert neighbours == [
+        {
+            "id": 35,
+            "mac": "80:07:94:46:ab:ab",
+            "address-family": "ipv4",
+            "address": "192.168.1.146",
+            "last-seen": 672,
+            "expired": True,
+        }
+    ]
+
+
 def test_async_get_all_interface_stats_runs_in_parallel() -> None:
     """Per-interface stat fetches still run concurrently."""
     client = KeeneticClient("192.0.2.1", "admin", "secret")

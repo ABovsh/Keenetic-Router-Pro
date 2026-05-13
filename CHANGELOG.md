@@ -8,6 +8,31 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.8 - Better tracked-client seen times
+
+### Improvements
+
+- **Tracked-client Last Seen now keeps working after a device goes offline.**
+  The coordinator merges Keenetic's IP-neighbour table with the hotspot client
+  table, so registered clients that disappear from Wi-Fi can still show the
+  last time the router saw them instead of falling back to `Unavailable`.
+- **Tracked-client First Seen is back as a timestamp.** New setups get a
+  diagnostic First Seen sensor sourced from Keenetic neighbour/hotspot data,
+  shown as a Home Assistant timestamp instead of raw seconds.
+- **Tracked-client Uptime is now labelled Wi-Fi Session.** The existing entity
+  identity is preserved, but the dashboard label now describes what Keenetic
+  actually reports for Wi-Fi clients: the current connection session duration.
+- **Device tracker diagnostics now explain neighbour-based presence.** Tracked
+  clients expose `last_seen_source`, `first_seen_source`, `neighbour_expired`,
+  `neighbour_wireless`, and `neighbour_leasetime` attributes to make offline
+  troubleshooting easier.
+
+### Internal
+
+- **Regression coverage added for `show ip neighbour` parsing and client data
+  merging.** Tests cover offline neighbour fallback, online hotspot priority,
+  timestamp seen sensors, and neighbour-expired away state.
+
 ## 1.7.7 - Presence and polling safety fixes
 
 ### Bug fixes

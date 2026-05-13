@@ -133,6 +133,8 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
             return "missing"
         if str(client.get("link", "")).lower() == "up":
             return "link"
+        if coerce_bool(client.get("neighbour-expired")):
+            return "neighbour_expired"
         if coerce_bool(client.get("active")):
             return "active"
         return "inactive"
@@ -178,8 +180,14 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
             "active": client.get("active"),
             "link": client.get("link"),
             "last-seen": client.get("last-seen"),
+            "last_seen_source": client.get("last-seen-source"),
+            "first-seen": client.get("first-seen"),
+            "first_seen_source": client.get("first-seen-source"),
             "uptime": client.get("uptime"),
             "registered": client.get("registered"),
+            "neighbour_expired": client.get("neighbour-expired"),
+            "neighbour_wireless": client.get("neighbour-wireless"),
+            "neighbour_leasetime": client.get("neighbour-leasetime"),
         })
         return {k: v for k, v in attrs.items() if v is not None}
 

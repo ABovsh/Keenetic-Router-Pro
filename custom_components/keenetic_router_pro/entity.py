@@ -386,4 +386,6 @@ class ClientEntity(CoordinatorEntity):
             return False
         if str(client.get("link", "")).lower() == "up":
             return True
+        if coerce_bool(client.get("neighbour-expired")):
+            return False
         return coerce_bool(client.get("active"))

@@ -12,7 +12,10 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.keenetic_router_pro.api import KeeneticAuthError, KeeneticClient
-from custom_components.keenetic_router_pro.coordinator import KeeneticCoordinator
+from custom_components.keenetic_router_pro.coordinator import (
+    KeeneticCoordinator,
+    _merge_clients_with_neighbours,
+)
 from custom_components.keenetic_router_pro.device_tracker import KeeneticClientTracker
 
 
@@ -43,7 +46,26 @@ class FakeKeeneticClient:
                 "summary": {"layer": {"conf": "running", "ipv4": "running"}},
             },
         }
-        self.clients = [{"mac": "AA:BB:CC:DD:EE:FF", "active": True, "ssid": "Main"}]
+        self.clients = [
+            {
+                "mac": "AA:BB:CC:DD:EE:FF",
+                "active": True,
+                "ssid": "Main",
+                "ip": "0.0.0.0",
+            }
+        ]
+        self.ip_neighbours = [
+            {
+                "mac": "AA:BB:CC:DD:EE:FF",
+                "address-family": "ipv4",
+                "address": "192.0.2.55",
+                "first-seen": 277971,
+                "last-seen": 1,
+                "leasetime": 129,
+                "expired": False,
+                "wireless": True,
+            }
+        ]
         self.mesh_nodes = [{"cid": "node-1", "ip": "192.0.2.20"}]
         self.interface_stats = {
             "PPPoE0": {"rxbytes": "1000", "txbytes": "2000"},
@@ -72,6 +94,9 @@ class FakeKeeneticClient:
 
     async def async_get_clients(self) -> list[dict[str, Any]]:
         return self.clients
+
+    async def async_get_ip_neighbours(self) -> list[dict[str, Any]]:
+        return self.ip_neighbours
 
     async def async_get_host_policies(self) -> dict[str, Any]:
         return {"aa:bb:cc:dd:ee:ff": {"policy": "Policy0"}}
@@ -157,7 +182,18 @@ def test_coordinator_first_refresh_builds_enriched_payload() -> None:
     assert data["system"]["title"] == "4.2.0"
     assert data["system"]["release-available"] == "4.3.0"
     assert data["clients_by_mac"] == {
-        "aa:bb:cc:dd:ee:ff": client.clients[0],
+        "aa:bb:cc:dd:ee:ff": {
+            **client.clients[0],
+            "ip": "192.0.2.55",
+            "neighbour": client.ip_neighbours[0],
+            "last-seen": 1,
+            "last-seen-source": "neighbour",
+            "first-seen": 277971,
+            "first-seen-source": "neighbour",
+            "neighbour-expired": False,
+            "neighbour-wireless": True,
+            "neighbour-leasetime": 129,
+        },
     }
     assert data["new_clients"] == {"aa:bb:cc:dd:ee:ff"}
     assert data["mesh_nodes"] == client.mesh_nodes
@@ -170,6 +206,79 @@ def test_coordinator_first_refresh_builds_enriched_payload() -> None:
     assert data["wan_interfaces"][0]["role_label"] == "Default connection"
     assert data["wan_interfaces"][1]["role_label"] == "Backup connection 1"
     assert data["crypto_maps"]["SITE"]["rx_throughput"] == 0.0
+
+
+def test_neighbour_merge_keeps_offline_last_seen_and_ip() -> None:
+    """Offline registered hotspot rows should get their stale timestamp from neighbours."""
+    clients = [
+        {
+            "mac": "80:07:94:46:ab:ab",
+            "ip": "0.0.0.0",
+            "active": False,
+            "uptime": 0,
+        }
+    ]
+    neighbours = [
+        {
+            "mac": "80:07:94:46:ab:ab",
+            "address-family": "ipv4",
+            "address": "192.168.1.146",
+            "first-seen": 277668,
+            "last-seen": 672,
+            "leasetime": 1122,
+            "expired": True,
+            "wireless": False,
+        }
+    ]
+
+    merged = _merge_clients_with_neighbours(clients, neighbours)
+
+    assert merged == [
+        {
+            **clients[0],
+            "ip": "192.168.1.146",
+            "neighbour": neighbours[0],
+            "last-seen": 672,
+            "last-seen-source": "neighbour",
+            "first-seen": 277668,
+            "first-seen-source": "neighbour",
+            "neighbour-expired": True,
+            "neighbour-wireless": False,
+            "neighbour-leasetime": 1122,
+        }
+    ]
+
+
+def test_neighbour_merge_prefers_live_hotspot_last_seen() -> None:
+    """Online hotspot timestamps are fresher than the neighbour fallback."""
+    clients = [
+        {
+            "mac": "80:07:94:46:ab:ab",
+            "ip": "192.168.1.146",
+            "active": True,
+            "last-seen": 1,
+            "first-seen": 276710,
+        }
+    ]
+    neighbours = [
+        {
+            "mac": "80:07:94:46:ab:ab",
+            "address-family": "ipv4",
+            "address": "192.168.1.146",
+            "first-seen": 277971,
+            "last-seen": 20,
+            "expired": False,
+            "wireless": True,
+        }
+    ]
+
+    merged = _merge_clients_with_neighbours(clients, neighbours)
+
+    assert merged[0]["last-seen"] == 1
+    assert merged[0]["last-seen-source"] == "hotspot"
+    assert merged[0]["first-seen"] == 276710
+    assert merged[0]["first-seen-source"] == "hotspot"
+    assert merged[0]["neighbour-expired"] is False
 
 
 def test_coordinator_fast_refresh_reuses_slow_cached_data_and_rates() -> None:

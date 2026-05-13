@@ -65,6 +65,81 @@ def _counter_rate_bytes_per_second(
     return max(0.0, delta / elapsed_seconds)
 
 
+def _is_empty_ip(value: Any) -> bool:
+    """Return True for missing placeholder client IP values."""
+    return value in (None, "", "0.0.0.0", "::")
+
+
+def _merge_clients_with_neighbours(
+    clients: list[dict[str, Any]],
+    neighbours: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Attach IP-neighbour discovery data to hotspot client records."""
+    neighbours_by_mac = {
+        normalize_mac(neighbour.get("mac")): neighbour
+        for neighbour in neighbours
+        if isinstance(neighbour, dict) and neighbour.get("mac")
+    }
+    merged: list[dict[str, Any]] = []
+    seen_macs: set[str] = set()
+
+    for client in clients:
+        if not isinstance(client, dict):
+            continue
+        mac = normalize_mac(client.get("mac"))
+        if not mac:
+            merged.append(client)
+            continue
+        seen_macs.add(mac)
+        neighbour = neighbours_by_mac.get(mac)
+        if not neighbour:
+            merged.append(client)
+            continue
+
+        item = dict(client)
+        item["neighbour"] = neighbour
+        if item.get("last-seen") in (None, ""):
+            item["last-seen"] = neighbour.get("last-seen")
+            item.setdefault("last-seen-source", "neighbour")
+        else:
+            item.setdefault("last-seen-source", "hotspot")
+        if item.get("first-seen") in (None, ""):
+            item["first-seen"] = neighbour.get("first-seen")
+            item.setdefault("first-seen-source", "neighbour")
+        else:
+            item.setdefault("first-seen-source", "hotspot")
+        if _is_empty_ip(item.get("ip")) and neighbour.get("address-family") == "ipv4":
+            item["ip"] = neighbour.get("address")
+        item["neighbour-expired"] = neighbour.get("expired")
+        item["neighbour-wireless"] = neighbour.get("wireless")
+        item["neighbour-leasetime"] = neighbour.get("leasetime")
+        merged.append(item)
+
+    for mac, neighbour in neighbours_by_mac.items():
+        if mac in seen_macs:
+            continue
+        merged.append(
+            {
+                "mac": mac,
+                "via": neighbour.get("via"),
+                "ip": neighbour.get("address")
+                if neighbour.get("address-family") == "ipv4"
+                else None,
+                "active": False,
+                "last-seen": neighbour.get("last-seen"),
+                "last-seen-source": "neighbour",
+                "first-seen": neighbour.get("first-seen"),
+                "first-seen-source": "neighbour",
+                "neighbour": neighbour,
+                "neighbour-expired": neighbour.get("expired"),
+                "neighbour-wireless": neighbour.get("wireless"),
+                "neighbour-leasetime": neighbour.get("leasetime"),
+            }
+        )
+
+    return merged
+
+
 class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Fetches all router data on each tick."""
 
@@ -164,6 +239,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             version_available,
             interfaces,
             clients,
+            ip_neighbours,
             host_policies,
             ndns_info,
             ping_check_status,
@@ -176,6 +252,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _bounded(self.client.async_get_available_version_info()) if very_slow_refresh else _resolve(_cached_version_available),
             _bounded(self.client.async_get_interfaces()),
             _bounded(self.client.async_get_clients()),
+            _bounded(self.client.async_get_ip_neighbours()),
             _bounded(self.client.async_get_host_policies()) if slow_refresh else _resolve(_prev.get("host_policies", {})),
             _bounded(self.client.async_get_ndns_info()) if very_slow_refresh else _resolve(_prev.get("ndns", {})),
             _bounded(self.client.async_get_ping_check_status()),
@@ -214,6 +291,8 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 clients = _ok("clients", clients, [])
         else:
             clients = _ok("clients", clients, [])
+        ip_neighbours = _ok("ip_neighbours", ip_neighbours, [], silent=True)
+        clients = _merge_clients_with_neighbours(clients, ip_neighbours)
         mesh_nodes = _ok("mesh_nodes", mesh_nodes, [])
         host_policies = _ok("host_policies", host_policies, {})
         ndns_info = _ok("ndns_info", ndns_info, {})

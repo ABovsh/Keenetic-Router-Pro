@@ -106,7 +106,7 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
 
     @property
     def name(self) -> str:
-        return "Uptime"
+        return "Wi-Fi Session"
 
     @property
     def native_unit_of_measurement(self) -> str:
@@ -118,6 +118,42 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
         if not client:
             return 0
         return coerce_seconds(client.get("uptime"), default=0) or 0
+
+
+class KeeneticClientFirstSeenSensor(ClientEntity, SensorEntity):
+    """Timestamp when the router first discovered the client."""
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:clock-start"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _CLIENT_FINGERPRINT_IGNORE = frozenset({"last-seen", "uptime"})
+
+    def __init__(
+        self,
+        coordinator: KeeneticCoordinator,
+        entry: ConfigEntry,
+        mac: str,
+        label: str,
+    ) -> None:
+        ClientEntity.__init__(self, coordinator, entry.entry_id, entry.title, mac, label)
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self._entry_id}_client_{self._mac}_first_seen"
+
+    @property
+    def name(self) -> str:
+        return "First Seen"
+
+    @property
+    def native_value(self) -> datetime | None:
+        client = self._client
+        if not client:
+            return None
+        seconds = coerce_seconds(client.get("first-seen"), default=None)
+        if seconds is None:
+            return None
+        return datetime.now(timezone.utc) - timedelta(seconds=seconds)
 
 
 class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):

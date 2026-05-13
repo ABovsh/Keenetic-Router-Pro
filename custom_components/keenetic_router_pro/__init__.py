@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import suppress
+import importlib
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -99,7 +100,7 @@ def _async_migrate_mesh_unique_ids(
 ) -> None:
     """Migrate old truncated mesh unique IDs to entry-scoped full IDs."""
     try:
-        from homeassistant.helpers import entity_registry as er
+        er = importlib.import_module("homeassistant.helpers.entity_registry")
     except ImportError:
         return
 

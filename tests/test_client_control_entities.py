@@ -136,6 +136,42 @@ def test_client_tracker_uses_active_flag_when_link_is_missing() -> None:
     assert tracker.extra_state_attributes["presence_source"] == "active"
 
 
+def test_client_tracker_uses_neighbour_expiry_for_offline_clients() -> None:
+    """An expired neighbour record is a clear away signal."""
+    entry = _entry()
+    coordinator = _coordinator()
+    coordinator.data["clients_by_mac"]["aa:bb:cc:dd:ee:ff"].pop("link")
+    coordinator.data["clients_by_mac"]["aa:bb:cc:dd:ee:ff"].update(
+        {
+            "active": False,
+            "last-seen": 672,
+            "last-seen-source": "neighbour",
+            "first-seen": 277668,
+            "first-seen-source": "neighbour",
+            "neighbour-expired": True,
+            "neighbour-wireless": False,
+            "neighbour-leasetime": 1122,
+        }
+    )
+
+    tracker = KeeneticClientTracker(
+        coordinator=coordinator,
+        entry=entry,
+        mac="aa:bb:cc:dd:ee:ff",
+        label="Kitchen tablet",
+        initial_ip="192.0.2.10",
+    )
+
+    attrs = tracker.extra_state_attributes
+
+    assert tracker.is_connected is False
+    assert attrs["presence_source"] == "neighbour_expired"
+    assert attrs["last_seen_source"] == "neighbour"
+    assert attrs["first_seen_source"] == "neighbour"
+    assert attrs["neighbour_expired"] is True
+    assert attrs["neighbour_leasetime"] == 1122
+
+
 def test_client_tracker_marks_missing_client_away() -> None:
     """When a client disappears from the router table, it is away."""
     entry = _entry()

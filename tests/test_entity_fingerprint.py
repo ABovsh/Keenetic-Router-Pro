@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from custom_components.keenetic_router_pro.entity import ClientEntity
 from custom_components.keenetic_router_pro.sensor.client import (
+    KeeneticClientFirstSeenSensor,
     KeeneticClientLastSeenSensor,
     KeeneticClientTxRateSensor,
     KeeneticClientUptimeSensor,
@@ -118,6 +119,47 @@ def test_last_seen_sensor_returns_timestamp() -> None:
     assert value is not None
     assert value.tzinfo is timezone.utc
     assert 20 <= (datetime.now(timezone.utc) - value).total_seconds() <= 40
+
+
+def test_first_seen_sensor_returns_timestamp() -> None:
+    """First Seen should expose the neighbour discovery time as a timestamp."""
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "first-seen": 300,
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+    entity = KeeneticClientFirstSeenSensor(
+        coord,
+        entry,
+        "AA:BB:CC:00:00:01",
+        "phone",
+    )
+
+    value = entity.native_value
+
+    assert value is not None
+    assert value.tzinfo is timezone.utc
+    assert 290 <= (datetime.now(timezone.utc) - value).total_seconds() <= 310
+
+
+def test_uptime_sensor_is_presented_as_wifi_session() -> None:
+    """Client uptime is the current Wi-Fi connection session duration."""
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "uptime": 165,
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+    entity = KeeneticClientUptimeSensor(
+        coord,
+        entry,
+        "AA:BB:CC:00:00:01",
+        "phone",
+    )
+
+    assert entity.name == "Wi-Fi Session"
+    assert entity.native_value == 165
 
 
 def test_txrate_sensor_is_presented_as_link_speed() -> None:

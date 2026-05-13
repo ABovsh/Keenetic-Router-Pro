@@ -808,6 +808,10 @@ class KeeneticClient:
         )
         return []
 
+    async def async_get_ip_neighbours(self) -> List[Dict[str, Any]]:
+        """Return the router's discovered IP neighbours."""
+        data = await self._rci_get("show/ip/neighbour")
+        return _nested_dict_items(data, "neighbour", "neighbours", "items")
 
     async def async_get_wireguard_status(
         self,
