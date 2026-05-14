@@ -77,7 +77,7 @@ from .client import (
     KeeneticClientTxRateSensor,
     KeeneticClientConnectionTypeSensor,
     KeeneticClientWifiBandSensor,
-    KeeneticClientWifiModeSensor,   
+    KeeneticClientWifiModeSensor,
 )
 from .crypto import (
     KeeneticCryptoMapStateSensor,
@@ -108,7 +108,6 @@ async def async_setup_entry(
     client: Optional[KeeneticClient] = runtime.client
     entities: list[SensorEntity] = []
 
-    # Temel sistem sensörleri
     entities.append(KeeneticCpuLoadSensor(coordinator, entry))
     entities.append(KeeneticMemoryUsageSensor(coordinator, entry))
     entities.append(KeeneticUptimeSensor(coordinator, entry))

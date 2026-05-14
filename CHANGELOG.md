@@ -8,6 +8,25 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.15 - Tracked-client cleanup and parsing hardening
+
+### Bug fixes
+
+- **Tracked-client Wi-Fi parsing now handles numeric fields returned as
+  strings.** Link speed and Wi-Fi band/type inference no longer risk failing
+  when a Keenetic RCI path returns `txrate` or RSSI-like fields as text.
+- **Device-tracker fallback lookup now normalizes MAC address variants.** If
+  coordinator data ever falls back to the raw client list instead of the
+  precomputed MAC index, `AA-BB-...`, `aa:bb:...`, and compact MAC forms still
+  resolve to the same tracked client.
+
+### Internal
+
+- **Tracked-client sensor code now shares byte-counter, live-session, and
+  Wi-Fi-band helpers.** This keeps offline/live availability rules in one
+  place and reduces drift between RX/TX, RSSI, Link Speed, Wi-Fi Band and
+  WiFi Mode sensors.
+
 ## 1.7.14 - Offline tracked-client live metric cleanup
 
 ### Improvements

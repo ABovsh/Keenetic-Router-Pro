@@ -6,12 +6,14 @@ from datetime import datetime
 
 from custom_components.keenetic_router_pro.entity import ClientEntity
 from custom_components.keenetic_router_pro.sensor.client import (
+    KeeneticClientConnectionTypeSensor,
     KeeneticClientLastSeenSensor,
     KeeneticClientRssiSensor,
     KeeneticClientRxSensor,
     KeeneticClientTxRateSensor,
     KeeneticClientTxSensor,
     KeeneticClientUptimeSensor,
+    KeeneticClientWifiBandSensor,
     KeeneticClientWifiModeSensor,
 )
 
@@ -39,7 +41,13 @@ def _make_entity(client_dict: dict) -> ClientEntity:
 
 
 def test_fingerprint_excludes_last_seen_and_uptime() -> None:
-    client = {"mac": "aa:bb:cc:00:00:01", "ip": "10.0.0.5", "link": "up", "last-seen": 100, "uptime": 50}
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "ip": "10.0.0.5",
+        "link": "up",
+        "last-seen": 100,
+        "uptime": 50,
+    }
     entity = _make_entity(client)
 
     fp1 = entity._client_fingerprint(client)
@@ -229,6 +237,28 @@ def test_txrate_sensor_is_presented_as_link_speed() -> None:
     assert entity.available is True
 
 
+def test_client_wifi_band_handles_string_txrate() -> None:
+    """Keenetic numeric fields may arrive as strings on some RCI paths."""
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "ssid": "Main",
+        "txrate": "1201",
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+
+    band = KeeneticClientWifiBandSensor(coord, entry, "AA:BB:CC:00:00:01", "phone")
+    connection = KeeneticClientConnectionTypeSensor(
+        coord,
+        entry,
+        "AA:BB:CC:00:00:01",
+        "phone",
+    )
+
+    assert band.native_value == "5 GHz"
+    assert connection.native_value == "WiFi 5 GHz - Main"
+
+
 def test_live_wifi_metrics_are_unavailable_for_offline_clients() -> None:
     client = {
         "mac": "aa:bb:cc:00:00:01",
@@ -322,7 +352,11 @@ def test_handle_coordinator_update_skips_when_only_noise_changed() -> None:
         assert super_calls == 1, "noise-only change must not forward to super()"
 
         # Third tick with link change: should forward.
-        coord.data["clients_by_mac"]["aa:bb:cc:00:00:01"] = {**client, "last-seen": 3, "link": "down"}
+        coord.data["clients_by_mac"]["aa:bb:cc:00:00:01"] = {
+            **client,
+            "last-seen": 3,
+            "link": "down",
+        }
         entity._handle_coordinator_update()
         assert super_calls == 2
     finally:

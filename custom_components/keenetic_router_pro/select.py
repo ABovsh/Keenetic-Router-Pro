@@ -11,6 +11,9 @@ from .coordinator import KeeneticCoordinator
 from .entity import ClientEntity
 from .utils import normalize_mac
 
+DEFAULT_POLICY_OPTION = "Default"
+DENY_POLICY_OPTION = "Deny (Blocked)"
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -23,25 +26,23 @@ async def async_setup_entry(
     client: KeeneticClient = runtime.client
     entities: list[SelectEntity] = []
 
-    # Policy listesini al
     policies = await client.async_get_policies()
 
-    # Tracked client'lar için policy select entity'leri
     tracked_clients = entry.data.get(CONF_TRACKED_CLIENTS, [])
     seen_macs: set[str] = set()
 
     for client_info in tracked_clients:
         if not isinstance(client_info, dict):
             continue
-        
+
         mac = normalize_mac(client_info.get("mac"))
         if not mac or mac in seen_macs:
             continue
         seen_macs.add(mac)
-        
+
         name = client_info.get("name") or mac.upper()
         initial_ip = client_info.get("ip")
-        
+
         entities.append(
             KeeneticClientPolicySelect(
                 coordinator=coordinator,
@@ -85,20 +86,15 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
         )
         self._api_client = api_client
         self._policies = policies
-        
-        # Build mapping between policy IDs and display names
+
         self._id_to_display: dict[str, str] = {}
         self._display_to_id: dict[str, str] = {}
-        
-        # Default policy (no specific policy)
-        self._id_to_display["__default__"] = "Default"
-        self._display_to_id["Default"] = "__default__"
-        
-        # Deny policy (blocked)
-        self._id_to_display["__deny__"] = "Deny (Blocked)"
-        self._display_to_id["Deny (Blocked)"] = "__deny__"
-        
-        # Custom policies from router
+
+        self._id_to_display["__default__"] = DEFAULT_POLICY_OPTION
+        self._display_to_id[DEFAULT_POLICY_OPTION] = "__default__"
+        self._id_to_display["__deny__"] = DENY_POLICY_OPTION
+        self._display_to_id[DENY_POLICY_OPTION] = "__deny__"
+
         for policy_id, description in policies.items():
             self._id_to_display[policy_id] = description
             self._display_to_id[description] = policy_id
@@ -117,7 +113,7 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
     def options(self) -> list[str]:
         """Return list of available options."""
         policy_names = sorted(self._policies.values())
-        return ["Default"] + policy_names + ["Deny (Blocked)"]
+        return [DEFAULT_POLICY_OPTION] + policy_names + [DENY_POLICY_OPTION]
 
     @property
     def current_option(self) -> str | None:
@@ -127,27 +123,26 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
         host_info = host_policies.get(self._mac, {})
         access = host_info.get("access")
         policy_id = host_info.get("policy")
-        
+
         if access == "deny":
-            return "Deny (Blocked)"
-        
+            return DENY_POLICY_OPTION
+
         if policy_id and policy_id in self._id_to_display:
             return self._id_to_display[policy_id]
-        
-        return "Default"
+
+        return DEFAULT_POLICY_OPTION
 
     async def async_select_option(self, option: str) -> None:
         """Change the selected policy."""
-        if option == "Default":
+        if option == DEFAULT_POLICY_OPTION:
             await self._api_client.async_set_client_policy(self._mac, "default")
-        elif option == "Deny (Blocked)":
+        elif option == DENY_POLICY_OPTION:
             await self._api_client.async_set_client_policy(self._mac, "deny")
         else:
             policy_id = self._display_to_id.get(option)
             if policy_id and policy_id not in ("__default__", "__deny__"):
                 await self._api_client.async_set_client_policy(self._mac, policy_id)
-        
-        # Refresh coordinator to update state
+
         await self.coordinator.async_request_refresh()
 
     @property
@@ -155,13 +150,12 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
         """Return additional state attributes."""
         host_policies = self.coordinator.data.get("host_policies", {})
         host_info = host_policies.get(self._mac, {})
-        
-        # Get current policy details
+
         current_policy_id = host_info.get("policy")
         current_policy_desc = None
         if current_policy_id and current_policy_id in self._id_to_display:
             current_policy_desc = self._id_to_display[current_policy_id]
-        
+
         return {
             "mac": self._mac.upper(),
             "client_name": self.hostname or self._label,
@@ -175,5 +169,4 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        # Entity is available if client is known to the router
         return self._client is not None

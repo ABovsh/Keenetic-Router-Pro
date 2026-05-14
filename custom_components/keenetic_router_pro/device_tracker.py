@@ -32,7 +32,7 @@ async def async_setup_entry(
     for client_info in tracked_clients:
         if not isinstance(client_info, dict):
             continue
-            
+
         mac = normalize_mac(client_info.get("mac"))
         if not mac or mac in seen_macs:
             continue
@@ -81,12 +81,13 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        
+
         self.async_on_remove(
             self._main_coordinator.async_add_listener(
                 self._handle_coordinator_update
             )
         )
+
     @callback
     def _handle_coordinator_update(self) -> None:
         self.async_write_ha_state()
@@ -106,7 +107,7 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
             ip = usable_ip(client.get("ip"))
             if ip:
                 return ip
-        
+
         return usable_ip(self._initial_ip)
 
     @property
@@ -157,7 +158,7 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
             "label": self._label,
             **tracking_info,
         }
-        
+
         if not client:
             attrs["ip"] = self._initial_ip
             return attrs
@@ -198,6 +199,6 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
         if isinstance(index, dict):
             return index.get(self._mac)
         for item in data.get("clients", []) or []:
-            if str(item.get("mac") or "").lower() == self._mac:
+            if normalize_mac(item.get("mac")) == self._mac:
                 return item
         return None

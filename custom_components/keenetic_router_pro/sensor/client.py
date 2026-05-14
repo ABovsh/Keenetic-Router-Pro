@@ -5,13 +5,19 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfInformation, UnitOfTime, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
 from ..entity import ClientEntity
 from ..utils import coerce_bool, coerce_seconds
+
+ZERO_COUNTER_VALUES = (None, "", 0, "0")
 
 
 def _client_is_online(client: dict[str, Any]) -> bool:
@@ -24,6 +30,65 @@ def _client_is_online(client: dict[str, Any]) -> bool:
 def _client_has_live_session(client: dict[str, Any] | None) -> bool:
     """Return whether live association-only client fields are meaningful."""
     return bool(client and _client_is_online(client))
+
+
+def _coerce_optional_int(value: Any) -> int | None:
+    """Return an integer for router numeric fields, or None when absent."""
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _bytes_to_gb(value: Any) -> float | None:
+    """Convert a byte counter to GiB for the existing client UI contract."""
+    try:
+        return round(float(value) / (1024 ** 3), 2)
+    except (TypeError, ValueError):
+        return None
+
+
+def _client_counter_available(client: dict[str, Any] | None, key: str) -> bool:
+    """Return whether a client byte counter is meaningful to show."""
+    if not client:
+        return False
+    if not _client_is_online(client) and client.get(key) in ZERO_COUNTER_VALUES:
+        return False
+    return True
+
+
+def _router_ap_band(ap: Any) -> str | None:
+    """Return Wi-Fi band inferred from a Keenetic access-point token."""
+    ap_name = str(ap or "")
+    if "WifiMaster0" in ap_name:
+        return "2.4 GHz"
+    if "WifiMaster1" in ap_name:
+        return "5 GHz"
+    return None
+
+
+def _wifi_band_from_client(client: dict[str, Any]) -> str | None:
+    """Infer the client's Wi-Fi band from the most authoritative fields."""
+    if client.get("port") is not None or client.get("auto-negotiation") is not None:
+        return None
+
+    mws = client.get("mws")
+    if isinstance(mws, dict):
+        band = _router_ap_band(mws.get("ap"))
+        if band:
+            return band
+
+    band = _router_ap_band(client.get("ap"))
+    if band:
+        return band
+
+    txrate = _coerce_optional_int(client.get("txrate"))
+    if txrate is not None:
+        return "5 GHz" if txrate > 300 else "2.4 GHz"
+
+    return None
 
 
 class KeeneticClientIpSensor(ClientEntity, SensorEntity):
@@ -40,7 +105,15 @@ class KeeneticClientIpSensor(ClientEntity, SensorEntity):
         label: str,
         initial_ip: str | None = None,
     ) -> None:
-        ClientEntity.__init__(self, coordinator, entry.entry_id, entry.title, mac, label, initial_ip)
+        ClientEntity.__init__(
+            self,
+            coordinator,
+            entry.entry_id,
+            entry.title,
+            mac,
+            label,
+            initial_ip,
+        )
 
     @property
     def unique_id(self) -> str:
@@ -84,9 +157,7 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        return bool(getattr(super(), "available", True)) and _client_has_live_session(
-            self._client,
-        )
+        return super().available and _client_has_live_session(self._client)
 
     @property
     def native_unit_of_measurement(self) -> str:
@@ -131,7 +202,7 @@ class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
         client = self._client
         if not client or _client_is_online(client):
             return False
-        return bool(getattr(super(), "available", True)) and coerce_seconds(
+        return super().available and coerce_seconds(
             client.get("last-seen"),
             default=None,
         ) is not None
@@ -177,12 +248,7 @@ class KeeneticClientRxSensor(ClientEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        client = self._client
-        if not client:
-            return False
-        if not _client_is_online(client) and client.get("rxbytes") in (None, "", 0, "0"):
-            return False
-        return bool(getattr(super(), "available", True))
+        return super().available and _client_counter_available(self._client, "rxbytes")
 
     @property
     def native_unit_of_measurement(self) -> str:
@@ -191,15 +257,9 @@ class KeeneticClientRxSensor(ClientEntity, SensorEntity):
     @property
     def native_value(self) -> float | None:
         client = self._client
-        if client:
-            rxbytes = client.get("rxbytes", 0)
-            if not _client_is_online(client) and rxbytes in (None, "", 0, "0"):
-                return None
-            try:
-                return round(float(rxbytes) / (1024 ** 3), 2)
-            except (TypeError, ValueError):
-                pass
-        return None
+        if not _client_counter_available(client, "rxbytes"):
+            return None
+        return _bytes_to_gb(client.get("rxbytes"))
 
 
 class KeeneticClientTxSensor(ClientEntity, SensorEntity):
@@ -229,12 +289,7 @@ class KeeneticClientTxSensor(ClientEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        client = self._client
-        if not client:
-            return False
-        if not _client_is_online(client) and client.get("txbytes") in (None, "", 0, "0"):
-            return False
-        return bool(getattr(super(), "available", True))
+        return super().available and _client_counter_available(self._client, "txbytes")
 
     @property
     def native_unit_of_measurement(self) -> str:
@@ -243,15 +298,9 @@ class KeeneticClientTxSensor(ClientEntity, SensorEntity):
     @property
     def native_value(self) -> float | None:
         client = self._client
-        if client:
-            txbytes = client.get("txbytes", 0)
-            if not _client_is_online(client) and txbytes in (None, "", 0, "0"):
-                return None
-            try:
-                return round(float(txbytes) / (1024 ** 3), 2)
-            except (TypeError, ValueError):
-                pass
-        return None
+        if not _client_counter_available(client, "txbytes"):
+            return None
+        return _bytes_to_gb(client.get("txbytes"))
 
 
 class KeeneticClientRssiSensor(ClientEntity, SensorEntity):
@@ -281,9 +330,7 @@ class KeeneticClientRssiSensor(ClientEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        return bool(getattr(super(), "available", True)) and _client_has_live_session(
-            self._client,
-        )
+        return super().available and _client_has_live_session(self._client)
 
     @property
     def native_unit_of_measurement(self) -> str:
@@ -293,12 +340,7 @@ class KeeneticClientRssiSensor(ClientEntity, SensorEntity):
     def native_value(self) -> int | None:
         client = self._client
         if client:
-            rssi = client.get("rssi")
-            if rssi is not None:
-                try:
-                    return int(rssi)
-                except (TypeError, ValueError):
-                    pass
+            return _coerce_optional_int(client.get("rssi"))
         return None
 
 
@@ -328,9 +370,7 @@ class KeeneticClientTxRateSensor(ClientEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        return bool(getattr(super(), "available", True)) and _client_has_live_session(
-            self._client,
-        )
+        return super().available and _client_has_live_session(self._client)
 
     @property
     def native_unit_of_measurement(self) -> str:
@@ -340,14 +380,10 @@ class KeeneticClientTxRateSensor(ClientEntity, SensorEntity):
     def native_value(self) -> int | None:
         client = self._client
         if client:
-            txrate = client.get("txrate")
-            if txrate is not None:
-                try:
-                    return int(txrate)
-                except (TypeError, ValueError):
-                    pass
+            return _coerce_optional_int(client.get("txrate"))
         return None
-    
+
+
 class KeeneticClientConnectionTypeSensor(ClientEntity, SensorEntity):
     """Connection type sensor (WiFi 2.4GHz, WiFi 5GHz, Ethernet)."""
     _attr_has_entity_name = True
@@ -385,36 +421,30 @@ class KeeneticClientConnectionTypeSensor(ClientEntity, SensorEntity):
                 return f"Ethernet ({speed} Mbps)"
             return "Ethernet"
 
-        # Check WiFi connection via mws (Mesh WiFi System)
         mws = client.get("mws")
-        if mws:
+        if isinstance(mws, dict):
             ap = mws.get("ap", "")
-            if "WifiMaster0" in ap:
+            band = _router_ap_band(ap)
+            if band == "2.4 GHz":
                 return "WiFi 2.4 GHz (Mesh)"
-            elif "WifiMaster1" in ap:
+            if band == "5 GHz":
                 return "WiFi 5 GHz (Mesh)"
             return f"WiFi (Mesh) - {ap}"
 
-        # Check direct WiFi connection (via ssid/ap)
         ssid = client.get("ssid")
         ap = client.get("ap")
-        
+
         if ssid or ap:
-            # Determine band from AP name
-            ap_name = str(ap) if ap else ""
-            if "WifiMaster0" in ap_name:
-                band = "2.4 GHz"
-            elif "WifiMaster1" in ap_name:
-                band = "5 GHz"
-            else:
-                # Try to determine from txrate/mode
-                txrate = client.get("txrate", 0)
-                mode = client.get("mode", "")
-                if txrate > 300 or "ac" in mode or "ax" in mode:
-                    band = "5 GHz"
-                else:
-                    band = "2.4 GHz"
-            
+            band = _router_ap_band(ap)
+            if band is None:
+                txrate = _coerce_optional_int(client.get("txrate")) or 0
+                mode = str(client.get("mode") or "").lower()
+                band = (
+                    "5 GHz"
+                    if txrate > 300 or "ac" in mode or "ax" in mode
+                    else "2.4 GHz"
+                )
+
             if ssid:
                 return f"WiFi {band} - {ssid}"
             return f"WiFi {band}"
@@ -423,19 +453,16 @@ class KeeneticClientConnectionTypeSensor(ClientEntity, SensorEntity):
         iface = client.get("interface")
         if iface:
             iface_name = iface if isinstance(iface, str) else iface.get("name", "")
-            if "WifiMaster0" in iface_name:
+            if "WifiMaster0" in str(iface_name):
                 return "WiFi 2.4 GHz"
-            elif "WifiMaster1" in iface_name:
+            if "WifiMaster1" in str(iface_name):
                 return "WiFi 5 GHz"
-            elif "GigabitEthernet" in iface_name:
+            if "GigabitEthernet" in str(iface_name):
                 return "Ethernet"
 
-        # Try to determine from txrate/speed
-        txrate = client.get("txrate")
-        if txrate:
-            if txrate > 300:
-                return "WiFi 5 GHz (likely)"
-            return "WiFi 2.4 GHz (likely)"
+        txrate = _coerce_optional_int(client.get("txrate"))
+        if txrate is not None:
+            return "WiFi 5 GHz (likely)" if txrate > 300 else "WiFi 2.4 GHz (likely)"
 
         return "unknown"
 
@@ -445,12 +472,11 @@ class KeeneticClientConnectionTypeSensor(ClientEntity, SensorEntity):
         conn_type = self.native_value
         if "Ethernet" in conn_type:
             return "mdi:ethernet"
-        elif "2.4" in conn_type:
+        if "2.4" in conn_type:
             return "mdi:wifi"
-        elif "5" in conn_type:
+        if "5" in conn_type:
             return "mdi:wifi-strength-4"
-        else:
-            return "mdi:wifi-question"
+        return "mdi:wifi-question"
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
@@ -461,9 +487,8 @@ class KeeneticClientConnectionTypeSensor(ClientEntity, SensorEntity):
 
         attrs: dict[str, Any] = {}
 
-        # Add WiFi specific attributes
         mws = client.get("mws")
-        if mws:
+        if isinstance(mws, dict):
             attrs["ap"] = mws.get("ap")
             attrs["mode"] = mws.get("mode")
             attrs["ht"] = mws.get("ht")
@@ -472,7 +497,6 @@ class KeeneticClientConnectionTypeSensor(ClientEntity, SensorEntity):
             if mws.get("roam"):
                 attrs["roaming"] = mws.get("roam")
 
-        # Add direct WiFi attributes
         if client.get("ssid"):
             attrs["ssid"] = client.get("ssid")
         if client.get("ap"):
@@ -480,7 +504,6 @@ class KeeneticClientConnectionTypeSensor(ClientEntity, SensorEntity):
         if client.get("mode"):
             attrs["mode"] = client.get("mode")
 
-        # Add Ethernet attributes
         if client.get("speed"):
             attrs["speed_mbps"] = client.get("speed")
         if client.get("duplex") is not None:
@@ -521,34 +544,7 @@ class KeeneticClientWifiBandSensor(ClientEntity, SensorEntity):
         if not client:
             return None
 
-        # Check if wired
-        if client.get("port") is not None or client.get("auto-negotiation") is not None:
-            return None
-
-        # Check via mws
-        mws = client.get("mws")
-        if mws:
-            ap = mws.get("ap", "")
-            if "WifiMaster0" in ap:
-                return "2.4 GHz"
-            elif "WifiMaster1" in ap:
-                return "5 GHz"
-
-        # Check via direct ap
-        ap = client.get("ap", "")
-        if "WifiMaster0" in ap:
-            return "2.4 GHz"
-        elif "WifiMaster1" in ap:
-            return "5 GHz"
-
-        # Try to determine from txrate
-        txrate = client.get("txrate")
-        if txrate:
-            if txrate > 300:
-                return "5 GHz"
-            return "2.4 GHz"
-
-        return None
+        return _wifi_band_from_client(client)
 
     @property
     def icon(self) -> str:
@@ -556,10 +552,9 @@ class KeeneticClientWifiBandSensor(ClientEntity, SensorEntity):
         band = self.native_value
         if band == "5 GHz":
             return "mdi:wifi-strength-4"
-        elif band == "2.4 GHz":
+        if band == "2.4 GHz":
             return "mdi:wifi"
-        else:
-            return "mdi:wifi-off"
+        return "mdi:wifi-off"
 
 
 class KeeneticClientWifiModeSensor(ClientEntity, SensorEntity):
@@ -587,9 +582,7 @@ class KeeneticClientWifiModeSensor(ClientEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        return bool(getattr(super(), "available", True)) and _client_has_live_session(
-            self._client,
-        )
+        return super().available and _client_has_live_session(self._client)
 
     @property
     def native_value(self) -> str | None:
@@ -598,17 +591,15 @@ class KeeneticClientWifiModeSensor(ClientEntity, SensorEntity):
         if not client:
             return None
 
-        # Check via mws
         mws = client.get("mws")
-        if mws:
+        if isinstance(mws, dict):
             mode = mws.get("mode")
             if mode:
                 return mode.upper()
 
-        # Check direct mode
         mode = client.get("mode")
         if mode:
-            return mode.upper()
+            return str(mode).upper()
 
         return None
 
@@ -618,12 +609,10 @@ class KeeneticClientWifiModeSensor(ClientEntity, SensorEntity):
         mode = self.native_value
         if mode == "11AX":
             return "mdi:wifi-strength-4"
-        elif mode == "11AC":
+        if mode == "11AC":
             return "mdi:wifi-strength-3"
-        elif mode == "11N":
+        if mode == "11N":
             return "mdi:wifi-strength-2"
-        elif mode == "11G":
-            return "mdi:wifi-strength-1"
-        elif mode == "11B":
+        if mode in ("11G", "11B"):
             return "mdi:wifi-strength-1"
         return "mdi:wifi"

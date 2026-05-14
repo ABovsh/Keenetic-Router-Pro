@@ -166,6 +166,27 @@ def test_client_tracker_uses_active_flag_when_link_is_missing() -> None:
     assert tracker.extra_state_attributes["presence_source"] == "active"
 
 
+def test_client_tracker_fallback_lookup_normalizes_mac_variants() -> None:
+    """Fallback client-list lookup should match the same MAC formats as the index."""
+    entry = _entry()
+    coordinator = _coordinator()
+    target = coordinator.data["clients_by_mac"].pop("aa:bb:cc:dd:ee:ff")
+    coordinator.data.pop("clients_by_mac")
+    target["mac"] = "AA-BB-CC-DD-EE-FF"
+    coordinator.data["clients"] = [target]
+
+    tracker = KeeneticClientTracker(
+        coordinator=coordinator,
+        entry=entry,
+        mac="aa:bb:cc:dd:ee:ff",
+        label="Kitchen tablet",
+        initial_ip="192.0.2.10",
+    )
+
+    assert tracker.is_connected is True
+    assert tracker.ip_address == "192.0.2.40"
+
+
 def test_client_tracker_uses_neighbour_expiry_for_offline_clients() -> None:
     """An expired neighbour record is a clear away signal."""
     entry = _entry()
