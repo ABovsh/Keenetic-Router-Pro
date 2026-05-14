@@ -8,6 +8,18 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.18 - Lifecycle and update action test hardening
+
+### Internal
+
+- **Added lifecycle tests for integration startup, platform forwarding, repair
+  issue handling, auth/API error mapping, unload cleanup and new-device events.**
+  These tests protect the code paths that run during HA reloads and first setup.
+- **Added firmware update action tests for router and mesh update flows.** The
+  suite now checks no-progress reboot fallback, rejected update commands,
+  missing mesh node IPs and mesh refresh-until-updated behavior without slow
+  sleeps.
+
 ## 1.7.17 - Efficient test coverage and payload hardening
 
 ### Bug fixes
