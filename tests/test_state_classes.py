@@ -52,7 +52,7 @@ def test_uptime_sensors_use_total_increasing(
     "class_name",
     ["KeeneticClientLastSeenSensor"],
 )
-def test_client_last_seen_sensor_is_timestamp_not_duration_measurement(
+def test_client_last_seen_sensor_is_exact_datetime_text(
     class_name: str,
 ) -> None:
     assignments = _class_assignments(
@@ -60,5 +60,5 @@ def test_client_last_seen_sensor_is_timestamp_not_duration_measurement(
         class_name,
     )
 
-    assert assignments.get("_attr_device_class") == "SensorDeviceClass.TIMESTAMP"
+    assert "_attr_device_class" not in assignments
     assert "_attr_state_class" not in assignments

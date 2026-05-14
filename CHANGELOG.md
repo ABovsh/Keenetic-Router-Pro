@@ -8,6 +8,19 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.12 - Exact tracked-client Last Seen display
+
+### Improvements
+
+- **Tracked-client Last Seen now displays exact local date and time.** Home
+  Assistant timestamp sensors are commonly rendered as relative text such as
+  “9 minutes ago”, so Last Seen is now exposed as formatted diagnostic text
+  (`YYYY-MM-DD HH:MM:SS`) while still remaining unavailable for online clients.
+
+### Internal
+
+- **Regression coverage updated for exact Last Seen display.**
+
 ## 1.7.11 - Offline tracked-client Last Seen fix
 
 ### Bug fixes

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
@@ -90,10 +90,9 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
 
 
 class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
-    """Timestamp when the router last saw the offline client."""
+    """Local date/time when the router last saw the offline client."""
     _attr_has_entity_name = True
     _attr_icon = "mdi:clock"
-    _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _CLIENT_FINGERPRINT_IGNORE = frozenset({"uptime"})
 
@@ -126,7 +125,7 @@ class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
         ) is not None
 
     @property
-    def native_value(self) -> datetime | None:
+    def native_value(self) -> str | None:
         client = self._client
         if not client:
             return None
@@ -135,7 +134,8 @@ class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
         seconds = coerce_seconds(client.get("last-seen"), default=None)
         if seconds is None:
             return None
-        return datetime.now(timezone.utc) - timedelta(seconds=seconds)
+        seen_at = datetime.now().astimezone() - timedelta(seconds=seconds)
+        return seen_at.strftime("%Y-%m-%d %H:%M:%S")
 
 
 class KeeneticClientRxSensor(ClientEntity, SensorEntity):

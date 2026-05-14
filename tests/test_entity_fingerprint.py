@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from custom_components.keenetic_router_pro.entity import ClientEntity
 from custom_components.keenetic_router_pro.sensor.client import (
@@ -100,8 +100,8 @@ def test_dedicated_last_seen_sensor_fingerprint_includes_last_seen() -> None:
     assert "uptime" not in fp1
 
 
-def test_last_seen_sensor_returns_timestamp_for_offline_client() -> None:
-    """Last Seen should be a human-friendly timestamp once the client is away."""
+def test_last_seen_sensor_returns_exact_datetime_for_offline_client() -> None:
+    """Last Seen should show exact local date/time instead of relative text."""
     client = {
         "mac": "aa:bb:cc:00:00:01",
         "active": False,
@@ -118,9 +118,10 @@ def test_last_seen_sensor_returns_timestamp_for_offline_client() -> None:
 
     value = entity.native_value
 
-    assert value is not None
-    assert value.tzinfo is timezone.utc
-    assert 20 <= (datetime.now(timezone.utc) - value).total_seconds() <= 40
+    assert isinstance(value, str)
+    assert len(value) == 19
+    parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+    assert 20 <= (datetime.now().astimezone().replace(tzinfo=None) - parsed).total_seconds() <= 40
 
 
 def test_last_seen_sensor_is_unavailable_for_online_client() -> None:
