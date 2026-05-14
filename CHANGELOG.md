@@ -8,6 +8,32 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.11 - Offline tracked-client Last Seen fix
+
+### Bug fixes
+
+- **Offline tracked-client Last Seen now has a second fetch path.** Some
+  Keenetic firmware exposes `show ip neighbour` correctly through `/rci/parse`
+  even when `/rci/show/ip/neighbour` is empty. The integration now falls back
+  to the parse command, so offline clients can show the router's actual
+  last-seen timestamp.
+- **Offline hotspot rows now prefer neighbour Last Seen.** If Keenetic keeps an
+  offline client in the hotspot table with zero-ish live data, the coordinator
+  now treats the neighbour table as the authoritative source for the offline
+  timestamp.
+- **Online tracked-client Last Seen is marked unavailable.** The entity now
+  becomes unavailable while the client is online instead of showing a confusing
+  `Unknown` timestamp.
+- **Offline zero traffic counters are no longer shown as real `0.00 GB`
+  values.** If Keenetic resets `rxbytes`/`txbytes` to zero for an offline
+  hotspot row, RX/TX become unavailable rather than misleading.
+
+### Internal
+
+- **Regression coverage added for parse fallback neighbour payloads, offline
+  neighbour timestamp priority, online Last Seen availability, and offline
+  zero traffic counters.**
+
 ## 1.7.10 - Cleaner tracked-client diagnostics
 
 ### Improvements

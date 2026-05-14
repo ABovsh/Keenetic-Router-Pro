@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 from custom_components.keenetic_router_pro.entity import ClientEntity
 from custom_components.keenetic_router_pro.sensor.client import (
     KeeneticClientLastSeenSensor,
+    KeeneticClientRxSensor,
     KeeneticClientTxRateSensor,
+    KeeneticClientTxSensor,
     KeeneticClientUptimeSensor,
 )
 
@@ -139,6 +141,25 @@ def test_last_seen_sensor_is_unavailable_for_online_client() -> None:
     )
 
     assert entity.native_value is None
+    assert entity.available is False
+
+
+def test_last_seen_sensor_is_available_for_offline_client_with_timestamp() -> None:
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "active": False,
+        "last-seen": 600,
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+    entity = KeeneticClientLastSeenSensor(
+        coord,
+        entry,
+        "AA:BB:CC:00:00:01",
+        "phone",
+    )
+
+    assert entity.available is True
 
 
 def test_uptime_sensor_is_presented_as_wifi_session() -> None:
@@ -178,6 +199,24 @@ def test_txrate_sensor_is_presented_as_link_speed() -> None:
     assert entity.name == "Link Speed"
     assert entity.native_unit_of_measurement == "Mbps"
     assert entity.native_value == 87
+
+
+def test_offline_zero_client_traffic_is_unavailable() -> None:
+    """Offline hotspot rows reset counters to zero; do not expose that as data."""
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "active": False,
+        "rxbytes": 0,
+        "txbytes": "0",
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+
+    rx = KeeneticClientRxSensor(coord, entry, "AA:BB:CC:00:00:01", "phone")
+    tx = KeeneticClientTxSensor(coord, entry, "AA:BB:CC:00:00:01", "phone")
+
+    assert rx.native_value is None
+    assert tx.native_value is None
 
 
 def test_fingerprint_picks_up_link_and_ip_changes() -> None:

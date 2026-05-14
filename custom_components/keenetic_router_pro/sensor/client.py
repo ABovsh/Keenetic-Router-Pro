@@ -115,6 +115,17 @@ class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
         return "Last Seen"
 
     @property
+    def available(self) -> bool:
+        """Last Seen is only useful once the tracked client is offline."""
+        client = self._client
+        if not client or _client_is_online(client):
+            return False
+        return bool(getattr(super(), "available", True)) and coerce_seconds(
+            client.get("last-seen"),
+            default=None,
+        ) is not None
+
+    @property
     def native_value(self) -> datetime | None:
         client = self._client
         if not client:
@@ -161,11 +172,13 @@ class KeeneticClientRxSensor(ClientEntity, SensorEntity):
         client = self._client
         if client:
             rxbytes = client.get("rxbytes", 0)
+            if not _client_is_online(client) and rxbytes in (None, "", 0, "0"):
+                return None
             try:
                 return round(float(rxbytes) / (1024 ** 3), 2)
             except (TypeError, ValueError):
                 pass
-        return 0.0
+        return None
 
 
 class KeeneticClientTxSensor(ClientEntity, SensorEntity):
@@ -202,11 +215,13 @@ class KeeneticClientTxSensor(ClientEntity, SensorEntity):
         client = self._client
         if client:
             txbytes = client.get("txbytes", 0)
+            if not _client_is_online(client) and txbytes in (None, "", 0, "0"):
+                return None
             try:
                 return round(float(txbytes) / (1024 ** 3), 2)
             except (TypeError, ValueError):
                 pass
-        return 0.0
+        return None
 
 
 class KeeneticClientRssiSensor(ClientEntity, SensorEntity):

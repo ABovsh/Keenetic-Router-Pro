@@ -249,6 +249,32 @@ def test_neighbour_merge_keeps_offline_last_seen_and_ip() -> None:
     ]
 
 
+def test_neighbour_merge_prefers_neighbour_last_seen_for_offline_hotspot_row() -> None:
+    """Offline hotspot rows may report zero-ish seen data; neighbour is authoritative."""
+    clients = [
+        {
+            "mac": "80:07:94:46:ab:ab",
+            "ip": "0.0.0.0",
+            "active": False,
+            "last-seen": 0,
+        }
+    ]
+    neighbours = [
+        {
+            "mac": "80:07:94:46:ab:ab",
+            "address-family": "ipv4",
+            "address": "192.168.1.146",
+            "last-seen": 672,
+            "expired": True,
+        }
+    ]
+
+    merged = _merge_clients_with_neighbours(clients, neighbours)
+
+    assert merged[0]["last-seen"] == 672
+    assert merged[0]["last-seen-source"] == "neighbour"
+
+
 def test_neighbour_merge_prefers_live_hotspot_last_seen() -> None:
     """Online hotspot timestamps are fresher than the neighbour fallback."""
     clients = [

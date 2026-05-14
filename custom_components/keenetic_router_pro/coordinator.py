@@ -12,7 +12,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import KeeneticAuthError, KeeneticClient
 from .const import DOMAIN, FAST_SCAN_INTERVAL
-from .utils import normalize_mac
+from .utils import coerce_bool, normalize_mac
 
 import logging
 
@@ -70,6 +70,13 @@ def _is_empty_ip(value: Any) -> bool:
     return value in (None, "", "0.0.0.0", "::")
 
 
+def _client_is_online(client: dict[str, Any]) -> bool:
+    """Return whether hotspot data says a client is currently connected."""
+    if str(client.get("link", "")).lower() == "up":
+        return True
+    return coerce_bool(client.get("active"))
+
+
 def _merge_clients_with_neighbours(
     clients: list[dict[str, Any]],
     neighbours: list[dict[str, Any]],
@@ -98,7 +105,13 @@ def _merge_clients_with_neighbours(
 
         item = dict(client)
         item["neighbour"] = neighbour
-        if item.get("last-seen") in (None, ""):
+        if (
+            not _client_is_online(item)
+            and neighbour.get("last-seen") not in (None, "")
+        ):
+            item["last-seen"] = neighbour.get("last-seen")
+            item["last-seen-source"] = "neighbour"
+        elif item.get("last-seen") in (None, "", 0, "0"):
             item["last-seen"] = neighbour.get("last-seen")
             item.setdefault("last-seen-source", "neighbour")
         else:

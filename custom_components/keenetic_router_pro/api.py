@@ -23,7 +23,7 @@ from .const import (
     WAN_STATUS_DOWN,
     WAN_STATUS_LINK_UP,
 )
-from .utils import coerce_bool, coerce_int
+from .utils import coerce_bool, coerce_int, normalize_mac
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.api")
 
@@ -811,7 +811,32 @@ class KeeneticClient:
     async def async_get_ip_neighbours(self) -> List[Dict[str, Any]]:
         """Return the router's discovered IP neighbours."""
         data = await self._rci_get("show/ip/neighbour")
-        return _nested_dict_items(data, "neighbour", "neighbours", "items")
+        neighbours = _nested_dict_items(data, "neighbour", "neighbours", "items")
+        if not neighbours:
+            try:
+                data = await self._rci_parse("show ip neighbour")
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:
+                _LOGGER.debug("Parse-style IP neighbour fetch failed: %s", err)
+                return []
+            neighbours = _nested_dict_items(
+                data,
+                "neighbour",
+                "neighbours",
+                "items",
+            ) or _dict_items(data)
+
+        return [
+            neighbour
+            for neighbour in neighbours
+            if normalize_mac(neighbour.get("mac"))
+            and (
+                neighbour.get("address") is not None
+                or neighbour.get("last-seen") is not None
+                or neighbour.get("first-seen") is not None
+            )
+        ]
 
     async def async_get_wireguard_status(
         self,
