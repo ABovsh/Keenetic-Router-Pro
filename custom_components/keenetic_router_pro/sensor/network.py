@@ -226,6 +226,8 @@ class KeeneticMainPortSensor(ControllerEntity, SensorEntity):
         """Return port state."""
         ports = self.coordinator.data.get("port_info", [])
         for port in ports:
+            if not isinstance(port, dict):
+                continue
             if port.get("label") == self._port_label:
                 return port.get("link", "unknown")
         return "not_found"
@@ -245,6 +247,8 @@ class KeeneticMainPortSensor(ControllerEntity, SensorEntity):
         """Return additional port attributes."""
         ports = self.coordinator.data.get("port_info", [])
         for port in ports:
+            if not isinstance(port, dict):
+                continue
             if port.get("label") == self._port_label:
                 attrs = {
                     "label": port.get("label"),

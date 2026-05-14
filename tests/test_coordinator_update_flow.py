@@ -208,6 +208,52 @@ def test_coordinator_first_refresh_builds_enriched_payload() -> None:
     assert data["crypto_maps"]["SITE"]["rx_throughput"] == 0.0
 
 
+def test_coordinator_mesh_fetch_failure_falls_back_to_empty_mesh() -> None:
+    """Optional mesh discovery must not fail the whole coordinator tick."""
+    client = FakeKeeneticClient()
+
+    async def fail_mesh_nodes(
+        clients: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        raise RuntimeError("mesh endpoint unavailable")
+
+    client.async_get_mesh_nodes = fail_mesh_nodes  # type: ignore[assignment]
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+
+    data = asyncio.run(coordinator._async_update_data())
+
+    assert data["mesh_nodes"] == []
+    assert data["clients_by_mac"]["aa:bb:cc:dd:ee:ff"]["ip"] == "192.0.2.55"
+
+
+def test_coordinator_backup_order_handles_string_priorities() -> None:
+    """RCI commonly returns numbers as strings; WAN ordering must still work."""
+    client = FakeKeeneticClient()
+
+    async def wan_interfaces(**kwargs: Any) -> list[dict[str, Any]]:
+        return [
+            {"id": "BackupLow", "defaultgw": False, "priority": "10"},
+            {"id": "Default", "defaultgw": True, "priority": "100"},
+            {"id": "BackupHigh", "defaultgw": False, "priority": "80"},
+        ]
+
+    client.async_get_wan_interfaces = wan_interfaces  # type: ignore[assignment]
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+
+    data = asyncio.run(coordinator._async_update_data())
+
+    assert [wan["id"] for wan in data["wan_interfaces"]] == [
+        "Default",
+        "BackupHigh",
+        "BackupLow",
+    ]
+    assert [wan["role_label"] for wan in data["wan_interfaces"]] == [
+        "Default connection",
+        "Backup connection 1",
+        "Backup connection 2",
+    ]
+
+
 def test_neighbour_merge_keeps_offline_last_seen_and_ip() -> None:
     """Offline registered hotspot rows should get their stale timestamp from neighbours."""
     clients = [

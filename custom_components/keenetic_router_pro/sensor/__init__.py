@@ -59,7 +59,7 @@ from .mesh import (
     KeeneticMeshClientsSensor,
     KeeneticMeshFirmwareVersionSensor,
     KeeneticMeshLocalIpSensor,
-    KeeneticMeshPortSensor
+    KeeneticMeshPortSensor,
 )
 from .traffic import (
     KeeneticLanRxSensor,
@@ -149,6 +149,8 @@ async def async_setup_entry(
     # Main router port sensors
     main_ports = coordinator.data.get("port_info", [])
     for port in main_ports:
+        if not isinstance(port, dict):
+            continue
         port_label = port.get("label")
         if port_label is not None:
             entities.append(KeeneticMainPortSensor(coordinator, entry, port_label))
@@ -214,6 +216,8 @@ async def async_setup_entry(
         ]
 
     for wan in coordinator.data.get("wan_interfaces", []) or []:
+        if not isinstance(wan, dict):
+            continue
         wan_id = wan.get("id")
         if not wan_id or wan_id in known_wan_ids:
             continue
@@ -236,7 +240,10 @@ async def async_setup_entry(
             KeeneticCryptoMapTxThroughputSensor(coordinator, entry, cmap_name),
         ]
 
-    for cmap_name in (coordinator.data.get("crypto_maps") or {}).keys():
+    crypto_maps = coordinator.data.get("crypto_maps") or {}
+    if not isinstance(crypto_maps, dict):
+        crypto_maps = {}
+    for cmap_name in crypto_maps.keys():
         if cmap_name in known_cmap_names:
             continue
         known_cmap_names.add(cmap_name)
@@ -262,12 +269,17 @@ async def async_setup_entry(
             known_mesh_port_keys,
         )
         for wan in coordinator.data.get("wan_interfaces", []) or []:
+            if not isinstance(wan, dict):
+                continue
             wan_id = wan.get("id")
             if not wan_id or wan_id in known_wan_ids:
                 continue
             known_wan_ids.add(wan_id)
             new_entities.extend(_wan_sensor_set(wan_id))
-        for cmap_name in (coordinator.data.get("crypto_maps") or {}).keys():
+        crypto_maps = coordinator.data.get("crypto_maps") or {}
+        if not isinstance(crypto_maps, dict):
+            crypto_maps = {}
+        for cmap_name in crypto_maps.keys():
             if cmap_name in known_cmap_names:
                 continue
             known_cmap_names.add(cmap_name)
@@ -290,6 +302,8 @@ def _add_mesh_sensors(
 ) -> None:
     """Append sensors for newly discovered mesh nodes and ports."""
     for node in coordinator.data.get("mesh_nodes", []) or []:
+        if not isinstance(node, dict):
+            continue
         node_cid = node.get("cid") or node.get("id")
         if not node_cid:
             continue

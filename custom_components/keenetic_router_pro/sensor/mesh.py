@@ -35,8 +35,12 @@ class KeeneticMeshSystemStateSensor(ControllerEntity, SensorEntity):
         if not mesh_nodes:
             return "no_nodes"
 
-        connected = sum(1 for node in mesh_nodes if node.get("connected", False))
-        total = len(mesh_nodes)
+        valid_nodes = [node for node in mesh_nodes if isinstance(node, dict)]
+        if not valid_nodes:
+            return "no_nodes"
+
+        connected = sum(1 for node in valid_nodes if node.get("connected", False))
+        total = len(valid_nodes)
 
         if connected == 0:
             return "down"
@@ -63,7 +67,9 @@ class KeeneticMeshSystemStateSensor(ControllerEntity, SensorEntity):
         """Return detailed mesh system information."""
         mesh_nodes = self.coordinator.data.get("mesh_nodes", [])
 
-        if not mesh_nodes:
+        valid_nodes = [node for node in mesh_nodes if isinstance(node, dict)]
+
+        if not valid_nodes:
             return {
                 "total_nodes": 0,
                 "connected_nodes": 0,
@@ -75,7 +81,7 @@ class KeeneticMeshSystemStateSensor(ControllerEntity, SensorEntity):
         disconnected = 0
         nodes_detail = []
 
-        for node in mesh_nodes:
+        for node in valid_nodes:
             is_connected = node.get("connected", False)
             if is_connected:
                 connected += 1
@@ -93,7 +99,7 @@ class KeeneticMeshSystemStateSensor(ControllerEntity, SensorEntity):
                 "associations": node.get("associations", 0),
             })
 
-        total = len(mesh_nodes)
+        total = len(valid_nodes)
         health_percent = round((connected / total) * 100, 1) if total > 0 else 0
 
         return {
@@ -323,6 +329,8 @@ class KeeneticMeshPortSensor(MeshEntity, SensorEntity):
 
         ports = node.get("port", [])
         for port in ports:
+            if not isinstance(port, dict):
+                continue
             if port.get("label") == self._port_label:
                 return port.get("link", "unknown")
 
@@ -347,6 +355,8 @@ class KeeneticMeshPortSensor(MeshEntity, SensorEntity):
 
         ports = node.get("port", [])
         for port in ports:
+            if not isinstance(port, dict):
+                continue
             if port.get("label") == self._port_label:
                 attrs = {
                     "label": port.get("label"),

@@ -35,6 +35,8 @@ async def async_setup_entry(
     known_wan_ids: set[str] = set()
     wan_interfaces = coordinator.data.get("wan_interfaces", []) or []
     for wan in wan_interfaces:
+        if not isinstance(wan, dict):
+            continue
         wan_id = wan.get("id")
         if not wan_id or wan_id in known_wan_ids:
             continue
@@ -46,7 +48,10 @@ async def async_setup_entry(
     # Tunnels can be added/removed at runtime via the web UI, so we
     # also register a listener below to catch new ones.
     known_cmap_names: set[str] = set()
-    for cmap_name in (coordinator.data.get("crypto_maps") or {}).keys():
+    crypto_maps = coordinator.data.get("crypto_maps") or {}
+    if not isinstance(crypto_maps, dict):
+        crypto_maps = {}
+    for cmap_name in crypto_maps.keys():
         if cmap_name in known_cmap_names:
             continue
         known_cmap_names.add(cmap_name)
@@ -67,6 +72,8 @@ async def async_setup_entry(
         new_entities: list[BinarySensorEntity] = []
         _add_mesh_binary_sensors(new_entities, coordinator, entry, known_mesh_ids)
         for wan in coordinator.data.get("wan_interfaces", []) or []:
+            if not isinstance(wan, dict):
+                continue
             wan_id = wan.get("id")
             if not wan_id or wan_id in known_wan_ids:
                 continue
@@ -77,7 +84,10 @@ async def async_setup_entry(
             new_entities.append(
                 KeeneticWanEnabledSensor(coordinator, entry, wan_id)
             )
-        for cmap_name in (coordinator.data.get("crypto_maps") or {}).keys():
+        crypto_maps = coordinator.data.get("crypto_maps") or {}
+        if not isinstance(crypto_maps, dict):
+            crypto_maps = {}
+        for cmap_name in crypto_maps.keys():
             if cmap_name in known_cmap_names:
                 continue
             known_cmap_names.add(cmap_name)
@@ -102,6 +112,8 @@ def _add_mesh_binary_sensors(
 ) -> None:
     """Append binary sensors for newly discovered mesh nodes."""
     for node in coordinator.data.get("mesh_nodes", []) or []:
+        if not isinstance(node, dict):
+            continue
         node_cid = node.get("cid") or node.get("id")
         if not node_cid:
             continue

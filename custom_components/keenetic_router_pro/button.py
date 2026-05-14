@@ -51,6 +51,8 @@ def _add_mesh_reboot_buttons(
 ) -> None:
     """Append reboot buttons for newly discovered mesh nodes."""
     for node in coordinator.data.get("mesh_nodes", []) or []:
+        if not isinstance(node, dict):
+            continue
         node_cid = node.get("cid") or node.get("id")
         if not node_cid:
             continue

@@ -20,6 +20,8 @@ def _add_wan_enabled_switches(
 ) -> None:
     """Append switches for newly discovered WAN interfaces."""
     for wan in coordinator.data.get("wan_interfaces", []) or []:
+        if not isinstance(wan, dict):
+            continue
         wan_id = wan.get("id")
         if not wan_id or wan_id in known_wan_ids:
             continue
@@ -67,7 +69,10 @@ def _add_crypto_map_enabled_switches(
     known_cmap_names: set[str],
 ) -> None:
     """Append switches for newly discovered site-to-site IPsec crypto maps."""
-    for cmap_name in (coordinator.data.get("crypto_maps") or {}).keys():
+    crypto_maps = coordinator.data.get("crypto_maps") or {}
+    if not isinstance(crypto_maps, dict):
+        return
+    for cmap_name in crypto_maps.keys():
         if cmap_name in known_cmap_names:
             continue
         known_cmap_names.add(cmap_name)
@@ -92,8 +97,10 @@ async def async_setup_entry(
     client: KeeneticClient = runtime.client
     entities: list[SwitchEntity] = []
 
-    # Wi-Fi interface switch'leri
+    # Wi-Fi interface switches
     for net in coordinator.data.get("wifi", []):
+        if not isinstance(net, dict):
+            continue
         iface_id = net.get("id") or net.get("name")
         if not iface_id:
             continue

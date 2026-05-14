@@ -8,6 +8,29 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.17 - Efficient test coverage and payload hardening
+
+### Bug fixes
+
+- **Mesh discovery failures no longer fail the whole coordinator refresh.**
+  Optional extender discovery now falls back to an empty mesh list for that
+  tick, while core router/client/WAN data continues updating.
+- **WAN backup ordering now handles priorities returned as strings.** Backup
+  connection labels stay correct when Keenetic RCI returns `"80"` instead of
+  `80`.
+- **Platform setup and dynamic entity listeners now tolerate malformed router
+  payload rows.** Bad non-dict rows in mesh, port, WAN, Wi-Fi and crypto-map
+  payloads are skipped instead of crashing entity setup.
+- **Mesh and main-router port sensors now ignore malformed port rows.**
+  Existing valid ports still render normally.
+
+### Internal
+
+- **Added Graphify-guided high-value tests for coordinator edge cases, sensor
+  setup, dynamic listeners and malformed sensor values.** The tests use small
+  fakes and captured callbacks instead of slow HA bootstrapping, so the suite
+  remains fast while checking more behavior.
+
 ## 1.7.16 - Graphify-guided sensor hardening
 
 ### Bug fixes

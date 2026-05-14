@@ -279,9 +279,14 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # the fallback path can reuse it instead of re-fetching.
         if slow_refresh:
             _resolved_clients = clients if isinstance(clients, list) else []
-            mesh_nodes = await _bounded(
-                self.client.async_get_mesh_nodes(clients=_resolved_clients)
-            )
+            try:
+                mesh_nodes = await _bounded(
+                    self.client.async_get_mesh_nodes(clients=_resolved_clients)
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:  # noqa: BLE001
+                mesh_nodes = err
         else:
             mesh_nodes = _prev.get("mesh_nodes", [])
  
@@ -546,7 +551,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
  
         def _prio_key(w: dict[str, Any]) -> int:
             p = w.get("priority")
-            return -int(p) if isinstance(p, (int, float)) else 0
+            return -_to_int(p)
  
         if default_idx is not None:
             default = wan_interfaces[default_idx]

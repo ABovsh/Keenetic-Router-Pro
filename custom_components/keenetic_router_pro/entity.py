@@ -116,6 +116,8 @@ class MeshEntity(CoordinatorEntity):
     def _node(self) -> dict[str, Any] | None:
         nodes = self.coordinator.data.get("mesh_nodes", [])
         for node in nodes:
+            if not isinstance(node, dict):
+                continue
             if (node.get("cid") or node.get("id")) == self._node_cid:
                 return node
         return None
@@ -163,6 +165,8 @@ class WanEntity(CoordinatorEntity):
     @property
     def _wan(self) -> dict[str, Any] | None:
         for w in self.coordinator.data.get("wan_interfaces", []) or []:
+            if not isinstance(w, dict):
+                continue
             if w.get("id") == self._wan_id:
                 return w
         return None
@@ -212,6 +216,8 @@ class InterfaceEntity(CoordinatorEntity):
     @property
     def _wan(self) -> dict[str, Any] | None:
         for w in self.coordinator.data.get("wan_interfaces", []) or []:
+            if not isinstance(w, dict):
+                continue
             if w.get("id") == self._iface_id:
                 return w
         return None
