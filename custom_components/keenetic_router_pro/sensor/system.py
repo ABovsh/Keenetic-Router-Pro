@@ -9,8 +9,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfTime, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
-from ..entity import ControllerEntity, MeshEntity
-from ..utils import coerce_seconds
+from ..entity import ControllerEntity
+from ..utils import coerce_float, coerce_seconds, parse_memory_fraction
 
 
 class KeeneticCpuLoadSensor(ControllerEntity, SensorEntity):
@@ -37,7 +37,9 @@ class KeeneticCpuLoadSensor(ControllerEntity, SensorEntity):
         sys = self.coordinator.data.get("system", {}) or {}
         for key in ("cpu_load", "cpuload", "cpu", "cpu-utilization"):
             if key in sys:
-                return float(sys[key])
+                value = coerce_float(sys[key])
+                if value is not None:
+                    return value
         return None
 
 
@@ -67,26 +69,21 @@ class KeeneticMemoryUsageSensor(ControllerEntity, SensorEntity):
         memtotal = sys.get("memtotal")
         memfree = sys.get("memfree")
 
-        if isinstance(mem, str) and "/" in mem:
-            try:
-                part_used, part_total = mem.split("/", 1)
-                used = float(part_used)
-                total = float(part_total)
-                if total > 0:
-                    return round(used * 100.0 / total, 1)
-            except (ValueError, TypeError):
-                pass
+        parsed_fraction = parse_memory_fraction(mem)
+        if parsed_fraction is not None:
+            return parsed_fraction
 
-        if isinstance(memtotal, (int, float)) and isinstance(memfree, (int, float)) and memtotal > 0:
-            used = memtotal - memfree
-            return round(used * 100.0 / memtotal, 1)
+        total = coerce_float(memtotal)
+        free = coerce_float(memfree)
+        if total and total > 0 and free is not None:
+            used = total - free
+            return round(used * 100.0 / total, 1)
 
         for key in ("mem_used_percent", "memory_usage", "memusage"):
             if key in sys:
-                try:
-                    return float(sys[key])
-                except (TypeError, ValueError):
-                    continue
+                value = coerce_float(sys[key])
+                if value is not None:
+                    return value
 
         return None
 
@@ -186,4 +183,3 @@ class KeeneticFirmwareVersionSensor(ControllerEntity, SensorEntity):
         if isinstance(bsp, dict) and bsp.get("exact"):
             attrs["bsp_version"] = bsp["exact"]
         return attrs if attrs else None
-

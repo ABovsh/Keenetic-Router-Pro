@@ -9,6 +9,7 @@ from .const import DOMAIN
 from .coordinator import KeeneticCoordinator
 from .utils import (
     coerce_bool,
+    find_client_by_mac,
     get_main_device_info,
     get_mesh_device_info,
     get_client_device_info,
@@ -341,11 +342,10 @@ class ClientEntity(CoordinatorEntity):
         data = self.coordinator.data or {}
         index = data.get("clients_by_mac")
         if isinstance(index, dict):
-            return index.get(self._mac)
-        for client in data.get("clients", []) or []:
-            if normalize_mac(client.get("mac")) == self._mac:
+            client = index.get(self._mac)
+            if isinstance(client, dict):
                 return client
-        return None
+        return find_client_by_mac(data.get("clients"), self._mac)
 
     @property
     def device_info(self) -> DeviceInfo:

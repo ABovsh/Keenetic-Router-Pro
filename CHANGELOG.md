@@ -8,6 +8,27 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.16 - Graphify-guided sensor hardening
+
+### Bug fixes
+
+- **System CPU and memory sensors now tolerate malformed numeric router
+  values.** Odd RCI payloads no longer risk raising from direct `float(...)`
+  conversion; unavailable values now stay unavailable.
+- **Mesh CPU, memory and client-count sensors now use the shared Keenetic
+  parsing helpers.** This keeps extender diagnostics consistent with the main
+  router sensors and avoids duplicated fallback logic.
+- **Tracked-client lookup now falls back safely when the MAC index contains
+  unexpected values.** Client entities and device trackers reuse the same
+  normalized raw-list fallback instead of assuming every indexed value is a
+  dict.
+
+### Internal
+
+- **Refactor pass was guided by the refreshed local Graphify graph.** The graph
+  pointed at `entity.py`, `sensor/client.py`, `sensor/mesh.py`, and
+  `sensor/system.py` as practical non-API hubs for low-risk cleanup.
+
 ## 1.7.15 - Tracked-client cleanup and parsing hardening
 
 ### Bug fixes

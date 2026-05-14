@@ -9,7 +9,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN, CONF_TRACKED_CLIENTS
 from .coordinator import KeeneticCoordinator
 from .entity import ClientEntity
-from .utils import coerce_bool, normalize_mac, usable_ip
+from .utils import coerce_bool, find_client_by_mac, normalize_mac, usable_ip
 
 
 async def async_setup_entry(
@@ -197,8 +197,7 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
         data = self._main_coordinator.data or {}
         index = data.get("clients_by_mac")
         if isinstance(index, dict):
-            return index.get(self._mac)
-        for item in data.get("clients", []) or []:
-            if normalize_mac(item.get("mac")) == self._mac:
-                return item
-        return None
+            client = index.get(self._mac)
+            if isinstance(client, dict):
+                return client
+        return find_client_by_mac(data.get("clients"), self._mac)

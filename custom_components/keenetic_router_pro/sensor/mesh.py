@@ -10,7 +10,7 @@ from homeassistant.const import UnitOfTime, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
 from ..entity import ControllerEntity, MeshEntity
-from ..utils import coerce_seconds
+from ..utils import coerce_float, coerce_int, coerce_seconds, parse_memory_fraction
 
 
 class KeeneticMeshSystemStateSensor(ControllerEntity, SensorEntity):
@@ -155,10 +155,7 @@ class KeeneticMeshClientsSensor(MeshEntity, SensorEntity):
         if node:
             associations = node.get("associations")
             if associations is not None:
-                try:
-                    return int(associations)
-                except (TypeError, ValueError):
-                    pass
+                return coerce_int(associations, 0)
         return 0
 
     @property
@@ -227,10 +224,7 @@ class KeeneticMeshCpuLoadSensor(MeshEntity, SensorEntity):
         if node:
             cpuload = node.get("cpuload")
             if cpuload is not None:
-                try:
-                    return float(cpuload)
-                except (TypeError, ValueError):
-                    pass
+                return coerce_float(cpuload)
         return None
 
 
@@ -254,16 +248,7 @@ class KeeneticMeshMemorySensor(MeshEntity, SensorEntity):
     def native_value(self) -> float | None:
         node = self._node
         if node:
-            memory = node.get("memory")
-            if isinstance(memory, str) and "/" in memory:
-                try:
-                    part_used, part_total = memory.split("/", 1)
-                    used = float(part_used)
-                    total = float(part_total)
-                    if total > 0:
-                        return round(used * 100.0 / total, 1)
-                except (ValueError, TypeError):
-                    pass
+            return parse_memory_fraction(node.get("memory"))
         return None
 
 

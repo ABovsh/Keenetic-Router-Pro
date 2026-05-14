@@ -6,6 +6,7 @@ import pytest
 
 from custom_components.keenetic_router_pro.utils import (
     coerce_bool,
+    coerce_float,
     coerce_int,
     coerce_seconds,
     find_client_by_mac,
@@ -126,3 +127,19 @@ def test_coerce_int_handles_loose_rci_values(
     raw: object, default: int, expected: int
 ) -> None:
     assert coerce_int(raw, default) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "default", "expected"),
+    [
+        ("12.5", None, 12.5),
+        (12, None, 12.0),
+        ("", None, None),
+        (None, -1.0, -1.0),
+        ("not-a-number", 7.5, 7.5),
+    ],
+)
+def test_coerce_float_handles_loose_rci_values(
+    raw: object, default: float | None, expected: float | None
+) -> None:
+    assert coerce_float(raw, default) == expected

@@ -29,6 +29,14 @@ def coerce_int(value: Any, default: int = 0) -> int:
         return default
 
 
+def coerce_float(value: Any, default: float | None = None) -> float | None:
+    """Return a float from loosely typed Keenetic RCI values."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def coerce_bool(value: Any) -> bool:
     """Return True only for actual truthy Keenetic-style values."""
     if isinstance(value, bool):
