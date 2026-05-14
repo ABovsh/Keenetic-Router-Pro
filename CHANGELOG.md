@@ -8,6 +8,19 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.13 - Last Seen frontend rendering hardening
+
+### Bug fixes
+
+- **Tracked-client Last Seen now avoids Home Assistant's relative-time
+  rendering more aggressively.** The entity explicitly clears `device_class`
+  and uses `DD.MM.YYYY HH:MM:SS`, so offline clients should show exact local
+  date/time instead of “15 minutes ago”.
+
+### Internal
+
+- **Regression coverage updated for the non-ISO Last Seen text format.**
+
 ## 1.7.12 - Exact tracked-client Last Seen display
 
 ### Improvements

@@ -60,5 +60,5 @@ def test_client_last_seen_sensor_is_exact_datetime_text(
         class_name,
     )
 
-    assert "_attr_device_class" not in assignments
+    assert assignments.get("_attr_device_class") == "None"
     assert "_attr_state_class" not in assignments

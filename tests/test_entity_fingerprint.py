@@ -120,7 +120,8 @@ def test_last_seen_sensor_returns_exact_datetime_for_offline_client() -> None:
 
     assert isinstance(value, str)
     assert len(value) == 19
-    parsed = datetime.strptime(value, "%Y-%m-%d %H:%M:%S")
+    assert "." in value
+    parsed = datetime.strptime(value, "%d.%m.%Y %H:%M:%S")
     assert 20 <= (datetime.now().astimezone().replace(tzinfo=None) - parsed).total_seconds() <= 40
 
 

@@ -93,6 +93,7 @@ class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
     """Local date/time when the router last saw the offline client."""
     _attr_has_entity_name = True
     _attr_icon = "mdi:clock"
+    _attr_device_class = None
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _CLIENT_FINGERPRINT_IGNORE = frozenset({"uptime"})
 
@@ -135,7 +136,7 @@ class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
         if seconds is None:
             return None
         seen_at = datetime.now().astimezone() - timedelta(seconds=seconds)
-        return seen_at.strftime("%Y-%m-%d %H:%M:%S")
+        return seen_at.strftime("%d.%m.%Y %H:%M:%S")
 
 
 class KeeneticClientRxSensor(ClientEntity, SensorEntity):
