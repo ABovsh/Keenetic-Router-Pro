@@ -8,6 +8,22 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.14 - Offline tracked-client live metric cleanup
+
+### Improvements
+
+- **Offline tracked clients now show less diagnostic noise.** Live Wi-Fi
+  session fields are unavailable when the router says the client is away:
+  Wi-Fi Session, Link Speed, RSSI, and WiFi Mode no longer show misleading
+  zero/unknown values for disconnected clients.
+- **Offline zero traffic counters are unavailable at the entity level.** When
+  Keenetic keeps an offline hotspot row with reset `rxbytes`/`txbytes`, RX/TX
+  are marked unavailable instead of appearing as meaningful live counters.
+
+### Internal
+
+- **Regression coverage added for offline live-metric availability.**
+
 ## 1.7.13 - Last Seen frontend rendering hardening
 
 ### Bug fixes

@@ -21,6 +21,11 @@ def _client_is_online(client: dict[str, Any]) -> bool:
     return coerce_bool(client.get("active"))
 
 
+def _client_has_live_session(client: dict[str, Any] | None) -> bool:
+    """Return whether live association-only client fields are meaningful."""
+    return bool(client and _client_is_online(client))
+
+
 class KeeneticClientIpSensor(ClientEntity, SensorEntity):
     """IP address sensor for client."""
     _attr_has_entity_name = True
@@ -76,6 +81,12 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
     @property
     def name(self) -> str:
         return "Wi-Fi Session"
+
+    @property
+    def available(self) -> bool:
+        return bool(getattr(super(), "available", True)) and _client_has_live_session(
+            self._client,
+        )
 
     @property
     def native_unit_of_measurement(self) -> str:
@@ -165,6 +176,15 @@ class KeeneticClientRxSensor(ClientEntity, SensorEntity):
         return "RX"
 
     @property
+    def available(self) -> bool:
+        client = self._client
+        if not client:
+            return False
+        if not _client_is_online(client) and client.get("rxbytes") in (None, "", 0, "0"):
+            return False
+        return bool(getattr(super(), "available", True))
+
+    @property
     def native_unit_of_measurement(self) -> str:
         return UnitOfInformation.GIGABYTES
 
@@ -206,6 +226,15 @@ class KeeneticClientTxSensor(ClientEntity, SensorEntity):
     @property
     def name(self) -> str:
         return "TX"
+
+    @property
+    def available(self) -> bool:
+        client = self._client
+        if not client:
+            return False
+        if not _client_is_online(client) and client.get("txbytes") in (None, "", 0, "0"):
+            return False
+        return bool(getattr(super(), "available", True))
 
     @property
     def native_unit_of_measurement(self) -> str:
@@ -251,6 +280,12 @@ class KeeneticClientRssiSensor(ClientEntity, SensorEntity):
         return "RSSI"
 
     @property
+    def available(self) -> bool:
+        return bool(getattr(super(), "available", True)) and _client_has_live_session(
+            self._client,
+        )
+
+    @property
     def native_unit_of_measurement(self) -> str:
         return "dBm"
 
@@ -290,6 +325,12 @@ class KeeneticClientTxRateSensor(ClientEntity, SensorEntity):
     @property
     def name(self) -> str:
         return "Link Speed"
+
+    @property
+    def available(self) -> bool:
+        return bool(getattr(super(), "available", True)) and _client_has_live_session(
+            self._client,
+        )
 
     @property
     def native_unit_of_measurement(self) -> str:
@@ -543,6 +584,12 @@ class KeeneticClientWifiModeSensor(ClientEntity, SensorEntity):
     @property
     def name(self) -> str:
         return "WiFi Mode"
+
+    @property
+    def available(self) -> bool:
+        return bool(getattr(super(), "available", True)) and _client_has_live_session(
+            self._client,
+        )
 
     @property
     def native_value(self) -> str | None:

@@ -7,10 +7,12 @@ from datetime import datetime
 from custom_components.keenetic_router_pro.entity import ClientEntity
 from custom_components.keenetic_router_pro.sensor.client import (
     KeeneticClientLastSeenSensor,
+    KeeneticClientRssiSensor,
     KeeneticClientRxSensor,
     KeeneticClientTxRateSensor,
     KeeneticClientTxSensor,
     KeeneticClientUptimeSensor,
+    KeeneticClientWifiModeSensor,
 )
 
 
@@ -168,6 +170,7 @@ def test_uptime_sensor_is_presented_as_wifi_session() -> None:
     """Client uptime is the current Wi-Fi connection session duration."""
     client = {
         "mac": "aa:bb:cc:00:00:01",
+        "link": "up",
         "uptime": 165,
     }
     coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
@@ -181,12 +184,34 @@ def test_uptime_sensor_is_presented_as_wifi_session() -> None:
 
     assert entity.name == "Wi-Fi Session"
     assert entity.native_value == 165
+    assert entity.available is True
+
+
+def test_uptime_sensor_is_unavailable_without_live_session() -> None:
+    """Offline clients do not have an active Wi-Fi session."""
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "active": False,
+        "uptime": 0,
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+    entity = KeeneticClientUptimeSensor(
+        coord,
+        entry,
+        "AA:BB:CC:00:00:01",
+        "phone",
+    )
+
+    assert entity.native_value == 0
+    assert entity.available is False
 
 
 def test_txrate_sensor_is_presented_as_link_speed() -> None:
     """The router's txrate value is the useful Wi-Fi link speed signal."""
     client = {
         "mac": "aa:bb:cc:00:00:01",
+        "link": "up",
         "txrate": 87,
     }
     coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
@@ -201,6 +226,27 @@ def test_txrate_sensor_is_presented_as_link_speed() -> None:
     assert entity.name == "Link Speed"
     assert entity.native_unit_of_measurement == "Mbps"
     assert entity.native_value == 87
+    assert entity.available is True
+
+
+def test_live_wifi_metrics_are_unavailable_for_offline_clients() -> None:
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "active": False,
+        "txrate": 1201,
+        "rssi": -51,
+        "mode": "11ax",
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+
+    txrate = KeeneticClientTxRateSensor(coord, entry, "AA:BB:CC:00:00:01", "phone")
+    rssi = KeeneticClientRssiSensor(coord, entry, "AA:BB:CC:00:00:01", "phone")
+    mode = KeeneticClientWifiModeSensor(coord, entry, "AA:BB:CC:00:00:01", "phone")
+
+    assert txrate.available is False
+    assert rssi.available is False
+    assert mode.available is False
 
 
 def test_offline_zero_client_traffic_is_unavailable() -> None:
@@ -219,6 +265,8 @@ def test_offline_zero_client_traffic_is_unavailable() -> None:
 
     assert rx.native_value is None
     assert tx.native_value is None
+    assert rx.available is False
+    assert tx.available is False
 
 
 def test_fingerprint_picks_up_link_and_ip_changes() -> None:
