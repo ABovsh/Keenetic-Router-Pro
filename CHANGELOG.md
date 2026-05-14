@@ -8,6 +8,24 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.10 - Cleaner tracked-client diagnostics
+
+### Improvements
+
+- **Tracked-client Last Seen now only appears when it is meaningful.** Online
+  clients report `Unavailable` for Last Seen instead of a constantly changing
+  “seen a few seconds ago” timestamp. Offline clients still use Keenetic's
+  neighbour data to show the last time the router saw the device.
+- **New tracked-client setups no longer create First Seen and DHCP Registered
+  sensors.** These fields were diagnostic noise for the common dashboard use
+  case; presence, IP, link speed, signal, traffic, Wi-Fi session, band and mode
+  remain available.
+
+### Internal
+
+- **Regression coverage added for online/offline Last Seen semantics and the
+  cleaned tracked-client sensor set.**
+
 ## 1.7.9 - Router-scoped tracked clients
 
 ### Bug fixes

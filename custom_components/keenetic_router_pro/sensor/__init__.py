@@ -69,9 +69,7 @@ from .traffic import (
 )
 from .client import (
     KeeneticClientIpSensor,
-    KeeneticClientRegisteredSensor,
     KeeneticClientUptimeSensor,
-    KeeneticClientFirstSeenSensor,
     KeeneticClientLastSeenSensor,
     KeeneticClientRxSensor,
     KeeneticClientTxSensor,
@@ -188,9 +186,7 @@ async def async_setup_entry(
         initial_ip = client_info.get("ip")
 
         entities.append(KeeneticClientIpSensor(coordinator, entry, mac, label, initial_ip))
-        entities.append(KeeneticClientRegisteredSensor(coordinator, entry, mac, label))
         entities.append(KeeneticClientUptimeSensor(coordinator, entry, mac, label))
-        entities.append(KeeneticClientFirstSeenSensor(coordinator, entry, mac, label))
         entities.append(KeeneticClientLastSeenSensor(coordinator, entry, mac, label))
         entities.append(KeeneticClientRxSensor(coordinator, entry, mac, label))
         entities.append(KeeneticClientTxSensor(coordinator, entry, mac, label))

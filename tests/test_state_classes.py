@@ -50,9 +50,9 @@ def test_uptime_sensors_use_total_increasing(
 
 @pytest.mark.parametrize(
     "class_name",
-    ["KeeneticClientFirstSeenSensor", "KeeneticClientLastSeenSensor"],
+    ["KeeneticClientLastSeenSensor"],
 )
-def test_client_seen_sensors_are_timestamps_not_duration_measurements(
+def test_client_last_seen_sensor_is_timestamp_not_duration_measurement(
     class_name: str,
 ) -> None:
     assignments = _class_assignments(

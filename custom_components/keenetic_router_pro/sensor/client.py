@@ -11,7 +11,14 @@ from homeassistant.const import UnitOfInformation, UnitOfTime, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
 from ..entity import ClientEntity
-from ..utils import coerce_seconds
+from ..utils import coerce_bool, coerce_seconds
+
+
+def _client_is_online(client: dict[str, Any]) -> bool:
+    """Return whether current router data says the tracked client is online."""
+    if str(client.get("link", "")).lower() == "up":
+        return True
+    return coerce_bool(client.get("active"))
 
 
 class KeeneticClientIpSensor(ClientEntity, SensorEntity):
@@ -41,44 +48,6 @@ class KeeneticClientIpSensor(ClientEntity, SensorEntity):
     @property
     def native_value(self) -> str | None:
         return self.ip_address
-
-
-class KeeneticClientRegisteredSensor(ClientEntity, SensorEntity):
-    """Registered status sensor (DHCP reservation)."""
-    _attr_has_entity_name = True
-    _attr_icon = "mdi:bookmark-check"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(
-        self,
-        coordinator: KeeneticCoordinator,
-        entry: ConfigEntry,
-        mac: str,
-        label: str,
-    ) -> None:
-        ClientEntity.__init__(self, coordinator, entry.entry_id, entry.title, mac, label)
-
-    @property
-    def unique_id(self) -> str:
-        return f"{self._entry_id}_client_{self._mac}_registered"
-
-    @property
-    def name(self) -> str:
-        return "DHCP Registered"
-
-    @property
-    def native_value(self) -> str:
-        client = self._client
-        if client:
-            return "yes" if client.get("registered", False) else "no"
-        return "unknown"
-
-    @property
-    def icon(self) -> str:
-        client = self._client
-        if client and client.get("registered", False):
-            return "mdi:bookmark-check"
-        return "mdi:bookmark-outline"
 
 
 class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
@@ -120,44 +89,8 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
         return coerce_seconds(client.get("uptime"), default=0) or 0
 
 
-class KeeneticClientFirstSeenSensor(ClientEntity, SensorEntity):
-    """Timestamp when the router first discovered the client."""
-    _attr_has_entity_name = True
-    _attr_icon = "mdi:clock-start"
-    _attr_device_class = SensorDeviceClass.TIMESTAMP
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _CLIENT_FINGERPRINT_IGNORE = frozenset({"last-seen", "uptime"})
-
-    def __init__(
-        self,
-        coordinator: KeeneticCoordinator,
-        entry: ConfigEntry,
-        mac: str,
-        label: str,
-    ) -> None:
-        ClientEntity.__init__(self, coordinator, entry.entry_id, entry.title, mac, label)
-
-    @property
-    def unique_id(self) -> str:
-        return f"{self._entry_id}_client_{self._mac}_first_seen"
-
-    @property
-    def name(self) -> str:
-        return "First Seen"
-
-    @property
-    def native_value(self) -> datetime | None:
-        client = self._client
-        if not client:
-            return None
-        seconds = coerce_seconds(client.get("first-seen"), default=None)
-        if seconds is None:
-            return None
-        return datetime.now(timezone.utc) - timedelta(seconds=seconds)
-
-
 class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
-    """Timestamp when the router last saw the client."""
+    """Timestamp when the router last saw the offline client."""
     _attr_has_entity_name = True
     _attr_icon = "mdi:clock"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
@@ -185,6 +118,8 @@ class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
     def native_value(self) -> datetime | None:
         client = self._client
         if not client:
+            return None
+        if _client_is_online(client):
             return None
         seconds = coerce_seconds(client.get("last-seen"), default=None)
         if seconds is None:
