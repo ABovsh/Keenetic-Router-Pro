@@ -388,6 +388,51 @@ def test_coordinator_fast_refresh_reuses_slow_cached_data_and_rates() -> None:
     assert second["crypto_maps"]["SITE"]["tx_throughput"] == 8.0
 
 
+def test_coordinator_fast_refresh_does_not_mutate_cached_crypto_maps() -> None:
+    """Fast ticks should copy cached slow data before enrichment."""
+    client = FakeKeeneticClient()
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+
+    first = asyncio.run(coordinator._async_update_data())
+    first["crypto_maps"]["SITE"]["_sample_ts"] = 1.0
+    first["crypto_maps"]["SITE"]["rx_throughput"] = 7.0
+    first["crypto_maps"]["SITE"]["tx_throughput"] = 8.0
+    coordinator.data = first
+    coordinator._refresh_count = 1
+
+    second = asyncio.run(coordinator._async_update_data())
+
+    assert second["crypto_maps"] is not first["crypto_maps"]
+    assert second["crypto_maps"]["SITE"] is not first["crypto_maps"]["SITE"]
+    assert first["crypto_maps"]["SITE"]["rx_throughput"] == 7.0
+    assert first["crypto_maps"]["SITE"]["tx_throughput"] == 8.0
+
+
+def test_coordinator_tolerates_malformed_optional_dict_payloads() -> None:
+    """Optional diagnostic endpoints should not break the whole refresh."""
+    client = FakeKeeneticClient()
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+
+    async def malformed_crypto_maps() -> dict[str, Any]:
+        return {
+            "BROKEN": {"connected": False},
+            "SKIP": "not-a-map",
+        }
+
+    async def malformed_ping_check_status() -> list[Any]:
+        return ["not-a-dict"]
+
+    client.async_get_crypto_maps = malformed_crypto_maps  # type: ignore[assignment]
+    client.async_get_ping_check_status = malformed_ping_check_status  # type: ignore[assignment]
+
+    data = asyncio.run(coordinator._async_update_data())
+
+    assert data["crypto_maps"]["BROKEN"]["rx_throughput"] == 0.0
+    assert data["crypto_maps"]["BROKEN"]["tx_throughput"] == 0.0
+    assert "SKIP" not in data["crypto_maps"]
+    assert data["wan_interfaces"][0]["ping_check"] is None
+
+
 def test_coordinator_preserves_tracked_client_presence_on_fetch_failure() -> None:
     """A transient client-table failure must not emit false away events."""
     client = FakeKeeneticClient()

@@ -97,6 +97,11 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
         return f"{self._entry_id}_client_{self._mac}"
 
     @property
+    def available(self) -> bool:
+        """Keep tracked clients available so missing router rows render as Away."""
+        return bool(getattr(self.coordinator, "last_update_success", True))
+
+    @property
     def mac_address(self) -> str:
         return self._mac
 

@@ -87,6 +87,27 @@ def test_client_policy_select_maps_options_and_refreshes_after_change() -> None:
     assert entity.current_option == "Deny (Blocked)"
 
 
+def test_client_policy_select_is_unavailable_when_client_row_disappears() -> None:
+    """Policy controls need a live client row before sending router commands."""
+    entry = _entry()
+    coordinator = _coordinator()
+    entity = KeeneticClientPolicySelect(
+        coordinator=coordinator,
+        entry=entry,
+        api_client=SimpleNamespace(),
+        mac="aa:bb:cc:dd:ee:ff",
+        label="Tablet",
+        initial_ip="192.0.2.10",
+        policies={"Policy1": "VPN"},
+    )
+
+    assert entity.available is True
+
+    coordinator.data["clients_by_mac"] = {}
+
+    assert entity.available is False
+
+
 def test_client_policy_setup_deduplicates_same_mac_variants() -> None:
     """One client tracked on one router should create one policy select."""
     coordinator = _coordinator()
@@ -238,4 +259,22 @@ def test_client_tracker_marks_missing_client_away() -> None:
     )
 
     assert tracker.is_connected is False
+    assert tracker.available is True
     assert tracker.extra_state_attributes["presence_source"] == "missing"
+
+
+def test_client_tracker_follows_coordinator_availability() -> None:
+    """Router-update failures should make the tracker unavailable, not away."""
+    entry = _entry()
+    coordinator = _coordinator()
+    coordinator.last_update_success = False
+
+    tracker = KeeneticClientTracker(
+        coordinator=coordinator,
+        entry=entry,
+        mac="aa:bb:cc:dd:ee:ff",
+        label="Tablet",
+        initial_ip="192.0.2.10",
+    )
+
+    assert tracker.available is False

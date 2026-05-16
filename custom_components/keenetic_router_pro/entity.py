@@ -279,7 +279,7 @@ class CryptoMapEntity(CoordinatorEntity):
         # that our tunnel is still present in the router config. If
         # the user deletes the crypto map, our entities become
         # unavailable rather than stale.
-        return super().available and self._cmap is not None
+        return bool(getattr(super(), "available", True)) and self._cmap is not None
 
     @property
     def device_info(self) -> DeviceInfo:

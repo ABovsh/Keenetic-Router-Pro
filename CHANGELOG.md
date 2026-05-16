@@ -16,6 +16,16 @@ git log.
   environment.** Client entities now expose a shared base availability property,
   matching the mesh/WAN entity pattern and keeping RX/TX, RSSI, Link Speed,
   Wi-Fi Session and Last Seen availability checks stable in CI.
+- **Kept tracked device trackers available when a client disappears from the
+  router table.** Missing clients now continue to render as Away instead of
+  becoming Unavailable, while real coordinator failures still mark the tracker
+  unavailable.
+- **Hardened optional coordinator payloads.** Malformed ping-check, DNS, IPsec,
+  interface-stat and crypto-map diagnostic payloads now fall back to empty data
+  instead of breaking the refresh tick.
+- **Stopped fast refreshes from mutating cached crypto-map data in place.**
+  Cached site-to-site IPsec data is copied before enrichment, and incomplete
+  crypto-map counter rows no longer raise errors.
 
 ## 1.7.18 - Lifecycle and update action test hardening
 

@@ -169,4 +169,4 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        return self._client is not None
+        return super().available

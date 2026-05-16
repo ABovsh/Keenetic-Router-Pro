@@ -10,6 +10,7 @@ import pytest
 from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.keenetic_router_pro.binary_sensor import (
+    KeeneticCryptoMapConnectedSensor,
     KeeneticWanConnectedSensor,
     _add_mesh_binary_sensors,
 )
@@ -112,6 +113,30 @@ def test_wan_connected_sensor_exposes_pending_as_unavailable() -> None:
     assert sensor.extra_state_attributes["failure_reason"].startswith(
         "ping check failing"
     )
+
+
+def test_crypto_map_connected_sensor_unavailable_when_map_disappears() -> None:
+    """Deleted IPsec crypto-map rows should not leave stale connected sensors."""
+    entry = _entry()
+    coordinator = _coordinator(
+        {
+            "crypto_maps": {
+                "OfficeVPN": {
+                    "connected": True,
+                    "state": "PHASE2_ESTABLISHED",
+                }
+            }
+        }
+    )
+    sensor = KeeneticCryptoMapConnectedSensor(coordinator, entry, "OfficeVPN")
+
+    assert sensor.available is True
+    assert sensor.is_on is True
+
+    coordinator.data["crypto_maps"] = {}
+
+    assert sensor.available is False
+    assert sensor.is_on is False
 
 
 def test_reported_latest_version_handles_channel_downgrade(monkeypatch: pytest.MonkeyPatch) -> None:

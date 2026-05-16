@@ -51,6 +51,11 @@ def _first_stat_int(stats: dict[str, Any], *keys: str) -> int:
     return 0
 
 
+def _dict_or_empty(value: Any) -> dict[str, Any]:
+    """Return a dict payload, or an empty dict for malformed endpoint data."""
+    return value if isinstance(value, dict) else {}
+
+
 def _counter_rate_bytes_per_second(
     current: int,
     previous: Any,
@@ -312,24 +317,32 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ip_neighbours = _ok("ip_neighbours", ip_neighbours, [], silent=True)
         clients = _merge_clients_with_neighbours(clients, ip_neighbours)
         mesh_nodes = _ok("mesh_nodes", mesh_nodes, [])
-        host_policies = _ok("host_policies", host_policies, {})
-        ndns_info = _ok("ndns_info", ndns_info, {})
-        ping_check_status = _ok("ping_check_status", ping_check_status, {})
+        host_policies = _dict_or_empty(_ok("host_policies", host_policies, {}))
+        ndns_info = _dict_or_empty(_ok("ndns_info", ndns_info, {}))
+        ping_check_status = _dict_or_empty(
+            _ok("ping_check_status", ping_check_status, {})
+        )
         # Crypto maps: not every router/firmware has the IPsec component,
         # so this endpoint may be unavailable. Mark the fetch as silent
         # so an absent endpoint doesn't produce a warning on every tick —
         # the api layer already debug-logs the reason.
-        crypto_maps = _ok(
-            "crypto_maps", crypto_maps, {}, silent=True
-        )
+        crypto_maps = {
+            name: dict(cmap)
+            for name, cmap in _dict_or_empty(
+                _ok("crypto_maps", crypto_maps, {}, silent=True)
+            ).items()
+            if isinstance(cmap, dict)
+        }
         # DNS proxy is diagnostic-only and intentionally slow-cadence;
         # routers without the endpoint should not warn every refresh.
-        dns_proxy = _ok("dns_proxy", dns_proxy, {}, silent=True)
+        dns_proxy = _dict_or_empty(
+            _ok("dns_proxy", dns_proxy, {}, silent=True)
+        )
         # IPsec diagnostics read recent router log lines on the same
         # very-slow cadence as DNS diagnostics. Missing log access is
         # non-critical and should not affect normal polling.
-        ipsec_diagnostics = _ok(
-            "ipsec_diagnostics", ipsec_diagnostics, {}, silent=True
+        ipsec_diagnostics = _dict_or_empty(
+            _ok("ipsec_diagnostics", ipsec_diagnostics, {}, silent=True)
         )
 
         # Fail-fast on critical fetches. If the router is unreachable,
@@ -389,11 +402,11 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         wifi = _ok("wifi", wifi, [])
         wireguard = _ok("wireguard", wireguard, [])
         vpn_tunnels = _ok("vpn_tunnels", vpn_tunnels, [])
-        wan_status = _ok("wan_status", wan_status, {})
+        wan_status = _dict_or_empty(_ok("wan_status", wan_status, {}))
         wan_interfaces = _ok("wan_interfaces", wan_interfaces, [])
-        traffic_stats = _ok("traffic_stats", traffic_stats, {})
-        port_info = _ok("port_info", port_info, {})
-        interface_stats = _ok("interface_stats", interface_stats, {})
+        traffic_stats = _dict_or_empty(_ok("traffic_stats", traffic_stats, {}))
+        port_info = _dict_or_empty(_ok("port_info", port_info, {}))
+        interface_stats = _dict_or_empty(_ok("interface_stats", interface_stats, {}))
 
         # Emit a single aggregated warning per tick for any non-critical
         # fetches that fell back to defaults. Keeping this above debug
@@ -526,12 +539,12 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if prev_cmap and prev_cmap.get("_sample_ts"):
                 dt = now_ts - float(prev_cmap.get("_sample_ts") or 0)
                 cmap["rx_throughput"] = _counter_rate_bytes_per_second(
-                    cmap["rx_bytes"],
+                    _to_int(cmap.get("rx_bytes")),
                     prev_cmap.get("rx_bytes"),
                     dt,
                 )
                 cmap["tx_throughput"] = _counter_rate_bytes_per_second(
-                    cmap["tx_bytes"],
+                    _to_int(cmap.get("tx_bytes")),
                     prev_cmap.get("tx_bytes"),
                     dt,
                 )
