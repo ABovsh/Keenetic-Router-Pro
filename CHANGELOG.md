@@ -8,14 +8,13 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
-## 1.7.19 - Tracked-client availability test fix
+## 1.7.19 - Tracked-client and coordinator stability
 
 ### Bug fixes
 
-- **Fixed tracked-client diagnostic sensors in the lightweight test
-  environment.** Client entities now expose a shared base availability property,
-  matching the mesh/WAN entity pattern and keeping RX/TX, RSSI, Link Speed,
-  Wi-Fi Session and Last Seen availability checks stable in CI.
+- **Tracked-client diagnostic sensors now handle availability consistently.**
+  RX/TX, RSSI, Link Speed, Wi-Fi Session and Last Seen now use the same
+  availability rules when the router data changes or a client disappears.
 - **Kept tracked device trackers available when a client disappears from the
   router table.** Missing clients now continue to render as Away instead of
   becoming Unavailable, while real coordinator failures still mark the tracker
@@ -27,19 +26,7 @@ git log.
   Cached site-to-site IPsec data is copied before enrichment, and incomplete
   crypto-map counter rows no longer raise errors.
 
-## 1.7.18 - Lifecycle and update action test hardening
-
-### Internal
-
-- **Added lifecycle tests for integration startup, platform forwarding, repair
-  issue handling, auth/API error mapping, unload cleanup and new-device events.**
-  These tests protect the code paths that run during HA reloads and first setup.
-- **Added firmware update action tests for router and mesh update flows.** The
-  suite now checks no-progress reboot fallback, rejected update commands,
-  missing mesh node IPs and mesh refresh-until-updated behavior without slow
-  sleeps.
-
-## 1.7.17 - Efficient test coverage and payload hardening
+## 1.7.17 - Router payload hardening
 
 ### Bug fixes
 
@@ -55,14 +42,7 @@ git log.
 - **Mesh and main-router port sensors now ignore malformed port rows.**
   Existing valid ports still render normally.
 
-### Internal
-
-- **Added Graphify-guided high-value tests for coordinator edge cases, sensor
-  setup, dynamic listeners and malformed sensor values.** The tests use small
-  fakes and captured callbacks instead of slow HA bootstrapping, so the suite
-  remains fast while checking more behavior.
-
-## 1.7.16 - Graphify-guided sensor hardening
+## 1.7.16 - Sensor payload hardening
 
 ### Bug fixes
 
@@ -77,13 +57,7 @@ git log.
   normalized raw-list fallback instead of assuming every indexed value is a
   dict.
 
-### Internal
-
-- **Refactor pass was guided by the refreshed local Graphify graph.** The graph
-  pointed at `entity.py`, `sensor/client.py`, `sensor/mesh.py`, and
-  `sensor/system.py` as practical non-API hubs for low-risk cleanup.
-
-## 1.7.15 - Tracked-client cleanup and parsing hardening
+## 1.7.15 - Tracked-client parsing hardening
 
 ### Bug fixes
 
@@ -95,14 +69,7 @@ git log.
   precomputed MAC index, `AA-BB-...`, `aa:bb:...`, and compact MAC forms still
   resolve to the same tracked client.
 
-### Internal
-
-- **Tracked-client sensor code now shares byte-counter, live-session, and
-  Wi-Fi-band helpers.** This keeps offline/live availability rules in one
-  place and reduces drift between RX/TX, RSSI, Link Speed, Wi-Fi Band and
-  WiFi Mode sensors.
-
-## 1.7.14 - Offline tracked-client live metric cleanup
+## 1.7.14 - Offline tracked-client live metrics
 
 ### Improvements
 
@@ -114,10 +81,6 @@ git log.
   Keenetic keeps an offline hotspot row with reset `rxbytes`/`txbytes`, RX/TX
   are marked unavailable instead of appearing as meaningful live counters.
 
-### Internal
-
-- **Regression coverage added for offline live-metric availability.**
-
 ## 1.7.13 - Last Seen frontend rendering hardening
 
 ### Bug fixes
@@ -127,10 +90,6 @@ git log.
   and uses `DD.MM.YYYY HH:MM:SS`, so offline clients should show exact local
   date/time instead of “15 minutes ago”.
 
-### Internal
-
-- **Regression coverage updated for the non-ISO Last Seen text format.**
-
 ## 1.7.12 - Exact tracked-client Last Seen display
 
 ### Improvements
@@ -139,10 +98,6 @@ git log.
   Assistant timestamp sensors are commonly rendered as relative text such as
   “9 minutes ago”, so Last Seen is now exposed as formatted diagnostic text
   (`YYYY-MM-DD HH:MM:SS`) while still remaining unavailable for online clients.
-
-### Internal
-
-- **Regression coverage updated for exact Last Seen display.**
 
 ## 1.7.11 - Offline tracked-client Last Seen fix
 
@@ -164,12 +119,6 @@ git log.
   values.** If Keenetic resets `rxbytes`/`txbytes` to zero for an offline
   hotspot row, RX/TX become unavailable rather than misleading.
 
-### Internal
-
-- **Regression coverage added for parse fallback neighbour payloads, offline
-  neighbour timestamp priority, online Last Seen availability, and offline
-  zero traffic counters.**
-
 ## 1.7.10 - Cleaner tracked-client diagnostics
 
 ### Improvements
@@ -182,11 +131,6 @@ git log.
   sensors.** These fields were diagnostic noise for the common dashboard use
   case; presence, IP, link speed, signal, traffic, Wi-Fi session, band and mode
   remain available.
-
-### Internal
-
-- **Regression coverage added for online/offline Last Seen semantics and the
-  cleaned tracked-client sensor set.**
 
 ## 1.7.9 - Router-scoped tracked clients
 
@@ -204,11 +148,6 @@ git log.
 - **Placeholder IP addresses are no longer treated as real client IPs.**
   `0.0.0.0` and `::` are ignored for tracked-client setup, entity IP values,
   and configuration URLs.
-
-### Internal
-
-- **Regression coverage added for router-scoped client device identity and
-  duplicate tracked-client policy setup.**
 
 ## 1.7.8 - Better tracked-client seen times
 
@@ -229,12 +168,6 @@ git log.
   `neighbour_wireless`, and `neighbour_leasetime` attributes to make offline
   troubleshooting easier.
 
-### Internal
-
-- **Regression coverage added for `show ip neighbour` parsing and client data
-  merging.** Tests cover offline neighbour fallback, online hotspot priority,
-  timestamp seen sensors, and neighbour-expired away state.
-
 ## 1.7.7 - Presence and polling safety fixes
 
 ### Bug fixes
@@ -247,11 +180,6 @@ git log.
   Large interface batches are limited to four in-flight per-interface stat
   requests, matching the coordinator's RCI concurrency guard.
 
-### Internal
-
-- **Regression coverage added for stale client snapshots and interface-stat
-  concurrency limits.**
-
 ## 1.7.6 - Cleaner tracked-client diagnostics
 
 ### Improvements
@@ -262,11 +190,6 @@ git log.
 - **Renamed tracked-client TX Rate to Link Speed.** For Wi-Fi clients,
   Keenetic's `txrate` is the useful current link-speed signal shown in Mbps, so
   the entity now uses the clearer dashboard label.
-
-### Internal
-
-- **Regression coverage updated to 173 lightweight tests.** New tests guard the
-  simplified tracked-client sensor set and the Link Speed presentation.
 
 ## 1.7.5 - Router-based tracked-client presence
 
@@ -292,13 +215,6 @@ git log.
   low-value `First Seen`, `Link Speed`, or `Port` tracked-client sensors by
   default, because they commonly showed raw seconds or `unknown` for Wi-Fi
   clients.
-
-### Internal
-
-- **Regression coverage updated to 172 lightweight tests.** New tests cover
-  router-link presence, `active=true` fallback, missing-client away state,
-  timestamp `Last Seen`, removal of ping runtime state, and the simplified
-  tracked-client sensor set.
 
 ## 1.7.4 - Payload parsing, options, and Ping Check hardening
 
@@ -330,19 +246,6 @@ git log.
   Assistant events still contain the full data for automations, but info logs
   now use masked suffixes.
 
-### Internal
-
-- **Coverage baseline added to CI.** The test workflow now runs coverage and
-  fails if the project drops below the current meaningful baseline.
-- **Shared router-value normalization helpers added.** String/int/bool
-  coercion used by API parsing now lives in one utility surface so future
-  firmware payload variants are easier to cover consistently.
-- **Regression coverage increased to 174 lightweight tests.** New tests cover
-  coordinator staged updates, tracked-client policy/presence entities,
-  WireGuard sensors, dynamic mesh platform helpers, RCI payload shapes, MWS
-  payload variants, update progress parsing, Ping Check semantics, config and
-  options helpers, and privacy-oriented log masking.
-
 ## 1.7.3 - State freshness and direct mesh update hardening
 
 ### Bug fixes
@@ -359,12 +262,6 @@ git log.
   node rotates its auth cookie during challenge auth, the integration now keeps
   the final cookie. If a cached cookie expires during direct node update calls,
   the cache is invalidated so the next attempt can authenticate cleanly.
-
-### Internal
-
-- **Graphify refreshed after the second review pass.** The current graph is
-  1427 nodes, 2277 edges, and 188 communities.
-- **Regression coverage increased to 118 lightweight tests.**
 
 ## 1.7.2 - Stability fixes for mesh, auth, and translations
 
@@ -393,26 +290,22 @@ git log.
 - **Mesh entities are added dynamically.** Newly discovered mesh nodes and
   mesh ports are added by coordinator listeners across sensor, binary sensor,
   button, and update platforms without requiring a Home Assistant restart.
-- **Project-local test tooling added.** `requirements-dev.txt` and GitHub
-  Actions CI now run compile checks and the lightweight HA-stubbed test suite.
 
 ## 1.7.1 - HACS validation fixes for 1.7.0
 
 Hotfix for two HACS validation errors that 1.7.0 tripped:
 
 - **`min_ha_version` is not a valid `manifest.json` key** — that field
-  is reserved for HA core's internal integration manifests, not custom
-  components. The minimum HA version is now declared in `hacs.json`
-  via the standard `homeassistant: "2024.5.0"` key, which is what
-  HACS actually reads.
+  is not accepted for custom integrations. The minimum HA version is now
+  declared in `hacs.json` via the standard `homeassistant: "2024.5.0"` key,
+  which is what HACS actually reads.
 - **`CONFIG_SCHEMA` warning** — hassfest requires every integration
   that defines `async_setup` to declare a config schema, even when
   it has no YAML support. The integration root now exposes
   `CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)` — the
   canonical "UI-only, no YAML" helper.
 
-No user-visible behaviour change vs 1.7.0; this release exists so the
-HACS marketplace stops rejecting installs.
+This release exists so HACS accepts installs again.
 
 ## 1.7.0 - Hardening, modern HA APIs, and statistics fixes
 
@@ -434,9 +327,7 @@ HACS marketplace stops rejecting installs.
   update flow, and config flow now re-raises `asyncio.CancelledError`
   before falling through to its generic handler. The old broad catch
   swallowed HA's shutdown signal during integration reload, sometimes
-  producing hangs that needed a HA restart to resolve. A new
-  `tests/test_cancellation_safety.py` parses the source and fails CI
-  if a regression slips back in.
+  producing hangs that needed a HA restart to resolve.
 
 ### 🐛 Bug fixes
 
@@ -456,48 +347,15 @@ HACS marketplace stops rejecting installs.
 
 ### ✨ Improvements
 
-- **`runtime_data` migration.** The integration now stores its API
-  client and coordinators on `entry.runtime_data` instead of
-  `hass.data[DOMAIN][entry.entry_id]`. Cleaner platform setup, less
-  bookkeeping in `async_unload_entry`, and the data is automatically
-  dropped by HA when the entry is removed. No user-visible change —
-  but if you happen to write blueprints or scripts that poke at
+- **Modern Home Assistant runtime storage.** The integration now uses
+  Home Assistant's current config-entry runtime storage. If you happen to
+  write custom blueprints or scripts that poke at
   `hass.data["keenetic_router_pro"]`, they need updating.
 - **`min_ha_version: 2024.5.0` declared in the manifest.** HACS will
   refuse to install on older HA cores rather than letting you hit a
   cryptic `runtime_data` AttributeError at setup time.
 
-### 🔧 Internal
-
-- **Test suite grew from 67 to 81 tests** (one skipped — needs full
-  HA env). New regression guards: cancellation propagation in hot-
-  path modules, `runtime_data` shape, modern config-flow pattern,
-  uptime state classes, and `clients_by_mac` precomputed lookup.
-- **Coordinator parallelism audit (no code change).** The Stage 1 +
-  Stage 2 + Stage 3 pipeline already uses `asyncio.gather(...,
-  return_exceptions=True)` with critical-fetch fail-fast and a
-  single aggregated warning per tick — confirmed during this audit
-  and now exercised by the cancellation-safety tests.
-
-### Deferred
-
-- **`api.py` module split.** The 2 985-line `api.py` is the codebase's
-  largest file. A clean split would move the `_validate_cli_arg`,
-  `_response_summary`, `_payload_summary` helpers into their own
-  module and break the `KeeneticClient` class apart by RCI surface
-  (read / write / parse / redact). The unit tests import the helpers
-  by their current names, so the move requires careful re-export
-  scaffolding. Punted to a 2.0 release rather than risk a bad split
-  in this minor.
-- **Generic `RetryableEndpoint` wrapper for endpoint auto-discovery.**
-  Initially planned, but the two candidate sites (mesh-node fallback,
-  VPN-tunnel discovery) need different cache semantics — one caches
-  "endpoint unsupported", the other doesn't. A wrapper covering both
-  would be either too thin to be useful or too magic to be readable.
-  Per the "don't abstract for fewer than three sites" rule, the
-  explicit code is better.
-
-## 1.6.8 - Performance refactor
+## 1.6.8 - Performance improvements
 
 ### Performance
 
@@ -522,22 +380,9 @@ HACS marketplace stops rejecting installs.
   accepts a pre-fetched `clients=` argument so we don't re-call
   `async_get_clients()` when the coordinator just fetched it.
 
-### Internal
-
-- Migrated `async_timeout` → stdlib `asyncio.timeout` (Python 3.11+).
-- Centralized magic strings (`WAN_STATUS_*`, `IPSEC_STATE_ESTABLISHED`,
-  `TRUTHY_STRINGS`, RCI paths) in `const.py`.
-- Extracted `normalize_mac`, `find_client_by_mac`, `parse_memory_fraction`
-  helpers into `utils.py` with unit tests.
-- Removed dead duplicate `Mesh*` sensor classes from `sensor/system.py`.
-- Narrowed bare `except:` in API helpers to log at debug.
-- Added pytest coverage: `test_utils.py` and `test_entity_fingerprint.py`,
-  plus extended `test_api_helpers.py` for the iface_list short-circuit and
-  parallel interface-stats paths.
-
 ### Notes
 
-- No user-facing config changes. Entity unique IDs preserved.
+- Configuration is unchanged and entity unique IDs are preserved.
 - 1.6.6 mesh `device_info` None-guard and 1.6.7 plaintext-HTTP repair card
   are preserved.
 
@@ -554,7 +399,7 @@ HACS marketplace stops rejecting installs.
   reconfigure the entry to use HTTPS. No configuration changes required —
   existing setups will see the card on next reload.
 
-## 1.6.6 - Internal cleanup and bug fixes
+## 1.6.6 - Mesh and client bug fixes
 
 ### Fixes
 
@@ -566,17 +411,6 @@ HACS marketplace stops rejecting installs.
   loop in `async_get_clients` previously caught `Exception` indiscriminately,
   hiding unexpected errors; it now narrows to `KeeneticApiError` and logs
   fallthroughs at debug level.
-
-### Improvements
-
-- **Internal refactor and dead-code removal.** Removed an unused duplicate
-  `dns.py` module, several unreferenced API helpers
-  (`async_check_firmware_update`, `async_get_client_stats`, `async_ping_ip`,
-  `async_ping_multiple`, `async_set_wireguard_enabled`), unused imports and
-  dead helper properties. No user-facing entities or unique IDs changed.
-- **Tighter `ControllerEntity` model lookup.** The `_model_name` helper now
-  iterates a single tuple of candidate keys instead of a fall-through ladder.
-- **De-duplicated mesh-association math** in the "router clients" sensor.
 
 ## 1.6.5 - IPsec VICI diagnostics
 
@@ -599,7 +433,7 @@ HACS marketplace stops rejecting installs.
   while keeping the existing direct/local API mode unchanged.
 - **Setup and reconfigure now show mode-specific fields.** KeenDNS protected
   mode hides direct-only port, SSL and challenge-auth options and uses the
-  tested HTTPS/443 Basic Auth defaults automatically.
+  HTTPS/443 Basic Auth defaults automatically.
 - **Full URL input is normalized safely.** Setup and reconfigure accept either
   a bare host name or a full `https://...` URL, reject paths/query strings, and
   store a clean host/port/SSL target.
@@ -609,8 +443,8 @@ HACS marketplace stops rejecting installs.
 
 ### Documentation
 
-- Documented the tested protected-access setup and the minimal `HTTP Proxy`
-  permission observed to allow full proxied RCI access.
+- Documented the protected-access setup and the minimal `HTTP Proxy`
+  permission needed for full proxied RCI access.
 - Added a warning that verbose curl logs expose Basic Auth headers and should
   be followed by password rotation when shared.
 
@@ -672,18 +506,12 @@ HACS marketplace stops rejecting installs.
   requests from the router's own stats so you can build Home Assistant
   automations around DNS/DoH trouble without scraping router logs.
 
-### Internal
-
-- DNS proxy health is polled on the existing slow coordinator cadence and reuses
-  Keenetic RCI state (`show dns-proxy`), so it does not add a separate polling
-  loop or parse local Home Assistant logs.
-
 ## 1.5.1 - Stability and reload hygiene
 
 ### Bug fixes
 
 - **Memory leak when reloading the integration** — every "Reload" action (or
-  options-flow change, which reloads under the hood) used to leave behind an
+  options-flow change, which reloads the integration) used to leave behind an
   invisible event listener bound to the previous coordinator. Over enough
   reloads this could grow Home Assistant's memory footprint and cause
   duplicate "new device" events. The listener is now properly unregistered
@@ -706,11 +534,6 @@ HACS marketplace stops rejecting installs.
   unexpected exception happens during initial config-flow setup. The
   traceback was already included; the duplicate string is gone.
 
-### Internal
-
-- Removed dead code paths and a redundant attribute declaration on the
-  device-tracker entity. No behaviour change.
-
 ## 1.5.0 - Security hardening
 
 ### Security
@@ -727,10 +550,10 @@ HACS marketplace stops rejecting installs.
   the initial setup, re-auth and reconfigure dialogs is now a proper
   password input — characters render as dots instead of plain text. Prevents
   shoulder-surfing and accidental screenshot leaks during setup.
-- **Internal client object can no longer leak credentials in logs.** A
-  defensive change so that any stray debug-log line or traceback that
-  includes the API client object now shows `<redacted>` for username and
-  password (host/port/SSL stay visible for troubleshooting).
+- **Router client details can no longer leak credentials in logs.** If a
+  debug-log line or traceback includes the API client object, username and
+  password now show as `<redacted>` while host/port/SSL stay visible for
+  troubleshooting.
 
 ### Documentation
 
@@ -748,7 +571,7 @@ HACS marketplace stops rejecting installs.
   previously shared a diagnostics dump publicly, consider rotating your
   router password as a precaution.
 
-## 1.4.0 - Bug fixes, throughput units, and code cleanup
+## 1.4.0 - Bug fixes and throughput units
 
 ### Bug fixes
 
@@ -761,9 +584,8 @@ HACS marketplace stops rejecting installs.
   rotated the password on a mesh node, the integration kept using the old
   cached auth token until you restarted Home Assistant. The bad token is
   now evicted automatically on the first `401 Unauthorized` response.
-- **Local-IP sensor is more robust to internal refactors.** A small
-  encapsulation fix that prevents the sensor from breaking if an internal
-  attribute on the API client is ever renamed.
+- **Local-IP sensor is more robust across upgrades.** The sensor no longer
+  depends on a fragile API-client attribute name.
 
 ### Improvements
 
@@ -773,16 +595,6 @@ HACS marketplace stops rejecting installs.
   in Mbit/s with two decimal places, and Home Assistant offers automatic
   unit conversion (kbit/s ↔ Mbit/s ↔ Gbit/s) directly in the entity
   customisation dialog — no template tricks needed.
-
-### Internal
-
-- Removed redundant initialisations in the device-tracker entity; cleaned
-  up a few useless f-strings; replaced legacy `Dict[...]` / `Optional[...]`
-  type annotations with the modern built-in syntax; translated leftover
-  Russian/Turkish comments to English. Coordinator fast-tick made cheaper
-  by collapsing three no-op async wrappers into one sync precomputation.
-
----
 
 ## 1.3.0 - Fork hardening and performance
 
@@ -839,11 +651,3 @@ history carry over unchanged from the upstream version.
 - Lighter, more practical README focused on install / config /
   troubleshooting.
 - Manifest documentation and issue-tracker links repointed to the fork.
-
-### Tests and tooling
-
-- Added a lightweight pytest suite covering CLI argument validation,
-  Basic Auth header generation, interface normalisation, client-stat
-  summaries, and log/payload redaction.
-- GitHub Actions workflow now runs `compileall` and the pytest suite on
-  every push.
