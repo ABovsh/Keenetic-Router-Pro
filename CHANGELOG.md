@@ -8,6 +8,15 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.19 - Tracked-client availability test fix
+
+### Bug fixes
+
+- **Fixed tracked-client diagnostic sensors in the lightweight test
+  environment.** Client entities now expose a shared base availability property,
+  matching the mesh/WAN entity pattern and keeping RX/TX, RSSI, Link Speed,
+  Wi-Fi Session and Last Seen availability checks stable in CI.
+
 ## 1.7.18 - Lifecycle and update action test hardening
 
 ### Internal

@@ -354,6 +354,10 @@ class ClientEntity(CoordinatorEntity):
         return find_client_by_mac(data.get("clients"), self._mac)
 
     @property
+    def available(self) -> bool:
+        return bool(getattr(super(), "available", True)) and self._client is not None
+
+    @property
     def device_info(self) -> DeviceInfo:
         client = self._client
         return get_client_device_info(
