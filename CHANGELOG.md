@@ -8,6 +8,16 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.22 - Restore _normalize_interfaces shim
+
+### Bug fixes
+
+- **Coordinator setup no longer fails with `AttributeError: 'KeeneticClient'
+  object has no attribute '_normalize_interfaces'`.** The 1.7.21 refactor
+  lifted `_normalize_interfaces` to a module-level helper but the coordinator
+  still calls it via the client. Restored a thin back-compat method on
+  `KeeneticClient` that delegates to the module-level function.
+
 ## 1.7.21 - Internal refactor groundwork
 
 ### Internal

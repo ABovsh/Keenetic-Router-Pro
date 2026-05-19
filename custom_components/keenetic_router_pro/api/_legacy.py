@@ -99,6 +99,14 @@ class KeeneticClient:
 
     __str__ = __repr__
 
+    def _normalize_interfaces(self, raw: Any) -> List[Dict[str, Any]]:
+        """Back-compat shim — delegates to module-level helper.
+
+        Kept on the class because coordinator.py calls it as
+        `self.client._normalize_interfaces(...)`.
+        """
+        return _normalize_interfaces(raw)
+
     def _basic_auth_headers(self) -> Dict[str, str]:
         """Return Basic auth headers without exposing credentials to logs."""
         auth_string = base64.b64encode(
