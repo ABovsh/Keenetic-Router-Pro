@@ -1,6 +1,7 @@
 """Utilities for Keenetic Router Pro integration."""
 from __future__ import annotations
 
+import math
 import re
 from typing import Any
 from .const import DOMAIN, TRUTHY_STRINGS
@@ -16,8 +17,16 @@ def coerce_seconds(value: Any, default: int | None = 0) -> int | None:
         return default
 
     try:
-        return int(float(value))
+        as_float = float(value)
     except (TypeError, ValueError):
+        return default
+    # ``int(float("inf"))`` raises OverflowError, and NaN/inf is never a
+    # meaningful uptime. Treat both as missing so HA sees a clean default.
+    if not math.isfinite(as_float):
+        return default
+    try:
+        return int(as_float)
+    except (OverflowError, ValueError):
         return default
 
 
@@ -30,11 +39,19 @@ def coerce_int(value: Any, default: int = 0) -> int:
 
 
 def coerce_float(value: Any, default: float | None = None) -> float | None:
-    """Return a float from loosely typed Keenetic RCI values."""
+    """Return a float from loosely typed Keenetic RCI values.
+
+    NaN and infinity are rejected: HA recorder/statistics cannot store them
+    cleanly, so a malformed firmware value like ``"nan"`` would otherwise
+    poison long-term stats for that sensor.
+    """
     try:
-        return float(value)
+        result = float(value)
     except (TypeError, ValueError):
         return default
+    if not math.isfinite(result):
+        return default
+    return result
 
 
 def coerce_bool(value: Any) -> bool:
@@ -88,7 +105,11 @@ def parse_memory_fraction(value: Any) -> float | None:
         return None
     if total <= 0:
         return None
-    return round(used * 100.0 / total, 1)
+    pct = used * 100.0 / total
+    # Clamp to [0, 100] — inconsistent firmware values must not produce
+    # negative or above-100% sensor readings that confuse HA statistics.
+    pct = max(0.0, min(100.0, pct))
+    return round(pct, 1)
 
 
 def sanitize_mesh_id(value: Any) -> str:

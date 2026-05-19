@@ -191,6 +191,16 @@ def _cookie_header_from_response(resp: aiohttp.ClientResponse) -> str | None:
     return cookie_kv
 
 
+def _is_endpoint_missing(err: BaseException) -> bool:
+    """Return True if ``err`` indicates the router did not recognise the
+    RCI endpoint (Keenetic returns the request as a "not found" / 404 in
+    that case). Used to latch capability caches off so we stop hammering
+    endpoints the firmware/component does not expose, which would otherwise
+    produce a router-side ndm error log every poll cycle."""
+    msg = str(err).lower()
+    return ("not found" in msg) or ("404" in msg)
+
+
 def _dict_items(value: Any) -> List[Dict[str, Any]]:
     """Return dict entries from a Keenetic list/dict payload."""
     if isinstance(value, list):
@@ -255,11 +265,21 @@ class KeeneticClient:
         # NOTE: __repr__ is overridden below so that any accidental log of
         # repr(client) / f"{client}" never exposes the password or username.
 
-        # Mesh/Wi-Fi System (MWS) capability cache:
-        # None  -> unknown (not checked yet)
-        # False -> endpoint missing on this device/firmware (avoid router log spam)
-        # True  -> endpoint works
+        # Capability caches. None -> unknown, False -> endpoint not on this
+        # device/firmware (skip future calls to avoid router-side log spam),
+        # True -> endpoint works. Pattern mirrors `_mws_member_supported`.
         self._mws_member_supported: bool | None = None
+        self._crypto_map_supported: bool | None = None
+        self._dns_proxy_supported: bool | None = None
+        self._ping_check_supported: bool | None = None
+        self._ndns_supported: bool | None = None
+        self._ipsec_diagnostics_supported: bool | None = None
+        # Hotspot host RCI subpaths that have responded "not found" — skip
+        # them on subsequent polls so we stop spamming the router log.
+        self._hotspot_subpath_skip: set[str] = set()
+        # Serialise authentication refreshes so concurrent RCI calls do not
+        # race on `_auth_header` / `_authenticated`.
+        self._auth_lock: asyncio.Lock = asyncio.Lock()
 
     def __repr__(self) -> str:
         """Redacted repr — never expose username/password in logs or tracebacks."""
@@ -435,8 +455,18 @@ class KeeneticClient:
         )
 
     async def _ensure_auth(self) -> None:
-        """Ensure we are authenticated before making an RCI call."""
-        if not self._authenticated:
+        """Ensure we are authenticated before making an RCI call.
+
+        The lock serialises concurrent refreshes. Without it, every RCI
+        call hitting an expired session would trigger its own auth handshake
+        in parallel, overwriting ``_auth_header`` mid-flight and producing
+        spurious 401s on otherwise valid requests.
+        """
+        if self._authenticated:
+            return
+        async with self._auth_lock:
+            if self._authenticated:
+                return
             if self._use_challenge_auth:
                 await self._async_authenticate_challenge()
             else:
@@ -790,10 +820,16 @@ class KeeneticClient:
         last_data: Any = None
 
         for subpath in RCI_HOTSPOT_HOST_PATHS:
+            if subpath in self._hotspot_subpath_skip:
+                continue
             try:
                 data = await self._rci_get(subpath)
                 last_data = data
             except KeeneticApiError as err:
+                if _is_endpoint_missing(err):
+                    # Latch this subpath off so we stop hitting an endpoint
+                    # the firmware does not expose every coordinator tick.
+                    self._hotspot_subpath_skip.add(subpath)
                 _LOGGER.debug("hotspot subpath %s failed: %s", subpath, err)
                 continue
 
@@ -1592,10 +1628,21 @@ class KeeneticClient:
         the aggregate status is "fail" if any profile is failing (matches
         how Keenetic itself treats the WAN as unusable for routing).
         """
-        data = await self._rci_get("show/ping-check") or {}
-        raw_profiles = data.get("pingcheck") or []
-        if not isinstance(raw_profiles, list):
+        if self._ping_check_supported is False:
             return {}
+        try:
+            data = await self._rci_get("show/ping-check") or {}
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:
+            if _is_endpoint_missing(err):
+                self._ping_check_supported = False
+            _LOGGER.debug("show/ping-check unavailable: %s", err)
+            return {}
+        self._ping_check_supported = True
+        # Firmware may collapse a single ping-check profile to a dict;
+        # accept both list and dict shapes instead of dropping the data.
+        raw_profiles = _dict_items(data.get("pingcheck") or [])
 
         # Collect per-interface observations from every profile that
         # actually has results (profile without `interface` block is
@@ -1795,11 +1842,14 @@ class KeeneticClient:
         outage where raw IP connectivity still works but DoH proxy requests
         are timing out or all encrypted upstreams stop answering.
         """
+        if self._dns_proxy_supported is False:
+            return {}
         try:
             data = await self._rci_get("show/dns-proxy") or {}
             proxy_status = data.get("proxy-status") or []
             if not isinstance(proxy_status, list):
                 return {}
+            self._dns_proxy_supported = True
 
             proxies: List[Dict[str, Any]] = []
             total_servers = 0
@@ -1816,11 +1866,12 @@ class KeeneticClient:
                 config = str(proxy.get("proxy-config") or "")
                 stat = str(proxy.get("proxy-stat") or "")
                 stat_servers = self._parse_dns_proxy_stat(stat)
-                https_servers = (
+                https_servers_raw = (
                     (proxy.get("proxy-https") or {}).get("server-https") or []
                 )
-                if not isinstance(https_servers, list):
-                    https_servers = []
+                # Firmware may collapse a single DoH upstream to a dict;
+                # `_dict_items` flattens both shapes to a list of dicts.
+                https_servers = _dict_items(https_servers_raw)
 
                 proxy_sent = sum(int(s["sent"]) for s in stat_servers)
                 proxy_failed = sum(int(s["failed"]) for s in stat_servers)
@@ -1881,6 +1932,8 @@ class KeeneticClient:
         except asyncio.CancelledError:
             raise
         except Exception as err:  # noqa: BLE001
+            if _is_endpoint_missing(err):
+                self._dns_proxy_supported = False
             _LOGGER.debug("Error getting DNS proxy status: %s", err)
             return {}
 
@@ -2029,13 +2082,18 @@ class KeeneticClient:
               }
             }
         """
+        if self._crypto_map_supported is False:
+            return {}
         try:
             data = await self._rci_get("show/crypto/map")
         except asyncio.CancelledError:
             raise
         except Exception as err:
+            if _is_endpoint_missing(err):
+                self._crypto_map_supported = False
             _LOGGER.debug("show/crypto/map unavailable: %s", err)
             return {}
+        self._crypto_map_supported = True
 
         if not isinstance(data, dict):
             return {}
@@ -3102,10 +3160,13 @@ class KeeneticClient:
         - updated: Last update status
         - address/address6: IP addresses
         """
+        if self._ndns_supported is False:
+            return {}
         try:
             data = await self._rci_get("show/ndns")
             if not data:
                 return {}
+            self._ndns_supported = True
             
             # Ensure we always return a dict
             result = dict(data) if isinstance(data, dict) else {}
@@ -3134,5 +3195,7 @@ class KeeneticClient:
         except asyncio.CancelledError:
             raise
         except Exception as err:
+            if _is_endpoint_missing(err):
+                self._ndns_supported = False
             _LOGGER.debug("Error getting NDNS info: %s", err)
             return {}

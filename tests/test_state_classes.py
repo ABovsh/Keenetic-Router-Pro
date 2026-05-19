@@ -48,6 +48,18 @@ def test_uptime_sensors_use_total_increasing(
     ), f"{class_name} must use TOTAL_INCREASING for monotonic uptime"
 
 
+def test_active_connections_sensor_uses_measurement() -> None:
+    """Active connections is an instantaneous gauge, not a lifetime total.
+
+    Using TOTAL caused HA statistics to treat it as a monotonic sum,
+    producing nonsense long-term graphs.
+    """
+    assignments = _class_assignments(
+        ROOT / "sensor/network.py", "KeeneticActiveConnectionsSensor"
+    )
+    assert assignments.get("_attr_state_class") == "SensorStateClass.MEASUREMENT"
+
+
 @pytest.mark.parametrize(
     "class_name",
     ["KeeneticClientLastSeenSensor"],

@@ -139,7 +139,9 @@ class KeeneticActiveConnectionsSensor(ControllerEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "active_connections"
     _attr_icon = "mdi:connection"
-    _attr_state_class = SensorStateClass.TOTAL
+    # Active connections is an instantaneous count, not a lifetime total.
+    # MEASUREMENT keeps HA statistics from treating it as a monotonic sum.
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
@@ -155,7 +157,7 @@ class KeeneticActiveConnectionsSensor(ControllerEntity, SensorEntity):
         conntotal = sys.get("conntotal", 0)
         connfree = sys.get("connfree", 0)
         try:
-            return int(conntotal) - int(connfree)
+            return max(0, int(conntotal) - int(connfree))
         except (TypeError, ValueError):
             return 0
 

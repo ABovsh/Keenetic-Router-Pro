@@ -143,3 +143,23 @@ def test_coerce_float_handles_loose_rci_values(
     raw: object, default: float | None, expected: float | None
 ) -> None:
     assert coerce_float(raw, default) == expected
+
+
+@pytest.mark.parametrize("raw", ["nan", "NaN", "inf", "-inf", float("nan"), float("inf"), float("-inf")])
+def test_coerce_float_rejects_non_finite_values(raw: object) -> None:
+    """NaN/inf must never reach the HA recorder — they break long-term stats."""
+    assert coerce_float(raw, default=None) is None
+    assert coerce_float(raw, default=0.0) == 0.0
+
+
+@pytest.mark.parametrize("raw", ["inf", "-inf", "nan", float("inf"), float("nan")])
+def test_coerce_seconds_rejects_non_finite_values(raw: object) -> None:
+    """``int(float('inf'))`` raises OverflowError; treat as missing."""
+    assert coerce_seconds(raw, default=0) == 0
+    assert coerce_seconds(raw, default=None) is None
+
+
+def test_parse_memory_fraction_clamps_into_range() -> None:
+    """Transient firmware payloads must not produce <0% or >100%."""
+    assert parse_memory_fraction("1100/1000") == 100.0
+    assert parse_memory_fraction("-100/1000") == 0.0

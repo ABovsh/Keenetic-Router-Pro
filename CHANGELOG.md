@@ -8,6 +8,35 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.20 - Quiet polling and sensor accuracy
+
+### Bug fixes
+
+- **Stopped flooding the router log with errors for unsupported features.**
+  Diagnostics for IPsec site-to-site tunnels, the DNS proxy, the Ping Check
+  service, NDNS / KeenDNS, and captive-portal client lists are now skipped on
+  routers that do not expose those features, after the very first
+  not-found response. Previously the integration retried each missing
+  endpoint on every poll, producing thousands of ndm errors per hour in the
+  router log on hardware without Guest Wi-Fi, IPsec, or DNS-proxy support.
+- **Active Connections sensor now records a live count instead of a total.**
+  The sensor switched to an instantaneous measurement, so HA long-term
+  statistics stop treating it as a monotonic running total and the graph
+  reflects what the router actually shows.
+- **Memory Usage sensor never reports below 0% or above 100%.** Transient
+  firmware payloads where memfree briefly exceeds memtotal no longer
+  produce nonsense percentages.
+- **CPU, memory, traffic and uptime sensors reject NaN and infinity.**
+  A malformed numeric value from the router can no longer poison HA
+  recorder statistics for those sensors.
+- **Prevented spurious 401 auth errors during high-concurrency polling.**
+  Auth refreshes are now serialised, so several RCI calls hitting an
+  expired session at once cannot race and overwrite each other's
+  credentials mid-flight.
+- **Ping Check and DNS proxy diagnostics now accept single-entry payloads.**
+  Routers that return one profile or one DoH upstream as a dict instead of
+  a list no longer cause those WAN / DNS diagnostics to disappear.
+
 ## 1.7.19 - Tracked-client and coordinator stability
 
 ### Bug fixes

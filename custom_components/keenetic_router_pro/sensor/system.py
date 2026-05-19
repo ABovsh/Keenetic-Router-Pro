@@ -77,7 +77,11 @@ class KeeneticMemoryUsageSensor(ControllerEntity, SensorEntity):
         free = coerce_float(memfree)
         if total and total > 0 and free is not None:
             used = total - free
-            return round(used * 100.0 / total, 1)
+            # Clamp to [0, 100] — when memfree is briefly larger than
+            # memtotal in transient firmware payloads the raw division
+            # produces a negative percentage that breaks HA statistics.
+            pct = max(0.0, min(100.0, used * 100.0 / total))
+            return round(pct, 1)
 
         for key in ("mem_used_percent", "memory_usage", "memusage"):
             if key in sys:
