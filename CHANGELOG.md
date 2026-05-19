@@ -8,6 +8,20 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.21 - Internal refactor groundwork
+
+### Internal
+
+- Converted `api.py` (3201-line single module) to an `api/` package: split
+  errors, connection target, regex/constants, and pure helpers into focused
+  submodules; lifted `_normalize_interfaces` and `_extract_parse_messages`
+  to module-level pure functions. `KeeneticClient` and all public symbols
+  remain importable from `custom_components.keenetic_router_pro.api`. No
+  behaviour or RCI surface changed.
+- Added unit-test coverage for the pure parsers and helpers
+  (`tests/unit/test_pure_parsers.py`) to lock current behaviour before
+  the upcoming domain mixin split.
+
 ## 1.7.20 - Quiet polling and sensor accuracy
 
 ### Bug fixes

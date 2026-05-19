@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Optional, Dict, List
-from urllib.parse import urlparse
 from homeassistant.exceptions import HomeAssistantError
 
 import aiohttp
@@ -12,9 +10,8 @@ import asyncio
 import base64
 import hashlib
 import logging
-import re
 
-from .const import (
+from ..const import (
     DOMAIN,
     IPSEC_STATE_ESTABLISHED,
     RCI_HOTSPOT_HOST_PATHS,
@@ -23,214 +20,25 @@ from .const import (
     WAN_STATUS_DOWN,
     WAN_STATUS_LINK_UP,
 )
-from .utils import coerce_bool, coerce_int, normalize_mac
+from ..utils import coerce_bool, normalize_mac
+from .constants import RCI_ROOT, _DNS_PROXY_STAT_RE, _IPSEC_VICI_OOM_RE
+from .errors import KeeneticApiError, KeeneticAuthError
+from .helpers import (
+    _cookie_header_from_response,
+    _dict_items,
+    _extract_parse_messages,
+    _is_endpoint_missing,
+    _nested_dict_items,
+    _normalize_interfaces,
+    _payload_summary,
+    _response_summary,
+    _to_int,
+    _truthy,
+    _validate_cli_arg,
+)
+from .target import normalize_connection_target
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.api")
-
-RCI_ROOT = "/rci"
-_SENSITIVE_NAMES = frozenset(
-    {
-        "authorization",
-        "cookie",
-        "key",
-        "login",
-        "pass",
-        "password",
-        "psk",
-        "secret",
-        "username",
-    }
-)
-_SENSITIVE_RESPONSE_RE = re.compile(
-    r'(?i)("?(?:authorization|cookie|key|login|pass|password|psk|secret|username)"?\s*[:=]\s*)'
-    r'("[^"]*"|\'[^\']*\'|[^,\s;}\]]+)'
-)
-_CLI_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.:/@+-]+$")
-_DNS_PROXY_STAT_RE = re.compile(
-    r"^\s*(?P<ip>\S+)\s+"
-    r"(?P<port>\d+)\s+"
-    r"(?P<sent>\d+)\s+"
-    r"(?P<answered>\d+)\s+"
-    r"(?P<nxdomain>\d+)\s+"
-    r"(?P<median>\d+)ms\s+"
-    r"(?P<average>\d+)ms\s+"
-    r"(?P<rank>\d+)\s*$"
-)
-_IPSEC_VICI_OOM_RE = re.compile(
-    r"IpSec::Vici::Stats:\s+out of memory(?:\s+\[(?P<code>[^\]]+)\])?",
-    re.IGNORECASE,
-)
-
-
-class KeeneticApiError(Exception):
-    """Base API error."""
-
-
-class KeeneticAuthError(KeeneticApiError):
-    """Authentication failed."""
-
-
-@dataclass(frozen=True)
-class KeeneticConnectionTarget:
-    """Normalized Keenetic HTTP target."""
-
-    host: str
-    port: int
-    ssl: bool
-
-    @property
-    def base_url(self) -> str:
-        """Return the normalized base URL for API requests."""
-        scheme = "https" if self.ssl else "http"
-        return f"{scheme}://{self.host}:{self.port}"
-
-
-def normalize_connection_target(host: str, port: int, ssl: bool) -> KeeneticConnectionTarget:
-    """Normalize host/port/SSL input from config flows and existing entries.
-
-    ``host`` may be a bare host name/IP or a full URL with an optional port.
-    Paths, query strings and fragments are rejected because the integration
-    appends its own ``/rci/...`` paths.
-    """
-    raw_host = str(host or "").strip()
-    if not raw_host:
-        raise KeeneticApiError("Host is required")
-
-    parsed = urlparse(raw_host if "://" in raw_host else f"//{raw_host}")
-    if parsed.scheme and parsed.scheme not in ("http", "https"):
-        raise KeeneticApiError(f"Unsupported URL scheme: {parsed.scheme}")
-    if parsed.path not in ("", "/") or parsed.params or parsed.query or parsed.fragment:
-        raise KeeneticApiError("Host must not include a path, query string or fragment")
-
-    normalized_host = parsed.hostname or raw_host
-    normalized_host = normalized_host.strip()
-    if not normalized_host:
-        raise KeeneticApiError("Host is required")
-    if any(ch.isspace() for ch in normalized_host):
-        raise KeeneticApiError("Host must not contain whitespace")
-
-    normalized_ssl = parsed.scheme == "https" if parsed.scheme else bool(ssl)
-    try:
-        url_port = parsed.port
-    except ValueError as err:
-        raise KeeneticApiError("Port must be between 1 and 65535") from err
-    try:
-        normalized_port = url_port if url_port is not None else int(port)
-    except (TypeError, ValueError) as err:
-        raise KeeneticApiError("Port must be between 1 and 65535") from err
-    if not 1 <= normalized_port <= 65535:
-        raise KeeneticApiError("Port must be between 1 and 65535")
-
-    return KeeneticConnectionTarget(
-        host=normalized_host,
-        port=normalized_port,
-        ssl=normalized_ssl,
-    )
-
-
-def _validate_cli_arg(value: str, label: str) -> str:
-    """Return a safe Keenetic CLI token or raise for command injection input."""
-    if value is None:
-        raise KeeneticApiError(f"Empty {label}")
-    raw_value = str(value)
-    candidate = raw_value.strip()
-    if not candidate:
-        raise KeeneticApiError(f"Empty {label}")
-    if candidate != raw_value:
-        raise KeeneticApiError(f"Unsafe {label}")
-    if not _CLI_TOKEN_RE.fullmatch(candidate):
-        raise KeeneticApiError(f"Unsafe {label}")
-    return candidate
-
-
-def _response_summary(text: str, limit: int = 240) -> str:
-    """Return a short, single-line response excerpt with obvious secrets redacted."""
-    summary = " ".join(str(text).split())
-    if not summary:
-        return "<empty>"
-    summary = _SENSITIVE_RESPONSE_RE.sub(r"\1<redacted>", summary)
-    if len(summary) > limit:
-        return f"{summary[:limit]}..."
-    return summary
-
-
-def _payload_summary(payload: Any) -> Any:
-    """Return a compact, non-secret representation of an outgoing JSON payload."""
-    if payload is None:
-        return None
-    if isinstance(payload, dict):
-        return {
-            str(key): "<redacted>"
-            if str(key).lower() in _SENSITIVE_NAMES
-            else type(value).__name__
-            for key, value in payload.items()
-        }
-    if isinstance(payload, list):
-        return f"list[{len(payload)}]"
-    return type(payload).__name__
-
-
-def _to_int(value: Any, default: int = 0) -> int:
-    """Return an int from loosely typed Keenetic RCI values."""
-    return coerce_int(value, default)
-
-
-def _truthy(value: Any) -> bool:
-    """Return True only for actual truthy Keenetic-style values."""
-    return coerce_bool(value)
-
-
-def _cookie_header_from_response(resp: aiohttp.ClientResponse) -> str | None:
-    """Extract a Cookie header value from a Set-Cookie response header."""
-    raw_cookie = resp.headers.get("Set-Cookie", "")
-    if not raw_cookie:
-        return None
-    cookie_kv = raw_cookie.split(";", 1)[0].strip()
-    if "=" not in cookie_kv:
-        return None
-    return cookie_kv
-
-
-def _is_endpoint_missing(err: BaseException) -> bool:
-    """Return True if ``err`` indicates the router did not recognise the
-    RCI endpoint (Keenetic returns the request as a "not found" / 404 in
-    that case). Used to latch capability caches off so we stop hammering
-    endpoints the firmware/component does not expose, which would otherwise
-    produce a router-side ndm error log every poll cycle."""
-    msg = str(err).lower()
-    return ("not found" in msg) or ("404" in msg)
-
-
-def _dict_items(value: Any) -> List[Dict[str, Any]]:
-    """Return dict entries from a Keenetic list/dict payload."""
-    if isinstance(value, list):
-        return [item for item in value if isinstance(item, dict)]
-    if isinstance(value, dict):
-        children = [item for item in value.values() if isinstance(item, dict)]
-        if children:
-            return children
-        if value:
-            return [value]
-    return []
-
-
-def _nested_dict_items(data: Any, *keys: str) -> List[Dict[str, Any]]:
-    """Return dict entries from a list payload or first matching nested key."""
-    if isinstance(data, list):
-        return _dict_items(data)
-    if not isinstance(data, dict):
-        return []
-
-    for key in keys:
-        value = data.get(key)
-        if isinstance(value, dict) and any(
-            marker in value for marker in ("cid", "mac", "id", "ip", "address")
-        ):
-            return [value]
-        items = _dict_items(value)
-        if items:
-            return items
-    return []
 
 
 class KeeneticClient:
@@ -597,27 +405,6 @@ class KeeneticClient:
         # JSON body sadece string: "interface Wireguard0 up"
         return await self._rci_post("parse", command, allow_text=True)
 
-    def _normalize_interfaces(self, raw: Any) -> List[Dict[str, Any]]:
-        """Raw /rci/show/interface çıktısını evrensel listeye çevir.
-
-        Dict anahtarları (ör. "ISP", "GigabitEthernet0") interface'in adıdır.
-        Kaybolmaması için, içeride "id" yoksa anahtar adı enjekte edilir.
-        """
-        if isinstance(raw, dict):
-            # {"GigabitEthernet0": {...}, "WifiMaster0/AccessPoint0": {...}}
-            result: List[Dict[str, Any]] = []
-            for key, val in raw.items():
-                if not isinstance(val, dict):
-                    continue
-                if "id" not in val:
-                    val = {**val, "id": key}
-                result.append(val)
-            return result
-        if isinstance(raw, list):
-            # [ {...}, {...} ]
-            return _dict_items(raw)
-        return []
-
     async def async_ping_ip(self, ip_address: str, timeout: float = 2.0) -> bool:
         """Ping an IP address using the router's ping functionality.
         
@@ -883,7 +670,7 @@ class KeeneticClient:
         if iface_list is None:
             if interfaces is None:
                 interfaces = await self.async_get_interfaces()
-            iface_list = self._normalize_interfaces(interfaces)
+            iface_list = _normalize_interfaces(interfaces)
 
         profiles: Dict[str, Any] = {}
 
@@ -955,7 +742,7 @@ class KeeneticClient:
         if iface_list is None:
             if interfaces is None:
                 interfaces = await self.async_get_interfaces()
-            iface_list = self._normalize_interfaces(interfaces)
+            iface_list = _normalize_interfaces(interfaces)
 
         bridge_labels: Dict[str, str] = {}
         for item in iface_list:
@@ -1187,7 +974,7 @@ class KeeneticClient:
         if iface_list is None:
             if interfaces is None:
                 interfaces = await self.async_get_interfaces()
-            iface_list = self._normalize_interfaces(interfaces)
+            iface_list = _normalize_interfaces(interfaces)
 
         VPN_TYPES = {
             "wireguard",
@@ -1255,7 +1042,7 @@ class KeeneticClient:
         if iface_list is None:
             if interfaces is None:
                 interfaces = await self.async_get_interfaces()
-            iface_list = self._normalize_interfaces(interfaces)
+            iface_list = _normalize_interfaces(interfaces)
 
         # ---------- yardımcı: interface'den IP çıkar ----------
         def _extract_ip(iface: Dict[str, Any]) -> str | None:
@@ -1416,7 +1203,7 @@ class KeeneticClient:
         if iface_list is None:
             if interfaces is None:
                 interfaces = await self.async_get_interfaces()
-            iface_list = self._normalize_interfaces(interfaces)
+            iface_list = _normalize_interfaces(interfaces)
 
         def _is_wan(iface: Dict[str, Any]) -> bool:
             # Explicit uplink role is the strongest signal.
@@ -1937,49 +1724,6 @@ class KeeneticClient:
             _LOGGER.debug("Error getting DNS proxy status: %s", err)
             return {}
 
-    @staticmethod
-    def _extract_parse_messages(data: Any) -> List[str]:
-        """Return textual log/message lines from a Keenetic response.
-
-        `show log ...` has used a few response shapes across firmware
-        versions: plain text, `message: [...]`, and structured rows with
-        `message`, `text`, `time` or `level` fields. Walk the payload so
-        diagnostics don't silently report OK just because the shape changed.
-        """
-        lines: List[str] = []
-
-        def _walk(value: Any) -> None:
-            if value is None:
-                return
-            if isinstance(value, str):
-                lines.extend(line for line in value.splitlines() if line)
-                return
-            if isinstance(value, list):
-                for item in value:
-                    _walk(item)
-                return
-            if isinstance(value, dict):
-                for key in ("message", "text", "line", "event"):
-                    if key in value:
-                        _walk(value.get(key))
-                        return
-                parts = [
-                    str(value[key])
-                    for key in ("level", "time", "module", "ident", "service")
-                    if value.get(key) not in (None, "")
-                ]
-                msg = value.get("msg") or value.get("description")
-                if msg:
-                    parts.append(str(msg))
-                if parts:
-                    lines.append(" ".join(parts))
-                    return
-                for nested in value.values():
-                    _walk(nested)
-
-        _walk(data)
-        return lines
-
     @classmethod
     def _parse_ipsec_vici_diagnostics(cls, lines: List[str]) -> Dict[str, Any]:
         """Summarize recent IPsec VICI memory errors from router log lines."""
@@ -2007,7 +1751,7 @@ class KeeneticClient:
         """Return low-cadence diagnostics for IPsec/VICI router log errors."""
         try:
             data = await self._rci_parse("show log 200 once")
-            lines = self._extract_parse_messages(data)
+            lines = _extract_parse_messages(data)
             diag = self._parse_ipsec_vici_diagnostics(lines)
             diag["command"] = "show log 200 once"
             return diag
@@ -2440,7 +2184,7 @@ class KeeneticClient:
             if iface_list is None:
                 if interfaces is None:
                     interfaces = await self.async_get_interfaces()
-                iface_list = self._normalize_interfaces(interfaces)
+                iface_list = _normalize_interfaces(interfaces)
             WAN_KEYWORDS = ("wan", "internet", "pppoe", "isp", "provider")
 
             for iface in iface_list:
@@ -2515,7 +2259,7 @@ class KeeneticClient:
         if iface_list is None:
             if interfaces is None:
                 interfaces = await self.async_get_interfaces()
-            iface_list = self._normalize_interfaces(interfaces)
+            iface_list = _normalize_interfaces(interfaces)
 
         wan_ids = {
             str(wan.get("id"))
