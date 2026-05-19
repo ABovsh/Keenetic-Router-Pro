@@ -8,6 +8,12 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.23
+
+### Internal
+
+- Internal: extract transport + auth from KeeneticClient (no behaviour change).
+
 ## 1.7.22 - Restore _normalize_interfaces shim
 
 ### Bug fixes
