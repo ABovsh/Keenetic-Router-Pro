@@ -1,0 +1,152 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Keenetic Router Pro",
+        "description": "Choose how Home Assistant should reach your Keenetic router.",
+        "data": {
+          "connection_mode": "Connection mode"
+        }
+      },
+      "connection": {
+        "title": "Keenetic Router Pro",
+        "description": "Enter the connection details for the selected mode.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password",
+          "ssl": "Use SSL",
+          "use_challenge_auth": "Use Challenge Auth (NDW2, required for newer models like Hero)"
+        }
+      },
+      "select_clients": {
+        "title": "Select Clients to Track",
+        "description": "Select which clients you want to track for presence detection. Found {client_count} clients.",
+        "data": {
+          "tracked_clients": "Clients to track"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate Keenetic Router Pro",
+        "description": "Update the credentials used to connect to your Keenetic router.",
+        "data": {
+          "username": "Username",
+          "password": "Password",
+          "use_challenge_auth": "Use Challenge Auth (NDW2)"
+        }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Keenetic Router Pro",
+        "description": "Choose how Home Assistant should reach this Keenetic router.",
+        "data": {
+          "connection_mode": "Connection mode"
+        }
+      },
+      "reconfigure_connection": {
+        "title": "Reconfigure Keenetic Router Pro",
+        "description": "Update the connection details for the selected mode.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "username": "Username",
+          "password": "Password",
+          "ssl": "Use SSL",
+          "use_challenge_auth": "Use Challenge Auth (NDW2)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid authentication credentials",
+      "cannot_connect": "Cannot connect to router",
+      "unknown": "Unknown error occurred"
+    },
+    "abort": {
+      "already_configured": "Device is already configured",
+      "already_in_progress": "Configuration flow is already in progress",
+      "no_host": "No host found in discovery data",
+      "no_clients": "No clients found on the network",
+      "reauth_successful": "Reauthentication was successful",
+      "reconfigure_successful": "Reconfiguration was successful"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure Tracked Clients",
+        "description": "Select which clients to track for presence detection. Found {client_count} clients.",
+        "data": {
+          "tracked_clients": "Clients to track"
+        }
+      }
+    },
+    "abort": {
+      "no_clients": "No clients found on the network"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "cpu_load": {
+        "name": "CPU Load"
+      },
+      "memory_usage": {
+        "name": "Memory Usage"
+      },
+      "uptime": {
+        "name": "Uptime"
+      },
+      "wan_status": {
+        "name": "WAN Status"
+      },
+      "connected_clients": {
+        "name": "Total Connected Clients"
+      },
+      "router_clients": {
+        "name": "Connected Clients"
+      },
+      "mesh_clients": {
+        "name": "Clients"
+      },
+      "disconnected_clients": {
+        "name": "Disconnected Clients"
+      },
+      "extender_count": {
+        "name": "Extender Count"
+      },
+      "pppoe_uptime": {
+        "name": "PPPoE Uptime"
+      },
+      "active_connections": {
+        "name": "Active Connections"
+      },
+      "firmware_version": {
+        "name": "Firmware Version"
+      },
+      "mesh_firmware_version": {
+        "name": "Firmware Version"
+      },
+      "wifi_24_temperature": {
+        "name": "Temperature 2.4 GHz"
+      },
+      "wifi_5_temperature": {
+        "name": "Temperature 5 GHz"
+      }
+    },
+    "button": {
+      "reboot": {
+        "name": "Reboot Router"
+      }
+    },
+    "update": {
+      "firmware_update": {
+        "name": "Firmware Update"
+      }
+    }
+  },
+  "issues": {
+    "insecure_http": {
+      "title": "Keenetic API is using plaintext HTTP",
+      "description": "The Keenetic Router Pro integration ({title}) is connecting to {host} over plain HTTP. Your router username, password (NDW2 hash), and session cookie traverse the LAN unencrypted on every poll, so anyone on the same network — including untrusted Wi-Fi guests, IoT devices, or a compromised LAN host — can capture credentials and impersonate you to the router.\n\nMitigation:\n1. In the router web UI, enable HTTPS for the web admin (System → Components → ensure SSL/TLS support is installed; Management → Web Admin → enable HTTPS).\n2. Open the integration entry in Settings → Devices & services → Keenetic Router Pro → Reconfigure, switch SSL on, and update the port (typically 443).\n3. After confirming HTTPS works, rotate the router admin password — anyone who sniffed the LAN since the integration was set up may already have it.\n\nThis warning is suppressed for loopback addresses."
+    }
+  }
+}

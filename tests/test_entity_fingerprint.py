@@ -1,0 +1,363 @@
+"""Tests for ClientEntity change-detection fingerprint."""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from custom_components.keenetic_router_pro.entity import ClientEntity
+from custom_components.keenetic_router_pro.sensor.client import (
+    KeeneticClientConnectionTypeSensor,
+    KeeneticClientLastSeenSensor,
+    KeeneticClientRssiSensor,
+    KeeneticClientRxSensor,
+    KeeneticClientTxRateSensor,
+    KeeneticClientTxSensor,
+    KeeneticClientUptimeSensor,
+    KeeneticClientWifiBandSensor,
+    KeeneticClientWifiModeSensor,
+)
+
+
+class _DummyCoordinator:
+    """Stand-in for KeeneticCoordinator with a settable ``data`` attr."""
+
+    def __init__(self, data: dict | None = None) -> None:
+        self.data = data or {}
+
+    def async_add_listener(self, *_a, **_kw):  # CoordinatorEntity.__init__ calls this on attach
+        return lambda: None
+
+
+def _make_entity(client_dict: dict) -> ClientEntity:
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client_dict}})
+    entity = ClientEntity(
+        coordinator=coord,
+        entry_id="entry",
+        title="router",
+        mac="AA:BB:CC:00:00:01",
+        label="phone",
+    )
+    return entity
+
+
+def test_fingerprint_excludes_last_seen_and_uptime() -> None:
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "ip": "10.0.0.5",
+        "link": "up",
+        "last-seen": 100,
+        "uptime": 50,
+    }
+    entity = _make_entity(client)
+
+    fp1 = entity._client_fingerprint(client)
+    fp2 = entity._client_fingerprint({**client, "last-seen": 200, "uptime": 75})
+
+    assert fp1 == fp2
+    assert "last-seen" not in fp1
+    assert "uptime" not in fp1
+
+
+def test_dedicated_uptime_sensor_fingerprint_includes_uptime() -> None:
+    """The uptime sensor must still update when only uptime changes."""
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "ip": "10.0.0.5",
+        "link": "up",
+        "last-seen": 100,
+        "uptime": 50,
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+    entity = KeeneticClientUptimeSensor(
+        coord,
+        entry,
+        "AA:BB:CC:00:00:01",
+        "phone",
+    )
+
+    fp1 = entity._client_fingerprint(client)
+    fp2 = entity._client_fingerprint({**client, "last-seen": 200, "uptime": 75})
+
+    assert fp1 != fp2
+    assert "uptime" in fp1
+    assert "last-seen" not in fp1
+
+
+def test_dedicated_last_seen_sensor_fingerprint_includes_last_seen() -> None:
+    """The last-seen sensor must still update when only last-seen changes."""
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "ip": "10.0.0.5",
+        "link": "up",
+        "last-seen": 100,
+        "uptime": 50,
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+    entity = KeeneticClientLastSeenSensor(
+        coord,
+        entry,
+        "AA:BB:CC:00:00:01",
+        "phone",
+    )
+
+    fp1 = entity._client_fingerprint(client)
+    fp2 = entity._client_fingerprint({**client, "last-seen": 200, "uptime": 75})
+
+    assert fp1 != fp2
+    assert "last-seen" in fp1
+    assert "uptime" not in fp1
+
+
+def test_last_seen_sensor_returns_exact_datetime_for_offline_client() -> None:
+    """Last Seen should show exact local date/time instead of relative text."""
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "active": False,
+        "last-seen": 30,
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+    entity = KeeneticClientLastSeenSensor(
+        coord,
+        entry,
+        "AA:BB:CC:00:00:01",
+        "phone",
+    )
+
+    value = entity.native_value
+
+    assert isinstance(value, str)
+    assert len(value) == 19
+    assert "." in value
+    parsed = datetime.strptime(value, "%d.%m.%Y %H:%M:%S")
+    assert 20 <= (datetime.now().astimezone().replace(tzinfo=None) - parsed).total_seconds() <= 40
+
+
+def test_last_seen_sensor_is_unavailable_for_online_client() -> None:
+    """Last Seen is only meaningful when the client is currently away."""
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "link": "up",
+        "active": True,
+        "last-seen": 4,
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+    entity = KeeneticClientLastSeenSensor(
+        coord,
+        entry,
+        "AA:BB:CC:00:00:01",
+        "phone",
+    )
+
+    assert entity.native_value is None
+    assert entity.available is False
+
+
+def test_last_seen_sensor_is_available_for_offline_client_with_timestamp() -> None:
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "active": False,
+        "last-seen": 600,
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+    entity = KeeneticClientLastSeenSensor(
+        coord,
+        entry,
+        "AA:BB:CC:00:00:01",
+        "phone",
+    )
+
+    assert entity.available is True
+
+
+def test_uptime_sensor_is_presented_as_wifi_session() -> None:
+    """Client uptime is the current Wi-Fi connection session duration."""
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "link": "up",
+        "uptime": 165,
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+    entity = KeeneticClientUptimeSensor(
+        coord,
+        entry,
+        "AA:BB:CC:00:00:01",
+        "phone",
+    )
+
+    assert entity.name == "Wi-Fi Session"
+    assert entity.native_value == 165
+    assert entity.available is True
+
+
+def test_uptime_sensor_is_unavailable_without_live_session() -> None:
+    """Offline clients do not have an active Wi-Fi session."""
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "active": False,
+        "uptime": 0,
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+    entity = KeeneticClientUptimeSensor(
+        coord,
+        entry,
+        "AA:BB:CC:00:00:01",
+        "phone",
+    )
+
+    assert entity.native_value == 0
+    assert entity.available is False
+
+
+def test_txrate_sensor_is_presented_as_link_speed() -> None:
+    """The router's txrate value is the useful Wi-Fi link speed signal."""
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "link": "up",
+        "txrate": 87,
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+    entity = KeeneticClientTxRateSensor(
+        coord,
+        entry,
+        "AA:BB:CC:00:00:01",
+        "phone",
+    )
+
+    assert entity.name == "Link Speed"
+    assert entity.native_unit_of_measurement == "Mbps"
+    assert entity.native_value == 87
+    assert entity.available is True
+
+
+def test_client_wifi_band_handles_string_txrate() -> None:
+    """Keenetic numeric fields may arrive as strings on some RCI paths."""
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "ssid": "Main",
+        "txrate": "1201",
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+
+    band = KeeneticClientWifiBandSensor(coord, entry, "AA:BB:CC:00:00:01", "phone")
+    connection = KeeneticClientConnectionTypeSensor(
+        coord,
+        entry,
+        "AA:BB:CC:00:00:01",
+        "phone",
+    )
+
+    assert band.native_value == "5 GHz"
+    assert connection.native_value == "WiFi 5 GHz - Main"
+
+
+def test_live_wifi_metrics_are_unavailable_for_offline_clients() -> None:
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "active": False,
+        "txrate": 1201,
+        "rssi": -51,
+        "mode": "11ax",
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+
+    txrate = KeeneticClientTxRateSensor(coord, entry, "AA:BB:CC:00:00:01", "phone")
+    rssi = KeeneticClientRssiSensor(coord, entry, "AA:BB:CC:00:00:01", "phone")
+    mode = KeeneticClientWifiModeSensor(coord, entry, "AA:BB:CC:00:00:01", "phone")
+
+    assert txrate.available is False
+    assert rssi.available is False
+    assert mode.available is False
+
+
+def test_offline_zero_client_traffic_is_unavailable() -> None:
+    """Offline hotspot rows reset counters to zero; do not expose that as data."""
+    client = {
+        "mac": "aa:bb:cc:00:00:01",
+        "active": False,
+        "rxbytes": 0,
+        "txbytes": "0",
+    }
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entry = type("Entry", (), {"entry_id": "entry", "title": "router"})()
+
+    rx = KeeneticClientRxSensor(coord, entry, "AA:BB:CC:00:00:01", "phone")
+    tx = KeeneticClientTxSensor(coord, entry, "AA:BB:CC:00:00:01", "phone")
+
+    assert rx.native_value is None
+    assert tx.native_value is None
+    assert rx.available is False
+    assert tx.available is False
+
+
+def test_fingerprint_picks_up_link_and_ip_changes() -> None:
+    client = {"mac": "aa:bb:cc:00:00:01", "ip": "10.0.0.5", "link": "up"}
+    entity = _make_entity(client)
+
+    fp1 = entity._client_fingerprint(client)
+    fp_link = entity._client_fingerprint({**client, "link": "down"})
+    fp_ip = entity._client_fingerprint({**client, "ip": "10.0.0.6"})
+
+    assert fp1 != fp_link
+    assert fp1 != fp_ip
+
+
+def test_fingerprint_returns_none_for_missing_client() -> None:
+    entity = _make_entity({"mac": "aa:bb:cc:00:00:01"})
+    assert entity._client_fingerprint(None) is None
+    assert entity._client_fingerprint({}) is None
+
+
+def test_handle_coordinator_update_skips_when_only_noise_changed() -> None:
+    """When only last-seen/uptime tick, _handle_coordinator_update must not
+    forward to super() (which would write_ha_state)."""
+    client = {"mac": "aa:bb:cc:00:00:01", "ip": "10.0.0.5", "link": "up", "last-seen": 1}
+    coord = _DummyCoordinator({"clients_by_mac": {"aa:bb:cc:00:00:01": client}})
+    entity = ClientEntity(
+        coordinator=coord,
+        entry_id="entry",
+        title="router",
+        mac="AA:BB:CC:00:00:01",
+        label="phone",
+    )
+
+    super_calls = 0
+
+    def fake_super_handle():
+        nonlocal super_calls
+        super_calls += 1
+
+    # CoordinatorEntity.async_write_ha_state is what super().__handle__ would
+    # call — patch the entire super() method via the bound parent.
+    import custom_components.keenetic_router_pro.entity as entity_module
+    original = entity_module.CoordinatorEntity._handle_coordinator_update
+    entity_module.CoordinatorEntity._handle_coordinator_update = lambda self: fake_super_handle()
+    try:
+        # First tick: cold cache, should forward.
+        entity._handle_coordinator_update()
+        assert super_calls == 1
+
+        # Second tick with only last-seen changed: should skip.
+        coord.data["clients_by_mac"]["aa:bb:cc:00:00:01"] = {**client, "last-seen": 2}
+        entity._handle_coordinator_update()
+        assert super_calls == 1, "noise-only change must not forward to super()"
+
+        # Third tick with link change: should forward.
+        coord.data["clients_by_mac"]["aa:bb:cc:00:00:01"] = {
+            **client,
+            "last-seen": 3,
+            "link": "down",
+        }
+        entity._handle_coordinator_update()
+        assert super_calls == 2
+    finally:
+        entity_module.CoordinatorEntity._handle_coordinator_update = original

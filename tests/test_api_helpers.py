@@ -1,0 +1,733 @@
+"""Unit tests for lightweight Keenetic API helpers."""
+
+from __future__ import annotations
+
+from tests.conftest import (
+    TEST_BASE_URL,
+    TEST_HOST,
+    TEST_HOST_ALT,
+    TEST_PASSWORD,
+    TEST_USERNAME,
+)
+
+import asyncio
+import base64
+
+import pytest
+
+from custom_components.keenetic_router_pro.api import (
+    KeeneticApiError,
+    KeeneticClient,
+    _dict_items,
+    _nested_dict_items,
+    _payload_summary,
+    _response_summary,
+    _validate_cli_arg,
+    normalize_connection_target,
+)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("GigabitEthernet0", "GigabitEthernet0"),
+        ("WifiMaster0/AccessPoint0", "WifiMaster0/AccessPoint0"),
+        ("aa:bb:cc:dd:ee:ff", "aa:bb:cc:dd:ee:ff"),
+        ("Crypto.Map_01+backup@site", "Crypto.Map_01+backup@site"),
+    ],
+)
+def test_validate_cli_arg_accepts_router_tokens(raw: str, expected: str) -> None:
+    """Normal single-token Keenetic identifiers are accepted."""
+    assert _validate_cli_arg(raw, "token") == expected
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "",
+        "   ",
+        " WifiMaster0/AccessPoint0 ",
+        "ISP\nsystem reboot",
+        "ISP\tsystem",
+        "ISP; reboot",
+        "ISP reboot",
+        "ISP|reboot",
+        "ISP&reboot",
+        "ISP$(reboot)",
+        "ISP`reboot`",
+        "ISP'reboot'",
+        'ISP"reboot"',
+        "ISP<reboot",
+        "ISP>reboot",
+        "ISP\\reboot",
+        "ISP*",
+        "ISP?",
+        "ISP\x1f",
+        None,
+    ],
+)
+def test_validate_cli_arg_rejects_injection(raw: str) -> None:
+    """Whitespace, controls, and shell-like tokens cannot reach /rci/parse."""
+    with pytest.raises(KeeneticApiError):
+        _validate_cli_arg(raw, "token")
+
+
+def test_basic_auth_headers_are_generated_without_mutating_state() -> None:
+    """Basic auth helper builds the expected header and no extra state."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+
+    headers = client._basic_auth_headers()
+
+    expected = base64.b64encode(f"{TEST_USERNAME}:{TEST_PASSWORD}".encode()).decode()
+    assert headers == {"Authorization": f"Basic {expected}"}
+    assert client._auth_header is None
+
+
+def test_connection_target_preserves_direct_defaults() -> None:
+    """Bare direct hosts keep the configured port and scheme."""
+    target = normalize_connection_target(TEST_HOST, 100, False)
+
+    assert target.host == TEST_HOST
+    assert target.port == 100
+    assert target.ssl is False
+    assert target.base_url == f"{TEST_BASE_URL}:100"
+
+
+def test_connection_target_normalizes_keendns_url() -> None:
+    """Full HTTPS URLs are accepted for KeenDNS protected web apps."""
+    target = normalize_connection_target(
+        "https://rsi.example.keenetic.pro",
+        443,
+        True,
+    )
+
+    assert target.host == "rsi.example.keenetic.pro"
+    assert target.port == 443
+    assert target.ssl is True
+    assert target.base_url == "https://rsi.example.keenetic.pro:443"
+
+
+def test_connection_target_uses_url_port_and_scheme() -> None:
+    """URL port and scheme override the separately supplied defaults."""
+    target = normalize_connection_target(
+        "https://rsi.example.keenetic.pro:8443",
+        100,
+        False,
+    )
+
+    assert target.host == "rsi.example.keenetic.pro"
+    assert target.port == 8443
+    assert target.ssl is True
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "",
+        "https://rsi.example.keenetic.pro/rci/show/version",
+        "https://rsi.example.keenetic.pro?x=1",
+        "ftp://rsi.example.keenetic.pro",
+        "bad host",
+        "https://rsi.example.keenetic.pro:99999",
+    ],
+)
+def test_connection_target_rejects_invalid_hosts(raw: str) -> None:
+    """Unsafe or ambiguous connection targets fail before requests are made."""
+    with pytest.raises(KeeneticApiError):
+        normalize_connection_target(raw, 443, True)
+
+
+def test_502_response_mentions_keendns_upstream() -> None:
+    """Bad Gateway errors point users at protected web-app upstream setup."""
+
+    class FakeResponse:
+        status = 502
+
+        async def text(self) -> str:
+            return "<html><h1>502 Bad Gateway</h1></html>"
+
+    client = KeeneticClient("rsi.example.keenetic.pro", TEST_USERNAME, TEST_PASSWORD, 443, True)
+
+    with pytest.raises(KeeneticApiError, match="internal published application"):
+        asyncio.run(client._handle_response(FakeResponse(), "/rci/show/version"))
+
+
+def test_response_summary_redacts_obvious_secrets() -> None:
+    """Router error excerpts should not expose credentials in logs/errors."""
+    summary = _response_summary(
+        f'{{"login": "{TEST_USERNAME}", "password": "{TEST_PASSWORD}", '
+        '"cookie": "session=abc", "message": "failed"}'
+    )
+
+    assert TEST_PASSWORD not in summary
+    assert TEST_USERNAME not in summary
+    assert "session=abc" not in summary
+    assert "<redacted>" in summary
+
+
+def test_payload_summary_redacts_sensitive_keys() -> None:
+    """Debug request logging keeps shape while hiding secret values."""
+    summary = _payload_summary(
+        {"login": TEST_USERNAME, "password": TEST_PASSWORD, "components": [{"name": "base"}]}
+    )
+
+    assert summary == {
+        "login": "<redacted>",
+        "password": "<redacted>",
+        "components": "list",
+    }
+
+
+def test_normalize_interfaces_injects_ids_for_dict_payloads() -> None:
+    """Dict-shaped /show/interface payloads keep their interface id."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+
+    result = client._normalize_interfaces(
+        {
+            "Bridge0": {"type": "Bridge", "mac": "aa:bb:cc:dd:ee:ff"},
+            "bad": "ignored",
+        }
+    )
+
+    assert result == [
+        {"type": "Bridge", "mac": "aa:bb:cc:dd:ee:ff", "id": "Bridge0"}
+    ]
+
+
+def test_dict_items_accepts_single_object_payloads() -> None:
+    """Keenetic endpoints may collapse a one-item collection to a plain object."""
+    payload = {"mac": "aa:bb:cc:dd:ee:ff", "active": True}
+
+    assert _dict_items(payload) == [payload]
+
+
+def test_nested_dict_items_handles_single_host_payload() -> None:
+    """Single-host hotspot payloads must not disappear during normalization."""
+    payload = {
+        "host": {
+            "mac": "aa:bb:cc:dd:ee:ff",
+            "ip": "192.0.2.25",
+            "active": True,
+        }
+    }
+
+    assert _nested_dict_items(payload, "host") == [payload["host"]]
+
+
+def test_parse_ipsec_vici_diagnostics_counts_recent_memory_errors() -> None:
+    """IPsec VICI memory errors are summarized from router log lines."""
+    lines = [
+        "May 6 23:03:32 ndhcpc GigabitEthernet0/Vlan5: received ACK",
+        "May 6 23:04:13 ndm IpSec::Vici::Stats: out of memory [0xcffe02a7].",
+        "May 6 23:05:12 ndm IpSec::Vici::Stats: out of memory [0xcffe02a7].",
+    ]
+
+    summary = KeeneticClient._parse_ipsec_vici_diagnostics(lines)
+
+    assert summary["status"] == "warning"
+    assert summary["vici_out_of_memory_count"] == 2
+    assert summary["last_error_code"] == "0xcffe02a7"
+    assert summary["recent_matches"] == [
+        "May 6 23:04:13 ndm IpSec::Vici::Stats: out of memory [0xcffe02a7].",
+        "May 6 23:05:12 ndm IpSec::Vici::Stats: out of memory [0xcffe02a7].",
+    ]
+    assert summary["scanned_log_lines"] == 3
+
+
+def test_extract_parse_messages_handles_structured_log_payloads() -> None:
+    """Structured show-log payloads are flattened into searchable lines."""
+    payload = {
+        "log": [
+            {
+                "level": "C",
+                "time": "May 7 00:12:18",
+                "module": "ndm",
+                "message": "IpSec::Vici::Stats: out of memory [0xcffe02a7].",
+            },
+            {
+                "time": "May 7 00:13:32",
+                "service": "ndhcpc",
+                "msg": "GigabitEthernet0/Vlan5: received ACK",
+            },
+        ]
+    }
+
+    lines = KeeneticClient._extract_parse_messages(payload)
+
+    assert lines == [
+        "IpSec::Vici::Stats: out of memory [0xcffe02a7].",
+        "May 7 00:13:32 ndhcpc GigabitEthernet0/Vlan5: received ACK",
+    ]
+    summary = KeeneticClient._parse_ipsec_vici_diagnostics(lines)
+    assert summary["status"] == "warning"
+    assert summary["vici_out_of_memory_count"] == 1
+
+
+def test_parse_ipsec_vici_diagnostics_reports_ok_without_errors() -> None:
+    """Normal logs produce an OK diagnostic state."""
+    summary = KeeneticClient._parse_ipsec_vici_diagnostics(["normal log line"])
+
+    assert summary["status"] == "ok"
+    assert summary["vici_out_of_memory_count"] == 0
+    assert summary["last_vici_out_of_memory"] is None
+
+
+def test_iface_list_kwarg_skips_redundant_normalization() -> None:
+    """Stage-2 calls accept a pre-normalized iface_list and must not re-normalize."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+
+    normalized = [
+        {"id": "Wireguard0", "type": "WireGuard", "state": "up"},
+        {"id": "GigabitEthernet0", "type": "Ethernet"},
+    ]
+
+    calls = 0
+    real_normalize = client._normalize_interfaces
+
+    def counting_normalize(raw):
+        nonlocal calls
+        calls += 1
+        return real_normalize(raw)
+
+    client._normalize_interfaces = counting_normalize  # type: ignore[assignment]
+
+    result = asyncio.run(client.async_get_wireguard_status(iface_list=normalized))
+
+    assert calls == 0, "iface_list path must skip _normalize_interfaces"
+    assert isinstance(result, dict)
+    assert "profiles" in result
+
+
+def test_get_mesh_nodes_from_clients_uses_prefetched_clients() -> None:
+    """The fallback accepts a pre-fetched client list to avoid a duplicate fetch."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+
+    async def fail_get_clients():  # pragma: no cover  # must not be invoked when prefetched clients are supplied
+        raise AssertionError("async_get_clients should not be called when clients are supplied")
+
+    client.async_get_clients = fail_get_clients  # type: ignore[assignment]
+
+    clients = [
+        {"mac": "AA:BB:CC:00:00:01", "system-mode": "extender", "active": True, "name": "Ext-1", "ip": "10.0.0.2"},
+        {"mac": "AA:BB:CC:00:00:02", "system-mode": "client", "active": True},
+        {"mac": "", "system-mode": "extender", "active": True},  # missing mac → skipped
+    ]
+
+    nodes = asyncio.run(client._get_mesh_nodes_from_clients(clients=clients))
+
+    assert len(nodes) == 1
+    node = nodes[0]
+    assert node["mac"] == "AA:BB:CC:00:00:01"
+    assert node["mode"] == "extender"
+    assert node["state"] == "up"
+    assert node["connected"] is True
+
+
+def test_get_mesh_nodes_from_clients_falls_back_to_fetch_when_no_arg() -> None:
+    """Without a supplied list the helper still calls async_get_clients."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+
+    fetched = [{"mac": "AA:BB:CC:00:00:09", "system-mode": "repeater", "active": False, "name": "Rep"}]
+
+    async def fake_get_clients():
+        return fetched
+
+    client.async_get_clients = fake_get_clients  # type: ignore[assignment]
+
+    nodes = asyncio.run(client._get_mesh_nodes_from_clients())
+
+    assert [n["mac"] for n in nodes] == ["AA:BB:CC:00:00:09"]
+    assert nodes[0]["state"] == "down"
+
+
+def test_get_mesh_nodes_from_clients_parses_string_booleans() -> None:
+    """Keenetic hotspot payloads use string booleans for extender activity."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    clients = [
+        {"mac": "AA:BB:CC:00:00:10", "system-mode": "extender", "active": "yes"},
+        {"mac": "AA:BB:CC:00:00:11", "system-mode": "repeater", "active": "no"},
+    ]
+
+    nodes = asyncio.run(client._get_mesh_nodes_from_clients(clients=clients))
+
+    assert [node["state"] for node in nodes] == ["up", "down"]
+
+
+def test_async_get_clients_parses_single_host_dict_payload() -> None:
+    """Router hotspot host responses may be a single dict instead of a list."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+
+    async def fake_get(subpath):
+        return {
+            "host": {
+                "mac": "AA:BB:CC:DD:EE:FF",
+                "ip": "192.0.2.44",
+                "active": True,
+            }
+        }
+
+    client._rci_get = fake_get  # type: ignore[assignment]
+
+    hosts = asyncio.run(client.async_get_clients())
+
+    assert hosts == [
+        {
+            "mac": "AA:BB:CC:DD:EE:FF",
+            "ip": "192.0.2.44",
+            "active": True,
+        }
+    ]
+
+
+def test_async_get_ip_neighbours_parses_numbered_payload() -> None:
+    """Neighbour responses can be keyed by numeric discovery ids."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+
+    async def fake_get(subpath):
+        assert subpath == "show/ip/neighbour"
+        return {
+            "neighbour": {
+                "35": {
+                    "id": 35,
+                    "mac": "80:07:94:46:ab:ab",
+                    "address-family": "ipv4",
+                    "address": TEST_HOST_ALT,
+                    "last-seen": 672,
+                    "expired": True,
+                }
+            }
+        }
+
+    client._rci_get = fake_get  # type: ignore[assignment]
+
+    neighbours = asyncio.run(client.async_get_ip_neighbours())
+
+    assert neighbours == [
+        {
+            "id": 35,
+            "mac": "80:07:94:46:ab:ab",
+            "address-family": "ipv4",
+            "address": TEST_HOST_ALT,
+            "last-seen": 672,
+            "expired": True,
+        }
+    ]
+
+
+def test_async_get_ip_neighbours_falls_back_to_parse_payload() -> None:
+    """Some firmware exposes neighbour rows through parse but not RCI show."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    calls: list[tuple[str, str]] = []
+
+    async def fake_get(subpath):
+        calls.append(("get", subpath))
+        assert subpath == "show/ip/neighbour"
+        return {}
+
+    async def fake_parse(command):
+        calls.append(("parse", command))
+        assert command == "show ip neighbour"
+        return {
+            "35": {
+                "id": 35,
+                "via": "80:07:94:46:ab:ab",
+                "mac": "80:07:94:46:ab:ab",
+                "address-family": "ipv4",
+                "address": TEST_HOST_ALT,
+                "last-seen": 672,
+                "expired": True,
+            },
+            "prompt": "(config)",
+        }
+
+    client._rci_get = fake_get  # type: ignore[assignment]
+    client._rci_parse = fake_parse  # type: ignore[assignment]
+
+    neighbours = asyncio.run(client.async_get_ip_neighbours())
+
+    assert calls == [
+        ("get", "show/ip/neighbour"),
+        ("parse", "show ip neighbour"),
+    ]
+    assert neighbours == [
+        {
+            "id": 35,
+            "via": "80:07:94:46:ab:ab",
+            "mac": "80:07:94:46:ab:ab",
+            "address-family": "ipv4",
+            "address": TEST_HOST_ALT,
+            "last-seen": 672,
+            "expired": True,
+        }
+    ]
+
+
+def test_async_get_all_interface_stats_runs_in_parallel() -> None:
+    """Per-interface stat fetches still run concurrently."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+
+    interfaces = {
+        "GigabitEthernet0": {"id": "GigabitEthernet0", "type": "Ethernet", "link": "up", "state": "up"},
+        "PPPoE0": {"id": "PPPoE0", "type": "PPPoE", "link": "up", "state": "up"},
+        "Bridge0": {"id": "Bridge0", "type": "Bridge", "link": "up", "state": "up"},  # filtered
+    }
+
+    async def fake_wan(interfaces=None, iface_list=None):
+        return [{"id": "PPPoE0"}]
+
+    in_flight = 0
+    max_in_flight = 0
+
+    async def fake_stat(name):
+        nonlocal in_flight, max_in_flight
+        in_flight += 1
+        max_in_flight = max(max_in_flight, in_flight)
+        try:
+            await asyncio.sleep(0.01)
+            return {"rxbytes": 100, "txbytes": 200}
+        finally:
+            in_flight -= 1
+
+    client.async_get_wan_interfaces = fake_wan  # type: ignore[assignment]
+    client.async_get_interface_stat = fake_stat  # type: ignore[assignment]
+
+    stats = asyncio.run(client.async_get_all_interface_stats(interfaces=interfaces))
+
+    assert "GigabitEthernet0" in stats
+    assert "PPPoE0" in stats
+    assert "Bridge0" not in stats  # bridge filtered when not in wan_ids
+    assert max_in_flight >= 2, "interface stat fetches must run concurrently"
+
+
+def test_async_get_all_interface_stats_caps_per_interface_concurrency() -> None:
+    """Large interface batches must honor the local RCI concurrency cap."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+
+    interfaces = {
+        f"GigabitEthernet{i}": {
+            "id": f"GigabitEthernet{i}",
+            "type": "Ethernet",
+            "link": "up",
+            "state": "up",
+        }
+        for i in range(12)
+    }
+
+    async def fake_wan(interfaces=None, iface_list=None):
+        return []
+
+    in_flight = 0
+    max_in_flight = 0
+    calls: list[str] = []
+
+    async def fake_stat(name):
+        nonlocal in_flight, max_in_flight
+        calls.append(name)
+        in_flight += 1
+        max_in_flight = max(max_in_flight, in_flight)
+        try:
+            await asyncio.sleep(0.01)
+            return {"rxbytes": 100, "txbytes": 200}
+        finally:
+            in_flight -= 1
+
+    client.async_get_wan_interfaces = fake_wan  # type: ignore[assignment]
+    client.async_get_interface_stat = fake_stat  # type: ignore[assignment]
+
+    stats = asyncio.run(client.async_get_all_interface_stats(interfaces=interfaces))
+
+    assert len(stats) == len(interfaces)
+    assert len(calls) == len(interfaces)
+    assert max_in_flight <= 4
+    assert max_in_flight > 1
+
+
+def test_async_get_all_interface_stats_swallows_per_interface_errors() -> None:
+    """One failing interface must not poison the whole result set."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+
+    interfaces = {
+        "ISP": {"id": "ISP", "type": "Ethernet", "link": "up"},
+        "Backup": {"id": "Backup", "type": "Ethernet", "link": "up"},
+    }
+
+    async def fake_wan(interfaces=None, iface_list=None):
+        return [{"id": "ISP"}, {"id": "Backup"}]
+
+    async def fake_stat(name):
+        if name == "Backup":
+            raise RuntimeError("boom")
+        return {"rxbytes": 1}
+
+    client.async_get_wan_interfaces = fake_wan  # type: ignore[assignment]
+    client.async_get_interface_stat = fake_stat  # type: ignore[assignment]
+
+    stats = asyncio.run(client.async_get_all_interface_stats(interfaces=interfaces))
+
+    assert "ISP" in stats
+    assert "Backup" not in stats
+
+
+def test_async_get_mesh_nodes_keeps_fallback_when_mws_returns_empty_list() -> None:
+    """A blank MWS response should not hide extenders seen in the client list."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+
+    clients = [
+        {
+            "mac": "AA:BB:CC:00:00:01",
+            "system-mode": "extender",
+            "active": True,
+            "name": "Extender",
+        }
+    ]
+
+    async def fake_get(subpath):
+        assert subpath == "show/mws/member"
+        return []
+
+    client._rci_get = fake_get  # type: ignore[assignment]
+
+    nodes = asyncio.run(client.async_get_mesh_nodes(clients=clients))
+
+    assert [node["mac"] for node in nodes] == ["AA:BB:CC:00:00:01"]
+    assert nodes[0]["state"] == "up"
+
+
+def test_async_get_mesh_nodes_keeps_fallback_when_mws_members_have_no_cid() -> None:
+    """Malformed MWS members should not erase the safer hotspot fallback."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+
+    clients = [
+        {
+            "mac": "AA:BB:CC:00:00:02",
+            "system-mode": "repeater",
+            "active": False,
+        }
+    ]
+
+    async def fake_get(subpath):
+        assert subpath == "show/mws/member"
+        return [{"mac": "AA:BB:CC:00:00:02", "model": "Extender"}]
+
+    client._rci_get = fake_get  # type: ignore[assignment]
+
+    nodes = asyncio.run(client.async_get_mesh_nodes(clients=clients))
+
+    assert [node["mac"] for node in nodes] == ["AA:BB:CC:00:00:02"]
+    assert nodes[0]["state"] == "down"
+
+
+def test_async_get_mesh_nodes_parses_dict_member_payload_and_single_port() -> None:
+    """RCI may return MWS members/ports as dicts instead of lists."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    clients = [
+        {
+            "mac": "AA:BB:CC:00:00:03",
+            "system-mode": "extender",
+            "active": True,
+        }
+    ]
+
+    async def fake_get(subpath):
+        assert subpath == "show/mws/member"
+        return {
+            "member": {
+                "cid": "AA:BB:CC:00:00:03",
+                "mac": "AA:BB:CC:00:00:03",
+                "ip": "192.0.2.53",
+                "known-host": "Kitchen Extender",
+                "internet-available": "yes",
+                "rci": {"errors": "0"},
+                "system": {"uptime": "123"},
+                "port": {
+                    "label": "1",
+                    "appearance": "GigabitEthernet",
+                    "link": "up",
+                    "speed": 1000,
+                },
+            }
+        }
+
+    client._rci_get = fake_get  # type: ignore[assignment]
+
+    nodes = asyncio.run(client.async_get_mesh_nodes(clients=clients))
+
+    assert len(nodes) == 1
+    assert nodes[0]["cid"] == "AA:BB:CC:00:00:03"
+    assert nodes[0]["connected"] is True
+    assert nodes[0]["name"] == "Kitchen Extender"
+    assert nodes[0]["port"] == [
+        {
+            "label": "1",
+            "appearance": "GigabitEthernet",
+            "link": "up",
+            "speed": 1000,
+            "duplex": None,
+        }
+    ]
+
+
+def test_async_get_mesh_nodes_treats_string_no_as_disconnected() -> None:
+    """String booleans from MWS must not make offline extenders look online."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    clients = [
+        {
+            "mac": "AA:BB:CC:00:00:04",
+            "system-mode": "extender",
+            "active": True,
+        }
+    ]
+
+    async def fake_get(subpath):
+        return [
+            {
+                "cid": "AA:BB:CC:00:00:04",
+                "mac": "AA:BB:CC:00:00:04",
+                "internet-available": "no",
+                "rci": {"errors": "0"},
+            }
+        ]
+
+    client._rci_get = fake_get  # type: ignore[assignment]
+
+    nodes = asyncio.run(client.async_get_mesh_nodes(clients=clients))
+
+    assert nodes[0]["connected"] is False
+    assert nodes[0]["state"] == "down"
+
+
+def test_update_progress_normalizes_string_values() -> None:
+    """Keenetic update status may return boolean/progress values as strings."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+
+    async def fake_get(subpath):
+        assert subpath == "system/update/status"
+        return {"in-progress": "no", "progress": "85", "stage": "download"}
+
+    client._rci_get = fake_get  # type: ignore[assignment]
+
+    progress = asyncio.run(client.async_get_update_progress())
+
+    assert progress == {
+        "in_progress": False,
+        "progress_percent": 85,
+        "stage": "download",
+        "eta_seconds": None,
+    }
+
+
+def test_summarize_client_stats_excludes_extenders() -> None:
+    """Client stats count user devices separately from mesh extenders."""
+    clients = [
+        {"mac": "a", "active": True, "ssid": "Main"},
+        {"mac": "b", "active": "no", "interface": "Bridge0"},
+        {"mac": "c", "system-mode": "extender", "active": True},
+    ]
+
+    summary = KeeneticClient.summarize_client_stats(clients)
+
+    assert summary["connected"] == 1
+    assert summary["disconnected"] == 1
+    assert summary["total"] == 2
+    assert summary["per_ap"] == {"Main": 1}
+    assert summary["extender_count"] == 1

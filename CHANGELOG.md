@@ -1,0 +1,814 @@
+# Changelog
+
+All notable changes to this integration are documented here.
+
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Entries are written for end users (HACS installs); each release is grouped by
+what you actually notice on your dashboard. For per-commit detail, see the
+git log.
+
+## 1.7.44
+
+- Maintenance cleanup only. No user-visible behavior changed.
+
+## 1.7.43
+
+- Maintenance cleanup only. No user-visible behavior changed.
+
+## 1.7.42
+
+- Maintenance cleanup only. No user-visible behavior changed.
+
+## 1.7.41
+
+- Maintenance cleanup only. No user-visible behavior changed.
+
+## 1.7.40
+
+- Maintenance cleanup only. No user-visible behavior changed.
+
+## 1.7.39
+
+- Maintenance cleanup only. No user-visible behavior changed.
+
+## 1.7.38
+
+- Maintenance cleanup only. No user-visible behavior changed.
+
+## 1.7.37
+
+- Maintenance cleanup only. No user-visible behavior changed.
+
+## 1.7.36
+
+- Maintenance cleanup only. No user-visible behavior changed.
+
+## 1.7.35
+
+- Maintenance cleanup only. No user-visible behavior changed.
+
+## 1.7.34
+
+- Maintenance cleanup only. No user-visible behavior changed.
+
+## 1.7.33
+
+### Security
+
+- Diagnostics and warning logs now redact additional mesh identifiers that can expose MAC addresses.
+
+## 1.7.32
+
+### Bug fixes
+
+- WAN, mesh-node, and IPsec value sensors now continue updating correctly between state changes.
+- Wi-Fi switch and Wi-Fi temperature entities now report unavailable correctly when the router cannot be refreshed.
+- Tracked client device trackers no longer write duplicate state updates on each refresh.
+
+### Security
+
+- Diagnostics and debug logs no longer expose MAC addresses through indexed diagnostic data or full MAC lists.
+- NDNS debug logging now records only payload shape instead of dumping the full router response.
+
+## 1.7.31
+
+- Maintenance cleanup only. No user-visible behavior changed.
+
+## 1.7.30
+
+### Improvements
+
+- WAN, mesh-node, IPsec, and client entities now reduce unnecessary Home Assistant state writes while still updating immediately on meaningful state changes.
+- Mesh client association counts are calculated once per refresh, reducing repeated work on mesh installations.
+
+### Reliability
+
+- Router data fetches now avoid silently swallowing unexpected errors in several optional data paths.
+
+## 1.7.29
+
+### Improvements
+
+- WAN and mesh-node sensors now use faster lookups during refreshes, reducing per-tick work on routers with several WAN interfaces or mesh nodes.
+
+## 1.7.28
+
+### Bug fixes
+
+- WAN sensors no longer fail when the router returns an unexpected interface summary payload.
+- Mesh nodes on older firmware are no longer reported as connected when they are offline.
+- DNS-over-HTTPS URI redaction now tolerates malformed port values.
+
+## 1.7.27
+
+### Bug fixes
+
+- Port information is no longer dropped when the router returns a non-empty port list.
+- Controller firmware updates now handle empty success responses from the router.
+- Mesh node firmware updates now stop cleanly when staging fails and can fall back from controller-driven updates to direct-node updates when needed.
+- Per-host policy lookups now match MAC addresses consistently across casing and formatting differences.
+- Optional router data parsers now tolerate one malformed row without dropping the rest of that sensor group.
+- Mesh nodes on older firmware that omit internet availability now use a safer connection fallback.
+
+### Security
+
+- DNS-over-HTTPS upstream URIs are redacted in Home Assistant state and diagnostics so embedded IDs or credentials are not exposed.
+
+## 1.7.26
+
+- Maintenance cleanup only. No user-visible behavior changed.
+
+## 1.7.25
+
+- Maintenance cleanup only. No user-visible behavior changed.
+
+## 1.7.24
+
+- Maintenance cleanup only. No user-visible behavior changed.
+
+## 1.7.23
+
+- Maintenance cleanup only. No user-visible behavior changed.
+
+## 1.7.22
+
+### Bug fixes
+
+- Coordinator setup no longer fails after upgrading from earlier 1.7.x builds.
+
+## 1.7.21
+
+- Maintenance cleanup only. No user-visible behavior changed.
+
+## 1.7.20 - Quiet polling and sensor accuracy
+
+### Bug fixes
+
+- **Stopped flooding the router log with errors for unsupported features.**
+  Diagnostics for IPsec site-to-site tunnels, the DNS proxy, the Ping Check
+  service, NDNS / KeenDNS, and captive-portal client lists are now skipped on
+  routers that do not expose those features, after the very first
+  not-found response. Previously the integration retried each missing
+  endpoint on every poll, producing thousands of ndm errors per hour in the
+  router log on hardware without Guest Wi-Fi, IPsec, or DNS-proxy support.
+- **Active Connections sensor now records a live count instead of a total.**
+  The sensor switched to an instantaneous measurement, so HA long-term
+  statistics stop treating it as a monotonic running total and the graph
+  reflects what the router actually shows.
+- **Memory Usage sensor never reports below 0% or above 100%.** Transient
+  firmware payloads where memfree briefly exceeds memtotal no longer
+  produce nonsense percentages.
+- **CPU, memory, traffic and uptime sensors reject NaN and infinity.**
+  A malformed numeric value from the router can no longer poison HA
+  recorder statistics for those sensors.
+- **Prevented spurious 401 auth errors during high-concurrency polling.**
+  Auth refreshes are now serialised, so several RCI calls hitting an
+  expired session at once cannot race and overwrite each other's
+  credentials mid-flight.
+- **Ping Check and DNS proxy diagnostics now accept single-entry payloads.**
+  Routers that return one profile or one DoH upstream as a dict instead of
+  a list no longer cause those WAN / DNS diagnostics to disappear.
+
+## 1.7.19 - Tracked-client and coordinator stability
+
+### Bug fixes
+
+- **Tracked-client diagnostic sensors now handle availability consistently.**
+  RX/TX, RSSI, Link Speed, Wi-Fi Session and Last Seen now use the same
+  availability rules when the router data changes or a client disappears.
+- **Kept tracked device trackers available when a client disappears from the
+  router table.** Missing clients now continue to render as Away instead of
+  becoming Unavailable, while real coordinator failures still mark the tracker
+  unavailable.
+- **Hardened optional coordinator payloads.** Malformed ping-check, DNS, IPsec,
+  interface-stat and crypto-map diagnostic payloads now fall back to empty data
+  instead of breaking the refresh tick.
+- **Stopped fast refreshes from mutating cached crypto-map data in place.**
+  Cached site-to-site IPsec data is copied before enrichment, and incomplete
+  crypto-map counter rows no longer raise errors.
+
+## 1.7.17 - Router payload hardening
+
+### Bug fixes
+
+- **Mesh discovery failures no longer fail the whole coordinator refresh.**
+  Optional extender discovery now falls back to an empty mesh list for that
+  tick, while core router/client/WAN data continues updating.
+- **WAN backup ordering now handles priorities returned as strings.** Backup
+  connection labels stay correct when Keenetic RCI returns `"80"` instead of
+  `80`.
+- **Platform setup and dynamic entity listeners now tolerate malformed router
+  payload rows.** Bad non-dict rows in mesh, port, WAN, Wi-Fi and crypto-map
+  payloads are skipped instead of crashing entity setup.
+- **Mesh and main-router port sensors now ignore malformed port rows.**
+  Existing valid ports still render normally.
+
+## 1.7.16 - Sensor payload hardening
+
+### Bug fixes
+
+- **System CPU and memory sensors now tolerate malformed numeric router
+  values.** Odd RCI payloads no longer risk raising from direct `float(...)`
+  conversion; unavailable values now stay unavailable.
+- **Mesh CPU, memory and client-count sensors now use the shared Keenetic
+  parsing helpers.** This keeps extender diagnostics consistent with the main
+  router sensors and avoids duplicated fallback logic.
+- **Tracked-client lookup now falls back safely when the MAC index contains
+  unexpected values.** Client entities and device trackers reuse the same
+  normalized raw-list fallback instead of assuming every indexed value is a
+  dict.
+
+## 1.7.15 - Tracked-client parsing hardening
+
+### Bug fixes
+
+- **Tracked-client Wi-Fi parsing now handles numeric fields returned as
+  strings.** Link speed and Wi-Fi band/type inference no longer risk failing
+  when a Keenetic RCI path returns `txrate` or RSSI-like fields as text.
+- **Device-tracker fallback lookup now normalizes MAC address variants.** If
+  coordinator data ever falls back to the raw client list instead of the
+  precomputed MAC index, `AA-BB-...`, `aa:bb:...`, and compact MAC forms still
+  resolve to the same tracked client.
+
+## 1.7.14 - Offline tracked-client live metrics
+
+### Improvements
+
+- **Offline tracked clients now show less diagnostic noise.** Live Wi-Fi
+  session fields are unavailable when the router says the client is away:
+  Wi-Fi Session, Link Speed, RSSI, and WiFi Mode no longer show misleading
+  zero/unknown values for disconnected clients.
+- **Offline zero traffic counters are unavailable at the entity level.** When
+  Keenetic keeps an offline hotspot row with reset `rxbytes`/`txbytes`, RX/TX
+  are marked unavailable instead of appearing as meaningful live counters.
+
+## 1.7.13 - Last Seen frontend rendering hardening
+
+### Bug fixes
+
+- **Tracked-client Last Seen now avoids Home Assistant's relative-time
+  rendering more aggressively.** The entity explicitly clears `device_class`
+  and uses `DD.MM.YYYY HH:MM:SS`, so offline clients should show exact local
+  date/time instead of “15 minutes ago”.
+
+## 1.7.12 - Exact tracked-client Last Seen display
+
+### Improvements
+
+- **Tracked-client Last Seen now displays exact local date and time.** Home
+  Assistant timestamp sensors are commonly rendered as relative text such as
+  “9 minutes ago”, so Last Seen is now exposed as formatted diagnostic text
+  (`YYYY-MM-DD HH:MM:SS`) while still remaining unavailable for online clients.
+
+## 1.7.11 - Offline tracked-client Last Seen fix
+
+### Bug fixes
+
+- **Offline tracked-client Last Seen now has a second fetch path.** Some
+  Keenetic firmware exposes `show ip neighbour` correctly through `/rci/parse`
+  even when `/rci/show/ip/neighbour` is empty. The integration now falls back
+  to the parse command, so offline clients can show the router's actual
+  last-seen timestamp.
+- **Offline hotspot rows now prefer neighbour Last Seen.** If Keenetic keeps an
+  offline client in the hotspot table with zero-ish live data, the coordinator
+  now treats the neighbour table as the authoritative source for the offline
+  timestamp.
+- **Online tracked-client Last Seen is marked unavailable.** The entity now
+  becomes unavailable while the client is online instead of showing a confusing
+  `Unknown` timestamp.
+- **Offline zero traffic counters are no longer shown as real `0.00 GB`
+  values.** If Keenetic resets `rxbytes`/`txbytes` to zero for an offline
+  hotspot row, RX/TX become unavailable rather than misleading.
+
+## 1.7.10 - Cleaner tracked-client diagnostics
+
+### Improvements
+
+- **Tracked-client Last Seen now only appears when it is meaningful.** Online
+  clients report `Unavailable` for Last Seen instead of a constantly changing
+  “seen a few seconds ago” timestamp. Offline clients still use Keenetic's
+  neighbour data to show the last time the router saw the device.
+- **New tracked-client setups no longer create First Seen and DHCP Registered
+  sensors.** These fields were diagnostic noise for the common dashboard use
+  case; presence, IP, link speed, signal, traffic, Wi-Fi session, band and mode
+  remain available.
+
+## 1.7.9 - Router-scoped tracked clients
+
+### Bug fixes
+
+- **The same tracked client can now be added to multiple Keenetic routers
+  without merging into one Home Assistant device.** Client devices are now
+  scoped by config entry plus MAC address, so a phone tracked on Orange and
+  Yakhny appears as two independent devices instead of one mixed device with
+  `_2` entity IDs.
+- **Tracked-client MAC formats are canonicalized everywhere.** `80:07:...`,
+  `80-07-...`, and `8007...` now resolve to the same tracked client key within
+  one router, preventing duplicate sensors and duplicate Connection Policy
+  controls.
+- **Placeholder IP addresses are no longer treated as real client IPs.**
+  `0.0.0.0` and `::` are ignored for tracked-client setup, entity IP values,
+  and configuration URLs.
+
+## 1.7.8 - Better tracked-client seen times
+
+### Improvements
+
+- **Tracked-client Last Seen now keeps working after a device goes offline.**
+  The coordinator merges Keenetic's IP-neighbour table with the hotspot client
+  table, so registered clients that disappear from Wi-Fi can still show the
+  last time the router saw them instead of falling back to `Unavailable`.
+- **Tracked-client First Seen is back as a timestamp.** New setups get a
+  diagnostic First Seen sensor sourced from Keenetic neighbour/hotspot data,
+  shown as a Home Assistant timestamp instead of raw seconds.
+- **Tracked-client Uptime is now labelled Wi-Fi Session.** The existing entity
+  identity is preserved, but the dashboard label now describes what Keenetic
+  actually reports for Wi-Fi clients: the current connection session duration.
+- **Device tracker diagnostics now explain neighbour-based presence.** Tracked
+  clients expose `last_seen_source`, `first_seen_source`, `neighbour_expired`,
+  `neighbour_wireless`, and `neighbour_leasetime` attributes to make offline
+  troubleshooting easier.
+
+## 1.7.7 - Presence and polling safety fixes
+
+### Bug fixes
+
+- **Tracked clients no longer flip to away on a transient client-table
+  failure.** If the Keenetic hotspot client table fails after a successful
+  refresh, the coordinator keeps the previous client snapshot for that tick and
+  marks it stale instead of publishing an empty table.
+- **Interface statistics now respect the router polling concurrency cap.**
+  Large interface batches are limited to four in-flight per-interface stat
+  requests, matching the coordinator's RCI concurrency guard.
+
+## 1.7.6 - Cleaner tracked-client diagnostics
+
+### Improvements
+
+- **Removed the separate tracked-client Link Status sensor from new setups.**
+  Presence already uses the same Keenetic `link=up` signal, so the extra sensor
+  was redundant.
+- **Renamed tracked-client TX Rate to Link Speed.** For Wi-Fi clients,
+  Keenetic's `txrate` is the useful current link-speed signal shown in Mbps, so
+  the entity now uses the clearer dashboard label.
+
+## 1.7.5 - Router-based tracked-client presence
+
+### Bug fixes
+
+- **Tracked clients no longer depend on ICMP ping from Home Assistant.** Device
+  trackers now use the Keenetic client table directly: `link=up` or
+  `active=true` means `home`, which works for clients in isolated or routed
+  networks where HA cannot ping the device.
+- **Tracked-client presence attributes are easier to understand.** Device
+  trackers now expose `tracking_method: router_link` and `presence_source`
+  (`link`, `active`, `inactive`, or `missing`) so the reason for `home`/`away`
+  is visible.
+- **Last Seen is now a timestamp.** The tracked-client `Last Seen` sensor shows
+  when the router last saw the device instead of a raw “seconds ago” duration.
+
+### Improvements
+
+- **Removed the unused ICMP dependency.** The integration no longer installs
+  `icmplib`, reducing setup complexity and avoiding host/container ICMP
+  permission issues.
+- **Reduced tracked-client sensor noise.** New setups no longer create the
+  low-value `First Seen`, `Link Speed`, or `Port` tracked-client sensors by
+  default, because they commonly showed raw seconds or `unknown` for Wi-Fi
+  clients.
+
+## 1.7.4 - Payload parsing, options, and Ping Check hardening
+
+### Bug fixes
+
+- **Single-host client payloads are no longer dropped.** Some Keenetic RCI
+  responses collapse one host into a plain object instead of a list; the
+  integration now keeps that client visible.
+- **Mesh fallback nodes survive blank MWS responses.** If `show/mws/member`
+  returns an empty or incomplete payload, extenders discovered from the
+  hotspot client table remain available instead of disappearing for that tick.
+- **MWS single-object payloads are parsed correctly.** `show/mws/member`
+  responses that collapse one member or port into a dict now still produce
+  the correct mesh node and port entities.
+- **String booleans from Keenetic are handled consistently.** Mesh extender
+  activity, MWS internet availability, firmware update progress, and client
+  statistics no longer treat values like `"no"` as truthy.
+- **Options now reuse the running router client.** Opening the integration
+  options no longer performs an avoidable extra client setup when Home
+  Assistant already has an active runtime client.
+- **Ping Check parsing is more faithful to Keenetic behaviour.** Persistent
+  `_WEBADMIN_*` profiles from the web UI are treated as authoritative, while
+  TEST-NET one-off probe targets are ignored so they do not create false WAN
+  outages.
+- **Cached IPsec throughput is not resampled on fast coordinator ticks.**
+  Crypto-map throughput now preserves the last real sample until the next
+  slow crypto-map refresh, avoiding misleading zero/underestimated rates.
+- **New-device logs no longer expose full client MAC/IP identifiers.** Home
+  Assistant events still contain the full data for automations, but info logs
+  now use masked suffixes.
+
+## 1.7.3 - State freshness and direct mesh update hardening
+
+### Bug fixes
+
+- **Tracked-client uptime and last-seen sensors now update on their own ticks.**
+  The client entity base still suppresses noisy uptime/last-seen-only writes
+  for unrelated tracked-client entities, but the dedicated uptime and last-seen
+  sensors now opt back into those fields.
+- **Removed mesh and WAN sub-devices now become unavailable instead of stale.**
+  Dynamically created mesh and WAN entities stay in Home Assistant after the
+  router removes them, but their availability now correctly reflects that the
+  underlying node/uplink is gone.
+- **Direct mesh firmware updates recover from stale node cookies.** If a mesh
+  node rotates its auth cookie during challenge auth, the integration now keeps
+  the final cookie. If a cached cookie expires during direct node update calls,
+  the cache is invalidated so the next attempt can authenticate cleanly.
+
+## 1.7.2 - Stability fixes for mesh, auth, and translations
+
+### Bug fixes
+
+- **Raw aiohttp responses are now released on auth and mesh update paths.**
+  Challenge auth, mesh-node auth, and direct node firmware update requests
+  now close every response object explicitly.
+- **`/rci/parse` arguments use strict single-token validation.**
+  Interface names, MACs, policies, crypto-map names, and mesh CIDs now reject
+  whitespace, quotes, shell separators, control characters, and expansion
+  characters before command construction.
+- **English translations are synced with `strings.json`.** Reconfigure and
+  connection-mode UI strings no longer drift from Home Assistant's source
+  translation file.
+- **Mesh-node and tracked-client uptime sensors use `TOTAL_INCREASING`.**
+  This matches router, PPPoE, and WireGuard uptime statistics while leaving
+  `last_seen` as a resetting measurement.
+
+### Improvements
+
+- **Mesh unique IDs are entry-scoped and collision-resistant.** Mesh sensors,
+  connect/update binary sensors, reboot buttons, and firmware update entities
+  now use the full sanitized mesh node id with the config entry id. Existing
+  mesh entity registry entries are migrated from the old truncated IDs.
+- **Mesh entities are added dynamically.** Newly discovered mesh nodes and
+  mesh ports are added by coordinator listeners across sensor, binary sensor,
+  button, and update platforms without requiring a Home Assistant restart.
+
+## 1.7.1 - HACS validation fixes for 1.7.0
+
+Hotfix for two HACS validation errors that 1.7.0 tripped:
+
+- **`min_ha_version` is not a valid `manifest.json` key** — that field
+  is not accepted for custom integrations. The minimum HA version is now
+  declared in `hacs.json` via the standard `homeassistant: "2024.5.0"` key,
+  which is what HACS actually reads.
+- **`CONFIG_SCHEMA` warning** — hassfest requires every integration
+  that defines `async_setup` to declare a config schema, even when
+  it has no YAML support. The integration root now exposes
+  `CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)` — the
+  canonical "UI-only, no YAML" helper.
+
+This release exists so HACS accepts installs again.
+
+## 1.7.0 - Hardening, modern HA APIs, and statistics fixes
+
+> ⚠️ **Minimum Home Assistant version bumped to 2024.5.0.** This release
+> uses HA's `runtime_data` config-entry pattern, which is unavailable
+> on older HA core versions. If you are still on 2024.4 or earlier,
+> stay on 1.6.8 until you upgrade HA.
+
+### 🔒 Security
+
+- **`SECURITY.md` shipped.** Documents what the integration redacts
+  (diagnostics, logs, repr) and — honestly — what it cannot protect:
+  HA stores config-entry passwords as plaintext in
+  `<config>/.storage/core.config_entries`, and no integration can fix
+  that. If you have ever shared a HA backup or a `.storage/` snapshot,
+  rotate your router admin password.
+- **Cancellation safety in every error-handling path.** Every
+  `except Exception` block in the API client, coordinator, firmware-
+  update flow, and config flow now re-raises `asyncio.CancelledError`
+  before falling through to its generic handler. The old broad catch
+  swallowed HA's shutdown signal during integration reload, sometimes
+  producing hangs that needed a HA restart to resolve.
+
+### 🐛 Bug fixes
+
+- **Uptime sensors no longer produce a sawtooth in long-term graphs.**
+  Router uptime, PPPoE uptime, and WireGuard tunnel uptime were
+  declared as `MEASUREMENT`, which made HA's recorder treat each poll
+  as a separate gauge value and store a 1-week sawtooth in the LTS
+  table. They are now `TOTAL_INCREASING` — the right state class for
+  a monotonic counter that resets on reboot/reconnect — and the
+  long-term-statistics graph for those sensors is now smooth.
+- **Reauth and reconfigure use the modern HA helper.** Both flows now
+  call `async_update_reload_and_abort` instead of the deprecated
+  `async_update_entry` + `async_abort` pair. The previous pattern
+  occasionally left users running with stale credentials until they
+  manually reloaded the integration; the new flow reloads in the
+  same step.
+
+### ✨ Improvements
+
+- **Modern Home Assistant runtime storage.** The integration now uses
+  Home Assistant's current config-entry runtime storage. If you happen to
+  write custom blueprints or scripts that poke at
+  `hass.data["keenetic_router_pro"]`, they need updating.
+- **`min_ha_version: 2024.5.0` declared in the manifest.** HACS will
+  refuse to install on older HA cores rather than letting you hit a
+  cryptic `runtime_data` AttributeError at setup time.
+
+## 1.6.8 - Performance improvements
+
+### Performance
+
+- **Coordinator builds an O(1) MAC-keyed client index.** Per-client entities
+  (sensors, switches, device-trackers) used to scan the full client list on
+  every coordinator tick to find their own row. The coordinator now publishes
+  `clients_by_mac`, and entities look themselves up directly. On a network
+  with hundreds of tracked devices this turns an O(N²) per-tick cost into
+  O(N).
+- **Per-client entities skip no-op state writes.** `ClientEntity` now compares
+  a fingerprint of its client row (excluding `last-seen` / `uptime` ticks) and
+  short-circuits `_handle_coordinator_update` when nothing meaningful changed.
+  Idle clients no longer trigger HA state writes every poll cycle.
+- **Interface stats fetched in parallel.** `async_get_all_interface_stats`
+  now uses `asyncio.gather` instead of sequential awaits, cutting WAN-stats
+  fetch latency on multi-interface routers.
+- **Interface list shared across the polling stages.** Stage 1 now fetches
+  `iface_list` once and passes it through to stage 2, mesh fetch, and the
+  WAN-status projection — eliminating ~3 redundant `show interface` round-trips
+  per coordinator tick.
+- **Mesh fetch reuses the already-fetched client list.** `_get_mesh_nodes_from_clients`
+  accepts a pre-fetched `clients=` argument so we don't re-call
+  `async_get_clients()` when the coordinator just fetched it.
+
+### Notes
+
+- Configuration is unchanged and entity unique IDs are preserved.
+- 1.6.6 mesh `device_info` None-guard and 1.6.7 plaintext-HTTP repair card
+  are preserved.
+
+## 1.6.7 - Plaintext-HTTP repair warning
+
+### 🔒 Security
+
+- **Repair card now warns when the integration is configured for plaintext
+  HTTP to a non-loopback router.** When SSL is disabled and the host is not
+  a loopback address, the integration raises a Home Assistant Repair issue
+  explaining that your router username, NDW2 password hash, and session
+  cookie traverse the LAN unencrypted on every poll. The card links to the
+  remediation steps in `SECURITY.md` and is automatically cleared once you
+  reconfigure the entry to use HTTPS. No configuration changes required —
+  existing setups will see the card on next reload.
+
+## 1.6.6 - Mesh and client bug fixes
+
+### Fixes
+
+- **Mesh device info no longer crashes when a node briefly disappears.** The
+  `MeshEntity.device_info` property could raise `AttributeError` when the
+  underlying mesh node had been removed from the router response between
+  ticks; it now safely returns the fallback router device info.
+- **Hotspot client fetch no longer swallows unrelated exceptions.** The fallback
+  loop in `async_get_clients` previously caught `Exception` indiscriminately,
+  hiding unexpected errors; it now narrows to `KeeneticApiError` and logs
+  fallthroughs at debug level.
+
+## 1.6.5 - IPsec VICI diagnostics
+
+### Improvements
+
+- **Added IPsec VICI diagnostic sensors.** The integration now summarizes
+  recent `IpSec::Vici::Stats: out of memory` router log entries so these
+  firmware/IPsec-stat issues are visible in Home Assistant without manually
+  scraping logs.
+- **Reduced IPsec crypto-map polling pressure.** Site-to-site IPsec tunnel
+  data now uses the very-slow coordinator cadence, matching other diagnostic
+  endpoints and avoiding unnecessary hits to Keenetic's IPsec statistics path.
+
+## 1.6.4 - KeenDNS protected web app access
+
+### Improvements
+
+- **Added a KeenDNS protected web app connection mode.** The integration can
+  now be configured with a password-protected KeenDNS app hostname over HTTPS
+  while keeping the existing direct/local API mode unchanged.
+- **Setup and reconfigure now show mode-specific fields.** KeenDNS protected
+  mode hides direct-only port, SSL and challenge-auth options and uses the
+  HTTPS/443 Basic Auth defaults automatically.
+- **Full URL input is normalized safely.** Setup and reconfigure accept either
+  a bare host name or a full `https://...` URL, reject paths/query strings, and
+  store a clean host/port/SSL target.
+- **Clearer 502 errors for protected apps.** Bad Gateway responses now point to
+  the KeenDNS published application/upstream configuration instead of looking
+  like a generic router API failure.
+
+### Documentation
+
+- Documented the protected-access setup and the minimal `HTTP Proxy`
+  permission needed for full proxied RCI access.
+- Added a warning that verbose curl logs expose Basic Auth headers and should
+  be followed by password rotation when shared.
+
+## 1.6.3 - WireGuard entity cleanup
+
+### Fixes
+
+- **Removed duplicate WireGuard entities from the main router device.** The old
+  WireGuard-specific RX/TX/Uptime sensors are no longer created because the
+  per-interface/WAN device model already exposes the relevant state in the
+  correct place.
+- **Removed duplicate VPN controls on WireGuard WAN devices.** VPN uplinks now
+  keep the WAN `Enabled` switch only, instead of showing both `Enabled` and a
+  separate `WireGuard` switch.
+- **Duration sensors now request whole-second display precision.** WAN and
+  PPPoE uptime sensors set HA's suggested precision to `0`, avoiding noisy
+  values like `212.00 s` where Home Assistant respects the hint.
+
+## 1.6.2 - Interface device organization and VLAN WAN throughput
+
+### Fixes
+
+- **VLAN WAN throughput now works.** WAN VLAN interfaces such as
+  `GigabitEthernet0/Vlan5` are no longer skipped when collecting interface
+  statistics. The integration now uses Keenetic's working
+  `show interface <name> stat` command first and keeps the older RCI GET form
+  as a fallback.
+
+### Improvements
+
+- **WAN interfaces now have an Enable switch on their own HA device.** The
+  switch uses the same Keenetic interface up/down control as the web UI and is
+  grouped with the WAN's status, IP, role, counters and throughput sensors.
+- **VPN controls are grouped with the interface they control.** VPN switches
+  now attach to the matching WAN device when the VPN is an uplink; otherwise
+  they appear under their own VPN/interface device instead of the main router.
+- **Throughput sensors expose raw stat details.** Per-WAN throughput entities
+  now include the raw `rxbytes`, `txbytes`, `rxspeed`, `txspeed`, stat
+  interface and stat timestamp as attributes for easier troubleshooting.
+
+## 1.6.1 - Mesh firmware update start fix
+
+### Fixes
+
+- **Mesh node firmware updates now use the controller MWS command first.**
+  KeeneticOS starts extender updates with `mws member <member> update start`;
+  the previous direct-node component update path could fail with "Could not
+  start firmware update on node ...". The direct-node path remains as a
+  fallback for older or unusual setups.
+
+## 1.6.0 - DNS over HTTPS diagnostics
+
+### Improvements
+
+- **New DNS Proxy Status sensor** — shows whether the router's DNS proxy is
+  healthy, degraded, down or unknown. This helps detect the failure mode where
+  raw IP connectivity still works but DNS over HTTPS stops answering.
+- **New DNS Proxy Failed Requests sensor** — exposes failed upstream DNS proxy
+  requests from the router's own stats so you can build Home Assistant
+  automations around DNS/DoH trouble without scraping router logs.
+
+## 1.5.1 - Stability and reload hygiene
+
+### Bug fixes
+
+- **Memory leak when reloading the integration** — every "Reload" action (or
+  options-flow change, which reloads the integration) used to leave behind an
+  invisible event listener bound to the previous coordinator. Over enough
+  reloads this could grow Home Assistant's memory footprint and cause
+  duplicate "new device" events. The listener is now properly unregistered
+  on unload.
+- **Cleaner shutdown when Home Assistant is stopping** — the ICMP ping loop
+  now correctly propagates cancellation during HA shutdown instead of
+  swallowing it. Stopping HA mid-tick no longer logs spurious "ping failed"
+  noise.
+- **Friendlier error if the router host is missing from the config entry** —
+  if a config entry somehow ends up without a `host` value (e.g. after a
+  migration glitch), setup now fails fast with a clear "please reconfigure"
+  message instead of crashing later with an opaque `NoneType` error.
+
+### Improvements
+
+- **Slightly faster fast-tick** — the 10-second coordinator tick no longer
+  rebuilds two intermediate cache dicts on every iteration. Negligible by
+  itself, but Home Assistant runs this loop ~8 600 times per day.
+- **Cleaner setup-error logs** — fixed a duplicated error message when an
+  unexpected exception happens during initial config-flow setup. The
+  traceback was already included; the duplicate string is gone.
+
+## 1.5.0 - Security hardening
+
+### Security
+
+- **Diagnostics downloads no longer leak your router password.** Before this
+  release, the "Download diagnostics" button on the integration card produced
+  a JSON file that could include your Keenetic credentials, session cookies,
+  Wi-Fi PSKs, MAC addresses and SSIDs in plain text. If you attached that
+  file to a GitHub issue or shared it for support, you were leaking secrets.
+  The diagnostics dump is now passed through Home Assistant's redaction
+  helper and all of those fields are replaced with `**REDACTED**` before the
+  file is written.
+- **Password input is now masked in the UI.** The router password field in
+  the initial setup, re-auth and reconfigure dialogs is now a proper
+  password input — characters render as dots instead of plain text. Prevents
+  shoulder-surfing and accidental screenshot leaks during setup.
+- **Router client details can no longer leak credentials in logs.** If a
+  debug-log line or traceback includes the API client object, username and
+  password now show as `<redacted>` while host/port/SSL stay visible for
+  troubleshooting.
+
+### Documentation
+
+- New [`SECURITY.md`](SECURITY.md) explaining where Home Assistant stores
+  the router password (`/config/.storage/core.config_entries`, plain text by
+  HA design — this is not specific to this integration), recommended file
+  permissions, password-rotation procedure, and what the integration
+  redacts in logs and diagnostics.
+
+### Notes
+
+- No config-entry schema change → no migration required, just upgrade and
+  restart.
+- If you previously shared a diagnostics dump publicly, consider rotating your
+  router password as a precaution.
+
+## 1.4.0 - Bug fixes and throughput units
+
+### Bug fixes
+
+- **Re-auth and reconfigure flows finally work.** Previously, when Home
+  Assistant prompted you to re-enter the router password (after a
+  credential change or session expiry), submitting the form silently did
+  nothing — the dialog re-rendered with cryptic error strings instead of
+  completing. Both flows now correctly close on success.
+- **Mesh nodes no longer get stuck after a password change.** If you
+  rotated the password on a mesh node, the integration kept using the old
+  cached auth token until you restarted Home Assistant. The bad token is
+  now evicted automatically on the first `401 Unauthorized` response.
+- **Local-IP sensor is more robust across upgrades.** The sensor no longer
+  depends on a fragile API-client attribute name.
+
+### Improvements
+
+- **WAN and IPsec throughput shown in Mbit/s, not bytes/s.** All
+  networking equipment and ISP plans are quoted in megabits per second,
+  so the previous `B/s` reading required mental math. Sensors now report
+  in Mbit/s with two decimal places, and Home Assistant offers automatic
+  unit conversion (kbit/s ↔ Mbit/s ↔ Gbit/s) directly in the entity
+  customisation dialog — no template tricks needed.
+
+## 1.3.0 - Fork hardening and performance
+
+This is the first release of the maintained fork. The Home Assistant domain
+stays `keenetic_router_pro` so existing dashboards, automations, and entity
+history carry over unchanged from the upstream version.
+
+### Security
+
+- Safer Basic Auth header construction that no longer risks leaking
+  credentials into debug logs.
+- Support for the newer NDW2 challenge-auth scheme used by recent Keenetic
+  firmwares, including session-cookie reuse so we don't re-authenticate on
+  every call.
+- Automatic one-shot re-authentication after expired session cookies before
+  surfacing failure to Home Assistant.
+- Sensitive values (passwords, PSKs, cookies, `Authorization` headers, keys,
+  secrets) are now redacted from API error excerpts and debug logs.
+- Raw config-flow form input is no longer logged at debug level — your
+  password is no longer written to `home-assistant.log` if debug logging
+  is enabled.
+- CLI arguments sent to `/rci/parse` are now validated against an allow-list
+  to prevent command-injection style input.
+- The reconfigure form no longer pre-fills the existing password as a
+  default value.
+
+### Improvements
+
+- **Proper re-auth and reconfigure flows.** When your router password
+  changes, HA now correctly prompts you to re-enter it instead of marking
+  the integration as permanently failed.
+- **Lower router CPU load.** Slow-changing data (firmware version, mesh
+  topology, NDNS info) is now polled on a much longer cycle. Interface
+  statistics are only fetched for interfaces that back enabled sensors.
+- Connected/disconnected/extender counts are now derived from already-
+  fetched client data instead of issuing extra API calls.
+- Fixed a class of bugs where device URLs could appear as `http://None` in
+  the device registry.
+- Wi-Fi presence-tracking interval is configurable from 5 to 300 seconds
+  via the integration's options.
+- The integration no longer requires the `pyqrcode` and `pypng`
+  dependencies — the Wi-Fi QR-image platform was removed.
+
+### Removed
+
+- USB device polling (controller and mesh nodes) — produced more noise
+  than value and added load to slower routers.
+- Wi-Fi QR-code image platform.
+- Non-English translation files (English only is shipped — translations
+  can be contributed back via PR if there is demand).
+
+### Documentation
+
+- Lighter, more practical README focused on install / config /
+  troubleshooting.
+- Manifest documentation and issue-tracker links repointed to the fork.
