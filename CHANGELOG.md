@@ -8,6 +8,19 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.45
+
+### 🐛 Bug fixes
+- Site-to-site IPsec (`crypto map`) polling cadence increased from 5 min to
+  10 min. On some KeeneticOS firmwares (observed on 5.00.C.10), each
+  `show/crypto/map` request triggers an `IpSec::Vici::Stats: out of memory`
+  event inside the router's `ndm` process. Polling the endpoint less often
+  reduces those events proportionally without affecting WAN, interface, or
+  traffic statistics polling (still 10 s). The `Connected` / `Tunnel state`
+  / `IKE state` / RX·TX sensors now update every 10 min instead of every
+  5 min; for faster site-to-site state detection, use a ground-truth health
+  check (e.g. an HA `ping` binary_sensor through the tunnel).
+
 ## 1.7.44
 
 - Maintenance cleanup only. No user-visible behavior changed.

@@ -226,6 +226,13 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         first_refresh = self.data is None
         slow_refresh = first_refresh or self._refresh_count % 6 == 0
         very_slow_refresh = first_refresh or self._refresh_count % 30 == 0
+        # Crypto-map (site-to-site IPsec) polling is gated separately at
+        # 10 min because each `show/crypto/map` call dispatches a Vici
+        # stats query inside ndm, which on KeeneticOS 5.00.C.10 leaks
+        # memory per call ("IpSec::Vici::Stats: out of memory
+        # [0xcffe02a7]"). Reducing call frequency proportionally reduces
+        # OOM events without affecting WAN/interface/traffic polling.
+        crypto_map_refresh = first_refresh or self._refresh_count % 60 == 0
 
         # Precompute the cached fallbacks for skipped slow-tick fetches
         # outside the gather() call so the fast tick doesn't rebuild
@@ -271,7 +278,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             _bounded(self.client.async_get_host_policies()) if slow_refresh else _resolve(_prev.get("host_policies", {})),
             _bounded(self.client.async_get_ndns_info()) if very_slow_refresh else _resolve(_prev.get("ndns", {})),
             _bounded(self.client.async_get_ping_check_status()),
-            _bounded(self.client.async_get_crypto_maps()) if very_slow_refresh else _resolve(_prev.get("crypto_maps", {})),
+            _bounded(self.client.async_get_crypto_maps()) if crypto_map_refresh else _resolve(_prev.get("crypto_maps", {})),
             _bounded(self.client.async_get_dns_proxy_status()) if very_slow_refresh else _resolve(_prev.get("dns_proxy", {})),
             _bounded(self.client.async_get_ipsec_diagnostics()) if very_slow_refresh else _resolve(_prev.get("ipsec_diagnostics", {})),
             return_exceptions=True,
@@ -526,7 +533,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         for cmap_name, cmap in crypto_maps.items():
             prev_cmap = prev_cmap_by_name.get(cmap_name)
-            if not very_slow_refresh and prev_cmap:
+            if not crypto_map_refresh and prev_cmap:
                 cmap["_sample_ts"] = prev_cmap.get("_sample_ts")
                 cmap["rx_throughput"] = prev_cmap.get("rx_throughput", 0.0)
                 cmap["tx_throughput"] = prev_cmap.get("tx_throughput", 0.0)
