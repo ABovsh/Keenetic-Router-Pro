@@ -8,11 +8,10 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.storage import Store
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
-from .api import KeeneticAuthError, KeeneticClient
+from .api import KeeneticClient
 from .const import DOMAIN, FAST_SCAN_INTERVAL
 from .coordinator_parts.derived import (
     build_clients_by_mac,
@@ -20,12 +19,18 @@ from .coordinator_parts.derived import (
     mesh_associations,
     order_wan_interfaces,
 )
+from .coordinator_parts.fetching import (
+    FetchFailure,
+    critical_failures_to_exception,
+    ok_or_default,
+)
 from .coordinator_parts.oom import advance_oom_state, parse_keenetic_log_ts
 from .coordinator_parts.payloads import (
     dict_or_empty,
     list_or_empty,
     merge_clients_with_neighbours,
 )
+from .coordinator_parts.refresh import build_batch_tree, refresh_plan
 from .utils import coerce_int, first_present, normalize_mac
 
 
@@ -135,7 +140,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # Collected per-tick so we can emit a single warning instead of
         # silently defaulting every failing fetch at debug level.
-        failed_fetches: list[tuple[str, BaseException]] = []
+        failed_fetches: list[FetchFailure] = []
 
         def _ok(name, value, default, silent: bool = False):
             """Replace failed fetches with a safe default of the right shape.
@@ -150,24 +155,32 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             the failure is not added to the warning aggregate — the
             api layer is expected to debug-log the reason itself.
             """
-            if isinstance(value, asyncio.CancelledError):
-                raise value
-            if isinstance(value, BaseException):
-                if not silent:
-                    failed_fetches.append((name, value))
+            result = ok_or_default(
+                name,
+                value,
+                default,
+                failed_fetches,
+                silent=silent,
+            )
+            if isinstance(value, BaseException) and not isinstance(
+                value, asyncio.CancelledError
+            ):
                 _LOGGER.debug("Coordinator fetch %s failed: %s", name, value)
-                return default
-            return value
+            return result
  
-        first_refresh = self.data is None
-        slow_refresh = first_refresh or self._refresh_count % 6 == 0
-        very_slow_refresh = first_refresh or self._refresh_count % 30 == 0
+        plan = refresh_plan(
+            first_refresh=self.data is None,
+            refresh_count=self._refresh_count,
+        )
+        first_refresh = plan.first_refresh
+        slow_refresh = plan.slow_refresh
+        very_slow_refresh = plan.very_slow_refresh
         # Site-to-site IPsec state now comes from ``show/ipsec`` (stroke
         # path), which is OOM-safe — verified by burst-testing 90+
         # rapid calls produce zero ``IpSec::Vici::Stats: out of memory``
         # events. Polled on the same ``slow_refresh`` cadence as WAN
         # traffic stats so throughput graphs have matching resolution.
-        ipsec_status_refresh = slow_refresh
+        ipsec_status_refresh = plan.ipsec_status_refresh
 
         # Precompute the cached fallbacks for skipped slow-tick fetches
         # outside the gather() call so the fast tick doesn't rebuild
@@ -194,26 +207,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # in the ``finally`` block below.
         try:
             if self.client._rci_batch_supported is not False:
-                batch_tree: dict[str, Any] = {}
-
-                def _add(path: str) -> None:
-                    node = batch_tree
-                    parts = path.strip("/").split("/")
-                    for p in parts[:-1]:
-                        node = node.setdefault(p, {})
-                    node.setdefault(parts[-1], {})
-
-                _add("show/system")
-                _add("show/interface")
-                _add("show/ip/neighbour")
-                if slow_refresh:
-                    _add("show/version")
-                    _add("show/ping-check")
-                    _add("show/ipsec")
-                if very_slow_refresh:
-                    _add("components/check-update")
-                    _add("show/ndns")
-                    _add("show/dns-proxy")
+                batch_tree = build_batch_tree(plan)
                 try:
                     await self.client.prefetch_tick(batch_tree)
                 except asyncio.CancelledError:
@@ -268,7 +262,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if isinstance(clients, BaseException):
                 previous_clients = _prev.get("clients", [])
                 if previous_clients:
-                    failed_fetches.append(("clients", clients))
+                    failed_fetches.append(FetchFailure("clients", clients))
                     _LOGGER.debug(
                         "Coordinator fetch clients failed; preserving previous client snapshot: %s",
                         clients,
@@ -381,15 +375,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # entity silently shows "zero/empty" instead of ``unavailable``,
             # masking real outages. Raise ``UpdateFailed`` so HA marks the
             # coordinator as failed and retries on the next tick.
-            critical_failures = [
-                (name, err) for name, err in failed_fetches
-                if name in ("system_info", "interfaces")
-            ]
-            if critical_failures:
-                if any(isinstance(err, KeeneticAuthError) for _, err in critical_failures):
-                    raise ConfigEntryAuthFailed("Keenetic credentials were rejected")
-                details = ", ".join(f"{n}: {e!r}" for n, e in critical_failures)
-                raise UpdateFailed(f"Critical router fetch failed ({details})")
+            critical_failures_to_exception(failed_fetches)
 
             client_stats = self.client.summarize_client_stats(clients)
  
@@ -480,7 +466,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "Keenetic coordinator: %d fetch(es) failed this tick and "
                     "fell back to defaults: %s",
                     len(failed_fetches),
-                    ", ".join(name for name, _ in failed_fetches),
+                    ", ".join(failure.name for failure in failed_fetches),
                 )
  
             # ---------- WAN enrichment (CPU-only, runs on already-fetched

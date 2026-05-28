@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 
 import pytest
 
+from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.update_coordinator import UpdateFailed
+
+from custom_components.keenetic_router_pro.api import KeeneticAuthError
 from custom_components.keenetic_router_pro.coordinator_parts.derived import (
     build_clients_by_mac,
     counter_rate_bytes_per_second,
     mesh_associations,
     order_wan_interfaces,
+)
+from custom_components.keenetic_router_pro.coordinator_parts.fetching import (
+    FetchFailure,
+    critical_failures_to_exception,
+    ok_or_default,
 )
 from custom_components.keenetic_router_pro.coordinator_parts.oom import (
     advance_oom_state,
@@ -20,6 +30,11 @@ from custom_components.keenetic_router_pro.coordinator_parts.payloads import (
     dict_or_empty,
     list_or_empty,
     merge_clients_with_neighbours,
+)
+from custom_components.keenetic_router_pro.coordinator_parts.refresh import (
+    RefreshPlan,
+    build_batch_tree,
+    refresh_plan,
 )
 
 
@@ -151,3 +166,89 @@ def test_order_wan_interfaces_orders_default_then_backups_and_assigns_role_label
         "Backup connection 2",
     ]
     assert [wan["role_index"] for wan in ordered] == [0, 1, 2]
+
+
+def test_refresh_plan_cadence_matches_existing_modulo_rules() -> None:
+    """Refresh cadence must preserve the coordinator's existing tick rules."""
+    assert refresh_plan(first_refresh=True, refresh_count=5) == RefreshPlan(
+        first_refresh=True,
+        slow_refresh=True,
+        very_slow_refresh=True,
+        ipsec_status_refresh=True,
+    )
+    assert refresh_plan(first_refresh=False, refresh_count=6) == RefreshPlan(
+        first_refresh=False,
+        slow_refresh=True,
+        very_slow_refresh=False,
+        ipsec_status_refresh=True,
+    )
+    assert refresh_plan(first_refresh=False, refresh_count=30) == RefreshPlan(
+        first_refresh=False,
+        slow_refresh=True,
+        very_slow_refresh=True,
+        ipsec_status_refresh=True,
+    )
+    assert refresh_plan(first_refresh=False, refresh_count=1) == RefreshPlan(
+        first_refresh=False,
+        slow_refresh=False,
+        very_slow_refresh=False,
+        ipsec_status_refresh=False,
+    )
+
+
+def test_build_batch_tree_includes_only_due_paths() -> None:
+    """Composite RCI prefetch tree should match fast/slow/very-slow cadence."""
+    fast = build_batch_tree(RefreshPlan(False, False, False, False))
+    slow = build_batch_tree(RefreshPlan(False, True, False, True))
+    very_slow = build_batch_tree(RefreshPlan(False, True, True, True))
+
+    assert fast == {
+        "show": {
+            "system": {},
+            "interface": {},
+            "ip": {"neighbour": {}},
+        }
+    }
+    assert "version" in slow["show"]
+    assert "ping-check" in slow["show"]
+    assert "ipsec" in slow["show"]
+    assert "components" not in slow
+    assert very_slow["components"] == {"check-update": {}}
+    assert "ndns" in very_slow["show"]
+    assert "dns-proxy" in very_slow["show"]
+
+
+def test_ok_or_default_reraises_cancelled_error() -> None:
+    """Fetch cancellation must never be converted to a fallback payload."""
+    with pytest.raises(asyncio.CancelledError):
+        ok_or_default("clients", asyncio.CancelledError(), [], [])
+
+
+def test_ok_or_default_records_non_silent_fetch_failure() -> None:
+    """Non-silent failures are tracked for aggregate warnings and critical checks."""
+    failed_fetches: list[FetchFailure] = []
+    error = RuntimeError("boom")
+
+    assert ok_or_default("clients", error, [], failed_fetches) == []
+    assert failed_fetches == [FetchFailure("clients", error)]
+
+
+def test_critical_failures_map_auth_to_config_entry_auth_failed() -> None:
+    """Auth failures on critical fetches should start HA reauth."""
+    failures = [FetchFailure("system_info", KeeneticAuthError("bad auth"))]
+
+    with pytest.raises(ConfigEntryAuthFailed):
+        critical_failures_to_exception(failures)
+
+
+def test_critical_failures_map_non_auth_to_update_failed() -> None:
+    """Non-auth critical failures should mark the coordinator refresh failed."""
+    failures = [FetchFailure("interfaces", RuntimeError("boom"))]
+
+    with pytest.raises(UpdateFailed):
+        critical_failures_to_exception(failures)
+
+
+def test_non_critical_failures_do_not_raise() -> None:
+    """Optional endpoint failures remain fallback-only."""
+    critical_failures_to_exception([FetchFailure("dns_proxy", RuntimeError("boom"))])
