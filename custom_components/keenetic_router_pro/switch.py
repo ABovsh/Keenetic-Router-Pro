@@ -171,7 +171,7 @@ class BaseKeeneticSwitch(ControllerEntity, SwitchEntity):
 
 
 class KeeneticWifiSwitch(BaseKeeneticSwitch):
-    """Wi-Fi SSID / interface aç/kapat switch'i."""
+    """Wi-Fi SSID/interface switch."""
 
     def __init__(
         self,

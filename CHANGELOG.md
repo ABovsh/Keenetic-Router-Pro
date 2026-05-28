@@ -8,6 +8,12 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.47
+
+### 🔧 Maintenance
+
+- Refactored internal coordinator, platform setup, and parser structure to make the integration easier to maintain and safer to extend. No entity IDs, configuration data, or user-facing behavior changed.
+
 ## 1.7.46
 
 ### 🐛 Bug fixes

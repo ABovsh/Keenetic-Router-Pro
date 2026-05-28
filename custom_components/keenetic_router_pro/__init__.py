@@ -247,7 +247,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     @callback
     def _async_handle_new_device() -> None:
-        """Yeni cihaz bağlandığında event tetikle."""
+        """Fire an event when a new device connects."""
         new_clients = coordinator.data.get("new_clients", set())
         clients_by_mac = coordinator.data.get("clients_by_mac", {})
         clients = coordinator.data.get("clients", [])
@@ -303,7 +303,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Config entry güncellendiğinde çağrılır (options flow sonrası)."""
+    """Reload the integration after a config entry update."""
     await hass.config_entries.async_reload(entry.entry_id)
 
 
