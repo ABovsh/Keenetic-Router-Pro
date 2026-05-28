@@ -1,7 +1,7 @@
 # Keenetic Router Pro
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![Version](https://img.shields.io/badge/version-1.7.44-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
+[![Version](https://img.shields.io/badge/version-1.7.46-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
 
 Home Assistant custom integration for Keenetic routers. It focuses on local polling, router diagnostics, mesh monitoring, presence tracking, WAN status, traffic counters, firmware updates, and selected client controls.
 
@@ -28,7 +28,9 @@ A maintained, hardened fork of the original Keenetic Router Pro integration. It 
 - **Lower router load.** Slow data such as mesh topology, firmware info,
   host policies, NDNS and IPsec diagnostics is cached across ticks. Client
   totals reuse already-fetched client data, and interface stats are polled
-  only for interfaces that back enabled entities.
+  only for interfaces that back enabled entities. On KeeneticOS 5.x the
+  per-tick reads are batched into a single composite RCI request,
+  cutting HTTP round-trips by ~10×.
 - **Better WAN and VPN visibility.** Per-uplink devices expose status,
   enabled state, role, public IP, uptime, counters and throughput. VLAN WAN
   interfaces and IPsec crypto-map throughput are handled, and VPN controls are
