@@ -10,7 +10,6 @@ import aiohttp
 
 from ...const import (
     DOMAIN,
-    INTERFACE_CONF_DISABLED,
     LINK_STATE_DOWN,
     LINK_STATE_UP,
     UPLINK_ROLE_TOKENS,
@@ -18,9 +17,14 @@ from ...const import (
     WAN_STATUS_DOWN,
     WAN_STATUS_LINK_UP,
 )
-from ...utils import coerce_bool, first_present
 from ..errors import KeeneticApiError
 from ..helpers import _dict_items, _is_endpoint_missing, _normalize_interfaces, iface_label
+from ..parsers.wan import (
+    derive_wan_enabled,
+    derive_wan_internet_access,
+    extract_wan_ip,
+    is_ranked_wan_interface,
+)
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.api.wan")
 
@@ -43,46 +47,11 @@ class WanMixin:
                 interfaces = await self.async_get_interfaces()
             iface_list = _normalize_interfaces(interfaces)
 
-        # ---------- yardımcı: interface'den IP çıkar ----------
-        def _extract_ip(iface: Dict[str, Any]) -> str | None:
-            """Try every known Keenetic address field/format."""
-            # 1) global-address (Keenetic 4.x+)
-            gaddr = iface.get("global-address")
-            if isinstance(gaddr, list) and gaddr:
-                first = gaddr[0]
-                if isinstance(first, dict):
-                    ip = first_present(first, "address", "ip")
-                    if ip:
-                        return str(ip).split("/")[0]
-                elif isinstance(first, str):
-                    return first.split("/")[0]
-
-            # 2) address alanı
-            address = iface.get("address")
-            if isinstance(address, list) and address:
-                first = address[0]
-                if isinstance(first, dict):
-                    ip = first_present(first, "address", "ip")
-                    if ip:
-                        return str(ip).split("/")[0]
-                elif isinstance(first, str):
-                    return first.split("/")[0]
-            elif isinstance(address, str) and address:
-                return address.split("/")[0]
-
-            # 3) doğrudan ip / ipv4 alanı
-            for key in ("ip", "ipv4", "ip-address"):
-                val = iface.get(key)
-                if val and isinstance(val, str):
-                    return val.split("/")[0]
-
-            return None
-
         # ---------- yardımcı: sonuç oluştur ----------
         def _build_result(
             iface: Dict[str, Any], wan_type: str
         ) -> Dict[str, Any]:
-            wan_ip = _extract_ip(iface)
+            wan_ip = extract_wan_ip(iface, prefer_global_address=True)
             link_state = str(iface.get("state") or "").lower()
             if link_state == LINK_STATE_UP:
                 status = WAN_STATUS_CONNECTED if wan_ip else WAN_STATUS_LINK_UP
@@ -202,113 +171,9 @@ class WanMixin:
                 interfaces = await self.async_get_interfaces()
             iface_list = _normalize_interfaces(interfaces)
 
-        def _is_wan(iface: Dict[str, Any]) -> bool:
-            # Explicit uplink role is the strongest signal.
-            role = iface.get("role")
-            if isinstance(role, list) and any(
-                str(r).lower() in UPLINK_ROLE_TOKENS for r in role
-            ):
-                return True
-            if isinstance(role, str) and role.lower() in UPLINK_ROLE_TOKENS:
-                return True
-
-            # Otherwise: global + priority is how Keenetic marks an
-            # interface as a ranked uplink. Both conditions must hold —
-            # `global: true` alone catches LAN bridges in some configs,
-            # and `priority` alone catches non-uplink routing tweaks.
-            is_global = bool(iface.get("global"))
-            has_priority = iface.get("priority") is not None
-            return is_global and has_priority
-
-        def _extract_ip(iface: Dict[str, Any]) -> str | None:
-            # PPPoE/static: flat "address" string. Ethernet WANs in some
-            # firmware versions use global-address/address lists.
-            addr = iface.get("address")
-            if isinstance(addr, str) and addr:
-                return addr.split("/")[0]
-            gaddr = iface.get("global-address")
-            if isinstance(gaddr, list) and gaddr:
-                first = gaddr[0]
-                if isinstance(first, dict):
-                    v = first_present(first, "address", "ip")
-                    if v:
-                        return str(v).split("/")[0]
-                elif isinstance(first, str):
-                    return first.split("/")[0]
-            if isinstance(addr, list) and addr:
-                first = addr[0]
-                if isinstance(first, dict):
-                    v = first_present(first, "address", "ip")
-                    if v:
-                        return str(v).split("/")[0]
-                elif isinstance(first, str):
-                    return first.split("/")[0]
-            return None
-
-        def _derive_enabled(iface: Dict[str, Any]) -> bool:
-            # summary.layer.conf == "disabled" means the interface is
-            # toggled off in the config — matches the UI toggle exactly.
-            summary = iface.get("summary") or {}
-            if not isinstance(summary, dict):
-                summary = {}
-            layer = summary.get("layer") or {}
-            if not isinstance(layer, dict):
-                layer = {}
-            conf = str(layer.get("conf") or "").lower()
-            if conf == INTERFACE_CONF_DISABLED:
-                return False
-            if conf == "running":
-                return True
-            # Fallback: if we don't have a summary, assume enabled unless
-            # state says otherwise.
-            return True
-
-        def _derive_internet_access(iface: Dict[str, Any]) -> bool | None:
-            """Best-effort ping-check / reachability indicator.
-
-            Keenetic's raw show/interface output on this firmware does
-            *not* expose the ping-check result as a distinct field — the
-            red "NO INTERNET ACCESS (PING CHECK)" badge in the web UI is
-            computed client-side from a different RCI call that's not
-            uniformly available across firmware versions.
-
-            As a pragmatic substitute we use:
-                up  = state=="up" AND global AND has routable IP
-                     AND summary.layer.ipv4 in {"running"}
-                down = state != "up" OR global is false OR no IP
-                unknown (None) = state up but no public IP yet (pending)
-
-            This matches the user-visible "this WAN is actually usable"
-            meaning for the common case (PPPoE up with IP, WG tunnel up
-            with handshake) without false-positiving on carrier
-            interfaces or half-initialised uplinks.
-            """
-            state = str(iface.get("state") or "").lower()
-            if state != LINK_STATE_UP:
-                return False
-            if not iface.get("global"):
-                return False
-            ip = _extract_ip(iface)
-            if not ip:
-                summary = iface.get("summary") or {}
-                if not isinstance(summary, dict):
-                    summary = {}
-                layer = summary.get("layer") or {}
-                if not isinstance(layer, dict):
-                    layer = {}
-                if str(layer.get("ipv4") or "").lower() == "pending":
-                    return None
-                return False
-            # Extra guard: PPPoE exposes `fail` when the last session
-            # attempt failed.
-            fail = str(iface.get("fail") or "").lower()
-            if coerce_bool(fail):
-                return False
-            return True
-
         wans: List[Dict[str, Any]] = []
         for iface in iface_list:
-            if not _is_wan(iface):
+            if not is_ranked_wan_interface(iface):
                 continue
             iface_id = iface.get("id") or iface.get("interface-name")
             if not iface_id:
@@ -328,19 +193,19 @@ class WanMixin:
                 "interface_name": iface.get("interface-name"),
                 "type": iface.get("type"),
                 "link_state": str(iface.get("state") or LINK_STATE_DOWN).lower(),
-                "enabled": _derive_enabled(iface),
+                "enabled": derive_wan_enabled(iface),
                 "global": bool(iface.get("global")),
                 "defaultgw": bool(iface.get("defaultgw")),
                 "priority": iface.get("priority"),
                 "role": role_list,
                 "security_level": iface.get("security-level"),
-                "ip": _extract_ip(iface),
+                "ip": extract_wan_ip(iface),
                 "mask": iface.get("mask"),
                 "uptime": iface.get("uptime"),
                 "underlying": iface.get("via"),
                 "remote": iface.get("remote"),
                 "mac": iface.get("mac"),
-                "internet_access": _derive_internet_access(iface),
+                "internet_access": derive_wan_internet_access(iface),
                 "summary_layers": (
                     iface["summary"].get("layer") or {}
                     if isinstance(iface.get("summary"), dict)
