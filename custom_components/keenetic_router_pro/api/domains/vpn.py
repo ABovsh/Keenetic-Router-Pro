@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from typing import Any, Dict, List
 
 import aiohttp
@@ -18,7 +17,6 @@ from ...const import (
     LINK_STATE_UP,
 )
 from ...utils import coerce_bool, first_present
-from ..constants import _IPSEC_VICI_OOM_RE
 from ..errors import KeeneticApiError
 from ..helpers import (
     _as_list,
@@ -31,58 +29,9 @@ from ..helpers import (
     _to_int,
     _validate_cli_arg,
 )
+from ..parsers.ipsec import parse_ipsec_statusall, parse_ipsec_vici_diagnostics
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.api.vpn")
-
-
-# Regexes for the deterministic strongSwan ``ipsec statusall`` text dump
-# served by RCI endpoint ``show/ipsec``. We parse the brief Security
-# Associations block because it carries everything we need on one line
-# per record and is stable across strongSwan 5.x/6.x. The verbose
-# multi-line section below it is intentionally ignored.
-_IPSEC_PHASE1_HEADER_RE = re.compile(
-    r"^\s*(?P<name>\S+?)\[(?P<sa_id>\d+)\]:\s+"
-    r"(?P<state>ESTABLISHED|CONNECTING|REKEYING|DELETING)\s+"
-    r".*?,\s+"
-    r"(?P<local>\S+)\[(?P<local_id>[^\]]+)\]\.\.\."
-    r"(?P<remote>\S+)\[(?P<remote_id>[^\]]+)\]\s*$"
-)
-_IPSEC_PHASE1_SPI_RE = re.compile(
-    r"^\s*(?P<name>\S+?)\[(?P<sa_id>\d+)\]:\s+"
-    r"(?P<ver>IKEv?\d?)\s+SPIs:\s+"
-    r"(?P<local_spi>\S+?)_i\s+(?P<remote_spi>\S+?)_r\*?,\s+"
-    r"(?:rekeying in (?P<rekey>.+?)|reauthentication disabled)\s*$"
-)
-_IPSEC_PHASE1_PROPOSAL_RE = re.compile(
-    r"^\s*(?P<name>\S+?)\[(?P<sa_id>\d+)\]:\s+IKE proposal:\s+(?P<proposal>\S+)\s*$"
-)
-_IPSEC_PHASE2_HEADER_RE = re.compile(
-    r"^\s*(?P<name>\S+?)\{(?P<sa_id>\d+)\}:\s+"
-    r"(?P<state>INSTALLED|REKEYING|DELETING|REKEYED)"
-    r"(?:,\s+(?P<mode>TUNNEL|TRANSPORT))?"
-    r"(?:,\s+reqid\s+(?P<reqid>\d+))?"
-    r"(?:,\s+(?P<proto>ESP|AH))?"
-    r"(?P<encap>\s+in\s+UDP)?"
-    r".*?SPIs:\s+(?P<local_spi>\S+?)_i\s+(?P<remote_spi>\S+?)_o\s*$"
-)
-_IPSEC_PHASE2_COUNTERS_RE = re.compile(
-    r"^\s*(?P<name>\S+?)\{(?P<sa_id>\d+)\}:\s+"
-    r"(?P<proposal>\S+?),\s+"
-    r"(?P<bytes_i>\d+)\s+bytes_i"
-    r"(?:\s+\((?P<pkts_i>\d+)\s+pkts(?:,\s+(?P<last_i>\d+)s ago)?\))?,\s+"
-    r"(?P<bytes_o>\d+)\s+bytes_o"
-    r"(?:\s+\((?P<pkts_o>\d+)\s+pkts(?:,\s+(?P<last_o>\d+)s ago)?\))?"
-    r"(?:,\s+rekeying in (?P<rekey>.+?))?\s*$"
-)
-_IPSEC_CONNECTION_LINE_RE = re.compile(
-    r"^\s*(?P<name>\S+?):\s+\S+\.\.\.\S+\s+IKEv?\d?"
-)
-_IPSEC_CONNECTION_CHILD_RE = re.compile(
-    r"^\s*(?P<name>\S+?):\s+child:\s+.+?\s+(?P<mode>TUNNEL|TRANSPORT),"
-)
-_IPSEC_SA_HEADER_RE = re.compile(
-    r"^Security Associations\s+\((?P<up>\d+)\s+up,\s+(?P<connecting>\d+)\s+connecting\)"
-)
 
 
 class VpnMixin:
@@ -263,48 +212,7 @@ class VpnMixin:
         coordinator can dedup against a persisted ``last_seen_ts`` and
         maintain a monotonically increasing OOM counter.
         """
-        matches: List[Dict[str, Any]] = []
-        if entries is not None:
-            for ent in entries:
-                if not isinstance(ent, dict):
-                    continue
-                msg = ent.get("message")
-                if not isinstance(msg, str):
-                    continue
-                m = _IPSEC_VICI_OOM_RE.search(msg)
-                if not m:
-                    continue
-                matches.append({
-                    "line": msg.strip(),
-                    "code": m.group("code"),
-                    "time": ent.get("time"),
-                })
-        else:
-            for line in lines:
-                if not isinstance(line, str):
-                    continue
-                m = _IPSEC_VICI_OOM_RE.search(line)
-                if not m:
-                    continue
-                matches.append({
-                    "line": line.strip(),
-                    "code": m.group("code"),
-                    "time": None,
-                })
-
-        last_match = matches[0] if entries is not None and matches else (
-            matches[-1] if matches else None
-        )
-        scanned = len(entries) if entries is not None else len(lines)
-        return {
-            "status": "warning" if matches else "ok",
-            "vici_out_of_memory_count": len(matches),
-            "last_vici_out_of_memory": last_match.get("line") if last_match else None,
-            "last_error_code": last_match.get("code") if last_match else None,
-            "recent_matches": [m["line"] for m in matches[-5:]],
-            "events": [(m["time"], m["line"]) for m in matches],
-            "scanned_log_lines": scanned,
-        }
+        return parse_ipsec_vici_diagnostics(lines, entries=entries)
 
     async def async_get_ipsec_diagnostics(self) -> Dict[str, Any]:
         """Return low-cadence diagnostics for IPsec/VICI router log errors.
@@ -354,195 +262,7 @@ class VpnMixin:
         (crypto_maps), avoiding the per-call OOM leak in ``ndm``'s
         ``IpSec::Vici::Stats`` handler on KeeneticOS 5.x.
         """
-        if not isinstance(text, str) or not text:
-            return {}
-
-        # Per-tunnel accumulator. We see the same tunnel name across
-        # several brief lines (phase1 header, phase1 SPI, phase1
-        # proposal, phase2 header, phase2 counters) — merge into one
-        # record per name.
-        tunnels: Dict[str, Dict[str, Any]] = {}
-
-        def _t(name: str) -> Dict[str, Any]:
-            t = tunnels.get(name)
-            if t is None:
-                t = {
-                    "name": name,
-                    "enabled": True,        # presence in statusall ≡ loaded ≡ enabled
-                    "remote_peer": None,
-                    "mode": None,
-                    "ipsec_profile_name": name,
-                    "state": "UNDEFINED",
-                    "ike_state": "UNDEFINED",
-                    FIELD_CONNECTED: False,
-                    "via": None,
-                    "local_endpoint": None,
-                    "remote_endpoint": None,
-                    "rx_bytes": 0,
-                    "tx_bytes": 0,
-                    "rx_packets": 0,
-                    "tx_packets": 0,
-                    "phase1": None,
-                    "phase2_sa_list": [],
-                    "raw_config": {},
-                    "raw_status": {},
-                }
-                tunnels[name] = t
-            return t
-
-        in_sa_section = False
-        in_connections_section = False
-        for raw in text.splitlines():
-            line = raw.rstrip()
-            if not line.strip():
-                continue
-
-            # Section markers
-            if line.startswith("Connections:"):
-                in_connections_section = True
-                in_sa_section = False
-                continue
-            if _IPSEC_SA_HEADER_RE.match(line):
-                in_sa_section = True
-                in_connections_section = False
-                continue
-            if line.startswith("Listening IP addresses") or line.startswith("Status of IKE"):
-                in_connections_section = False
-                in_sa_section = False
-                continue
-
-            if in_connections_section:
-                m = _IPSEC_CONNECTION_LINE_RE.match(line)
-                if m:
-                    name = m.group("name")
-                    _t(name)  # mark as configured
-                    continue
-                m = _IPSEC_CONNECTION_CHILD_RE.match(line)
-                if m:
-                    t = _t(m.group("name"))
-                    t["mode"] = (m.group("mode") or "").lower() or t["mode"]
-                    continue
-                continue
-
-            if not in_sa_section:
-                continue
-
-            m = _IPSEC_PHASE1_HEADER_RE.match(line)
-            if m:
-                t = _t(m.group("name"))
-                t["ike_state"] = m.group("state")
-                t["local_endpoint"] = _clean_addr(m.group("local"))
-                t["remote_endpoint"] = _clean_addr(m.group("remote"))
-                t["remote_peer"] = m.group("remote_id") or t["remote_peer"]
-                p1 = t["phase1"] or {}
-                p1.update({
-                    "name": m.group("name"),
-                    "ike_state": m.group("state"),
-                    "unique_id": _to_int(m.group("sa_id")),
-                    "local_addr": _clean_addr(m.group("local")),
-                    "remote_addr": _clean_addr(m.group("remote")),
-                })
-                t["phase1"] = p1
-                continue
-
-            m = _IPSEC_PHASE1_SPI_RE.match(line)
-            if m:
-                t = _t(m.group("name"))
-                p1 = t["phase1"] or {"name": m.group("name")}
-                ver = m.group("ver") or ""
-                p1["ike_version"] = "2" if "2" in ver else ("1" if "1" in ver else None)
-                p1["local_spi"] = m.group("local_spi")
-                p1["remote_spi"] = m.group("remote_spi")
-                if m.group("rekey"):
-                    p1["rekey_in"] = m.group("rekey").strip()
-                t["phase1"] = p1
-                continue
-
-            m = _IPSEC_PHASE1_PROPOSAL_RE.match(line)
-            if m:
-                t = _t(m.group("name"))
-                p1 = t["phase1"] or {"name": m.group("name")}
-                p1["proposal"] = m.group("proposal")
-                t["phase1"] = p1
-                continue
-
-            m = _IPSEC_PHASE2_HEADER_RE.match(line)
-            if m:
-                t = _t(m.group("name"))
-                sa_id = _to_int(m.group("sa_id"))
-                sa = next(
-                    (s for s in t["phase2_sa_list"] if s.get("unique_id") == sa_id),
-                    None,
-                )
-                if sa is None:
-                    sa = {"unique_id": sa_id}
-                    t["phase2_sa_list"].append(sa)
-                sa["sa_state"] = m.group("state")
-                if m.group("mode"):
-                    sa["mode"] = m.group("mode")
-                if m.group("reqid"):
-                    sa["request_id"] = _to_int(m.group("reqid"))
-                if m.group("proto"):
-                    sa["protocol"] = m.group("proto")
-                sa["encapsulation"] = bool(m.group("encap"))
-                sa["local_spi"] = m.group("local_spi")
-                sa["remote_spi"] = m.group("remote_spi")
-                continue
-
-            m = _IPSEC_PHASE2_COUNTERS_RE.match(line)
-            if m:
-                t = _t(m.group("name"))
-                sa_id = _to_int(m.group("sa_id"))
-                sa = next(
-                    (s for s in t["phase2_sa_list"] if s.get("unique_id") == sa_id),
-                    None,
-                )
-                if sa is None:
-                    sa = {"unique_id": sa_id}
-                    t["phase2_sa_list"].append(sa)
-                sa["ipsec_cypher"] = m.group("proposal")
-                sa["in_bytes"] = m.group("bytes_i")
-                sa["out_bytes"] = m.group("bytes_o")
-                if m.group("pkts_i"):
-                    sa["in_packets"] = m.group("pkts_i")
-                if m.group("pkts_o"):
-                    sa["out_packets"] = m.group("pkts_o")
-                if m.group("last_i"):
-                    sa["in_time"] = _to_int(m.group("last_i"))
-                if m.group("last_o"):
-                    sa["out_time"] = _to_int(m.group("last_o"))
-                if m.group("rekey"):
-                    sa["rekey_in"] = m.group("rekey").strip()
-                continue
-
-        # Roll up counters across SAs and derive overall state.
-        for name, t in tunnels.items():
-            rx_b = tx_b = rx_p = tx_p = 0
-            installed = False
-            for sa in t["phase2_sa_list"]:
-                rx_b += _to_int(sa.get("in_bytes"))
-                tx_b += _to_int(sa.get("out_bytes"))
-                rx_p += _to_int(sa.get("in_packets"))
-                tx_p += _to_int(sa.get("out_packets"))
-                if str(sa.get("sa_state", "")).upper() == "INSTALLED":
-                    installed = True
-            t["rx_bytes"] = rx_b
-            t["tx_bytes"] = tx_b
-            t["rx_packets"] = rx_p
-            t["tx_packets"] = tx_p
-
-            ike_up = t["ike_state"] in ("ESTABLISHED", "REKEYING")
-            if installed and ike_up:
-                t["state"] = IPSEC_STATE_ESTABLISHED
-                t[FIELD_CONNECTED] = True
-            elif ike_up:
-                t["state"] = t["ike_state"] if t["ike_state"] == "REKEYING" else "PHASE1_ONLY"
-            elif t["ike_state"] == "CONNECTING":
-                t["state"] = t["ike_state"]
-            else:
-                t["state"] = "UNDEFINED"
-
-        return tunnels
+        return parse_ipsec_statusall(text)
 
     async def async_get_ipsec_status(self) -> Dict[str, Dict[str, Any]]:
         """Return site-to-site IPsec tunnels via the safe stroke path.
