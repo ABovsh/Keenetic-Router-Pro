@@ -14,6 +14,12 @@ git log.
 
 - Refactored internal coordinator, platform setup, and parser structure to make the integration easier to maintain and safer to extend. No entity IDs, configuration data, or user-facing behavior changed.
 
+## 1.7.48
+
+### 🔧 Maintenance
+
+- Reduced runtime router load by making coordinator refresh tiers explicit. Fast ticks now keep critical live data fresh while reusing slower diagnostic and interface-detail snapshots between their scheduled refreshes.
+
 ## 1.7.46
 
 ### 🐛 Bug fixes

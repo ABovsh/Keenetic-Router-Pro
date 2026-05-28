@@ -168,39 +168,54 @@ def test_order_wan_interfaces_orders_default_then_backups_and_assigns_role_label
     assert [wan["role_index"] for wan in ordered] == [0, 1, 2]
 
 
-def test_refresh_plan_cadence_matches_existing_modulo_rules() -> None:
-    """Refresh cadence must preserve the coordinator's existing tick rules."""
-    assert refresh_plan(first_refresh=True, refresh_count=5) == RefreshPlan(
+def test_refresh_plan_first_refresh_runs_all_tiers() -> None:
+    assert refresh_plan(first_refresh=True, refresh_count=17) == RefreshPlan(
         first_refresh=True,
+        medium_refresh=True,
         slow_refresh=True,
         very_slow_refresh=True,
         ipsec_status_refresh=True,
     )
-    assert refresh_plan(first_refresh=False, refresh_count=6) == RefreshPlan(
-        first_refresh=False,
-        slow_refresh=True,
-        very_slow_refresh=False,
-        ipsec_status_refresh=True,
-    )
-    assert refresh_plan(first_refresh=False, refresh_count=30) == RefreshPlan(
-        first_refresh=False,
-        slow_refresh=True,
-        very_slow_refresh=True,
-        ipsec_status_refresh=True,
-    )
-    assert refresh_plan(first_refresh=False, refresh_count=1) == RefreshPlan(
-        first_refresh=False,
-        slow_refresh=False,
-        very_slow_refresh=False,
-        ipsec_status_refresh=False,
-    )
 
 
-def test_build_batch_tree_includes_only_due_paths() -> None:
-    """Composite RCI prefetch tree should match fast/slow/very-slow cadence."""
-    fast = build_batch_tree(RefreshPlan(False, False, False, False))
-    slow = build_batch_tree(RefreshPlan(False, True, False, True))
-    very_slow = build_batch_tree(RefreshPlan(False, True, True, True))
+@pytest.mark.parametrize(
+    ("refresh_count", "medium", "slow", "very_slow"),
+    [
+        (1, False, False, False),
+        (2, False, False, False),
+        (3, True, False, False),
+        (6, True, True, False),
+        (30, True, True, True),
+    ],
+)
+def test_refresh_plan_runtime_efficiency_tiers(
+    refresh_count: int,
+    medium: bool,
+    slow: bool,
+    very_slow: bool,
+) -> None:
+    plan = refresh_plan(first_refresh=False, refresh_count=refresh_count)
+
+    assert plan.first_refresh is False
+    assert plan.medium_refresh is medium
+    assert plan.slow_refresh is slow
+    assert plan.very_slow_refresh is very_slow
+    assert plan.ipsec_status_refresh is slow
+
+
+def test_build_batch_tree_includes_only_active_tier_paths() -> None:
+    fast = build_batch_tree(
+        RefreshPlan(False, False, False, False, False)
+    )
+    medium = build_batch_tree(
+        RefreshPlan(False, True, False, False, False)
+    )
+    slow = build_batch_tree(
+        RefreshPlan(False, True, True, False, True)
+    )
+    very_slow = build_batch_tree(
+        RefreshPlan(False, True, True, True, True)
+    )
 
     assert fast == {
         "show": {
@@ -209,8 +224,10 @@ def test_build_batch_tree_includes_only_due_paths() -> None:
             "ip": {"neighbour": {}},
         }
     }
-    assert "version" in slow["show"]
-    assert "ping-check" in slow["show"]
+    assert "ping-check" not in fast["show"]
+    assert "ipsec" not in fast["show"]
+    assert "ping-check" in medium["show"]
+    assert "ipsec" not in medium["show"]
     assert "ipsec" in slow["show"]
     assert "components" not in slow
     assert very_slow["components"] == {"check-update": {}}

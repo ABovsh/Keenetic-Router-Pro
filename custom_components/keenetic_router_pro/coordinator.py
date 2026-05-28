@@ -173,6 +173,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             refresh_count=self._refresh_count,
         )
         first_refresh = plan.first_refresh
+        medium_refresh = plan.medium_refresh
         slow_refresh = plan.slow_refresh
         very_slow_refresh = plan.very_slow_refresh
         # Site-to-site IPsec state now comes from ``show/ipsec`` (stroke
@@ -187,11 +188,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # these dicts every time. On a non-slow tick the previous
         # version info is reused verbatim; on a slow tick these are
         # discarded and the live RCI fetch result is used instead.
-        if not slow_refresh:
+        if not very_slow_refresh:
             _cached_version = {
                 k: _prev_sys.get(k) for k in _VERSION_CACHE_KEYS if k in _prev_sys
             }
-        if not very_slow_refresh:
             _cached_version_available = {
                 "title": _prev_sys.get("release-available"),
                 "sandbox": _prev_sys.get("fw-update-sandbox"),
@@ -242,14 +242,14 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ipsec_diagnostics,
             ) = await asyncio.gather(
                 _bounded(self.client.async_get_system_info()),
-                _bounded(self.client.async_get_current_version_info()) if slow_refresh else _resolve(_cached_version),
+                _bounded(self.client.async_get_current_version_info()) if very_slow_refresh else _resolve(_cached_version),
                 _bounded(self.client.async_get_available_version_info()) if very_slow_refresh else _resolve(_cached_version_available),
                 _bounded(self.client.async_get_interfaces()),
                 _bounded(self.client.async_get_clients()),
                 _bounded(self.client.async_get_ip_neighbours()),
                 _bounded(self.client.async_get_host_policies()) if slow_refresh else _resolve(_prev.get("host_policies", {})),
                 _bounded(self.client.async_get_ndns_info()) if very_slow_refresh else _resolve(_prev.get("ndns", {})),
-                _bounded(self.client.async_get_ping_check_status()) if slow_refresh else _resolve(_prev.get("ping_check_status", {})),
+                _bounded(self.client.async_get_ping_check_status()) if medium_refresh else _resolve(_prev.get("ping_check_status", {})),
                 _bounded(self.client.async_get_ipsec_status()) if ipsec_status_refresh else _resolve(_prev.get("crypto_maps", {})),
                 _bounded(self.client.async_get_dns_proxy_status()) if very_slow_refresh else _resolve(_prev.get("dns_proxy", {})),
                 _bounded(self.client.async_get_ipsec_diagnostics()) if very_slow_refresh else _resolve(_prev.get("ipsec_diagnostics", {})),
@@ -303,14 +303,18 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Crypto maps: not every router/firmware has the IPsec component,
             # so this endpoint may be unavailable. Mark the fetch as silent
             # so an absent endpoint doesn't produce a warning on every tick —
-            # the api layer already debug-logs the reason.
-            crypto_maps = {
-                name: dict(cmap)
-                for name, cmap in dict_or_empty(
-                    _ok("crypto_maps", crypto_maps, {}, silent=True)
-                ).items()
-                if isinstance(cmap, dict)
-            }
+            # the api layer already debug-logs the reason. When the slow tier
+            # is skipped, keep the previous snapshot instead of rebuilding it.
+            if slow_refresh:
+                crypto_maps = {
+                    name: dict(cmap)
+                    for name, cmap in dict_or_empty(
+                        _ok("crypto_maps", crypto_maps, {}, silent=True)
+                    ).items()
+                    if isinstance(cmap, dict)
+                }
+            else:
+                crypto_maps = _prev.get("crypto_maps", {})
             # DNS proxy is diagnostic-only and intentionally slow-cadence;
             # routers without the endpoint should not warn every refresh.
             dns_proxy = dict_or_empty(
@@ -352,7 +356,11 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     }
                 self._oom_state_loaded = True
 
-            events = ipsec_diagnostics.get("events") if ipsec_diagnostics else None
+            events = (
+                ipsec_diagnostics.get("events")
+                if very_slow_refresh and ipsec_diagnostics
+                else None
+            )
             if events:
                 next_oom_state = advance_oom_state(self._oom_state, events)
                 if next_oom_state != self._oom_state:
@@ -389,64 +397,96 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
  
             # ---------- Stage 2: depends on stage-1 `interfaces` ----------
-            # Normalize once and share the result so each stage-2 call skips
-            # a redundant O(N) walk over the same payload.
+            # Fast ticks reuse the last published stage-2 snapshot instead of
+            # fanning out extra router calls. Medium ticks refresh WAN and
+            # interface stats, while the slow/very-slow tiers continue to
+            # govern the larger diagnostic groups.
             iface_list = self.client._normalize_interfaces(interfaces)
-
-            # WAN interface set rarely changes between ticks (links flap but
-            # the *set* of WAN-eligible interfaces is stable). Build a cheap
-            # fingerprint of the interface payload and reuse the previously
-            # derived WAN list when the fingerprint matches. This skips one
-            # RCI round-trip per fast tick on the common path; the freshly
-            # fetched interfaces dict still drives `interface_stats` so
-            # link/state changes still propagate immediately.
             iface_fp = tuple(
                 (i.get("id"), i.get("type"), i.get("link"), i.get("state"))
                 for i in iface_list
             )
-            cached_wan = _prev.get("wan_interfaces")
-            cached_fp = _prev.get("_iface_fingerprint")
-            if (
-                not first_refresh
-                and cached_wan is not None
-                and cached_fp == iface_fp
-            ):
-                wan_interfaces = [dict(w) for w in cached_wan]
-            else:
-                try:
-                    wan_interfaces = await _bounded(
-                        self.client.async_get_wan_interfaces(
+            if medium_refresh:
+                # WAN interface set rarely changes between ticks (links flap but
+                # the *set* of WAN-eligible interfaces is stable). Build a cheap
+                # fingerprint of the interface payload and reuse the previously
+                # derived WAN list when the fingerprint matches.
+                cached_wan = _prev.get("wan_interfaces")
+                cached_fp = _prev.get("_iface_fingerprint")
+                if (
+                    not first_refresh
+                    and cached_wan is not None
+                    and cached_fp == iface_fp
+                ):
+                    wan_interfaces = [dict(w) for w in cached_wan]
+                else:
+                    try:
+                        wan_interfaces = await _bounded(
+                            self.client.async_get_wan_interfaces(
+                                interfaces=interfaces,
+                                iface_list=iface_list,
+                            )
+                        )
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as err:  # noqa: BLE001
+                        wan_interfaces = err
+                (
+                    wifi,
+                    wireguard,
+                    vpn_tunnels,
+                    wan_status,
+                    traffic_stats,
+                    port_info,
+                    interface_stats,
+                ) = await asyncio.gather(
+                    _bounded(
+                        self.client.async_get_wifi_networks(
+                            interfaces=interfaces, iface_list=iface_list
+                        )
+                    ),
+                    _bounded(
+                        self.client.async_get_wireguard_status(
+                            interfaces=interfaces, iface_list=iface_list
+                        )
+                    ),
+                    _bounded(
+                        self.client.async_get_vpn_tunnels(
+                            interfaces=interfaces, iface_list=iface_list
+                        )
+                    ),
+                    _bounded(
+                        self.client.async_get_wan_status(
+                            interfaces=interfaces, iface_list=iface_list
+                        )
+                    ),
+                    _bounded(
+                        self.client.async_get_traffic_stats(
+                            interfaces=interfaces, iface_list=iface_list
+                        )
+                    ),
+                    _bounded(self.client.async_get_port_info(interfaces=interfaces)),
+                    _bounded(
+                        self.client.async_get_all_interface_stats(
                             interfaces=interfaces,
                             iface_list=iface_list,
+                            wan_interfaces=wan_interfaces
+                            if isinstance(wan_interfaces, list)
+                            else [],
                         )
-                    )
-                except asyncio.CancelledError:
-                    raise
-                except Exception as err:  # noqa: BLE001
-                    wan_interfaces = err
-            (
-                wifi,
-                wireguard,
-                vpn_tunnels,
-                wan_status,
-                traffic_stats,
-                port_info,
-                interface_stats,
-            ) = await asyncio.gather(
-                _bounded(self.client.async_get_wifi_networks(interfaces=interfaces, iface_list=iface_list)),
-                _bounded(self.client.async_get_wireguard_status(interfaces=interfaces, iface_list=iface_list)),
-                _bounded(self.client.async_get_vpn_tunnels(interfaces=interfaces, iface_list=iface_list)),
-                _bounded(self.client.async_get_wan_status(interfaces=interfaces, iface_list=iface_list)),
-                _bounded(self.client.async_get_traffic_stats(interfaces=interfaces, iface_list=iface_list)),
-                _bounded(self.client.async_get_port_info(interfaces=interfaces)),
-                _bounded(self.client.async_get_all_interface_stats(
-                    interfaces=interfaces,
-                    iface_list=iface_list,
-                    wan_interfaces=wan_interfaces if isinstance(wan_interfaces, list) else [],
-                )),
-                return_exceptions=True,
-            )
- 
+                    ),
+                    return_exceptions=True,
+                )
+            else:
+                wan_interfaces = _prev.get("wan_interfaces", [])
+                wifi = _prev.get("wifi", [])
+                wireguard = _prev.get("wireguard", [])
+                vpn_tunnels = _prev.get("vpn_tunnels", [])
+                wan_status = _prev.get("wan_status", {})
+                traffic_stats = _prev.get("traffic_stats", {})
+                port_info = _prev.get("port_info", [])
+                interface_stats = _prev.get("interface_stats", {})
+
             wifi = _ok("wifi", wifi, [])
             wireguard = _ok("wireguard", wireguard, [])
             vpn_tunnels = _ok("vpn_tunnels", vpn_tunnels, [])
@@ -468,139 +508,162 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     len(failed_fetches),
                     ", ".join(failure.name for failure in failed_fetches),
                 )
- 
+
+            wan_stats_fresh = medium_refresh
+
             # ---------- WAN enrichment (CPU-only, runs on already-fetched
             # data — logic unchanged from the sequential implementation) ----------
             #
             # We reuse the already-fetched ``interface_stats`` (show/interface/stat
             # for every interface) instead of firing extra RCI calls. Throughput
             # is computed as a delta against the previous coordinator tick.
-            prev_wan_by_id: dict[str, dict[str, Any]] = {}
-            if self.data:
-                for prev in self.data.get("wan_interfaces", []) or []:
-                    pid = prev.get("id")
-                    if pid:
-                        prev_wan_by_id[pid] = prev
-            now_ts = asyncio.get_running_loop().time()
- 
-            for wan in wan_interfaces:
-                wan_id = wan.get("id")
-                stats = (interface_stats or {}).get(wan_id) or {}
-                rx_bytes = _first_stat_int(
-                    stats,
-                    "rxbytes",
-                    "rx-bytes",
-                    "rx_bytes",
-                )
-                tx_bytes = _first_stat_int(
-                    stats,
-                    "txbytes",
-                    "tx-bytes",
-                    "tx_bytes",
-                )
-                wan["rx_bytes"] = rx_bytes
-                wan["tx_bytes"] = tx_bytes
-                wan["rx_packets"] = _first_stat_int(
-                    stats,
-                    "rxpackets",
-                    "rx-packets",
-                )
-                wan["tx_packets"] = _first_stat_int(
-                    stats,
-                    "txpackets",
-                    "tx-packets",
-                )
-                wan["rx_speed_raw"] = _first_stat_int(
-                    stats,
-                    "rxspeed",
-                    "rx-speed",
-                    "rx_rate",
-                )
-                wan["tx_speed_raw"] = _first_stat_int(
-                    stats,
-                    "txspeed",
-                    "tx-speed",
-                    "tx_rate",
-                )
-                wan["stats_interface"] = stats.get("interface_name") or wan_id
-                wan["stats_timestamp"] = stats.get("timestamp")
-                wan["_sample_ts"] = now_ts
- 
-                # --- Authoritative ping-check override ---
-                # When the router itself reports a ping-check result for
-                # this WAN, trust it over the heuristic. Three cases:
-                #   passing=True  -> internet_access=True (ping check ok)
-                #   passing=False -> internet_access=False (real outage,
-                #                    the case the feature request is about)
-                #   passing=None  -> no real profile attached / mixed state
-                #                    -> keep the heuristic value from api.py
-                pc = ping_check_status.get(wan_id)
-                if pc is not None:
-                    wan["ping_check"] = pc
-                    passing = pc.get("passing")
-                    if passing is True or passing is False:
-                        wan["internet_access"] = passing
-                        wan["internet_access_source"] = "ping_check"
+            if wan_stats_fresh:
+                prev_wan_by_id: dict[str, dict[str, Any]] = {}
+                if self.data:
+                    for prev in self.data.get("wan_interfaces", []) or []:
+                        pid = prev.get("id")
+                        if pid:
+                            prev_wan_by_id[pid] = prev
+                now_ts = asyncio.get_running_loop().time()
+
+                for wan in wan_interfaces:
+                    wan_id = wan.get("id")
+                    stats = (interface_stats or {}).get(wan_id) or {}
+                    rx_bytes = _first_stat_int(
+                        stats,
+                        "rxbytes",
+                        "rx-bytes",
+                        "rx_bytes",
+                    )
+                    tx_bytes = _first_stat_int(
+                        stats,
+                        "txbytes",
+                        "tx-bytes",
+                        "tx_bytes",
+                    )
+                    wan["rx_bytes"] = rx_bytes
+                    wan["tx_bytes"] = tx_bytes
+                    wan["rx_packets"] = _first_stat_int(
+                        stats,
+                        "rxpackets",
+                        "rx-packets",
+                    )
+                    wan["tx_packets"] = _first_stat_int(
+                        stats,
+                        "txpackets",
+                        "tx-packets",
+                    )
+                    wan["rx_speed_raw"] = _first_stat_int(
+                        stats,
+                        "rxspeed",
+                        "rx-speed",
+                        "rx_rate",
+                    )
+                    wan["tx_speed_raw"] = _first_stat_int(
+                        stats,
+                        "txspeed",
+                        "tx-speed",
+                        "tx_rate",
+                    )
+                    wan["stats_interface"] = stats.get("interface_name") or wan_id
+                    wan["stats_timestamp"] = stats.get("timestamp")
+                    wan["_sample_ts"] = now_ts
+
+                    # --- Authoritative ping-check override ---
+                    # When the router itself reports a ping-check result for
+                    # this WAN, trust it over the heuristic. Three cases:
+                    #   passing=True  -> internet_access=True (ping check ok)
+                    #   passing=False -> internet_access=False (real outage,
+                    #                    the case the feature request is about)
+                    #   passing=None  -> no real profile attached / mixed state
+                    #                    -> keep the heuristic value from api.py
+                    pc = ping_check_status.get(wan_id)
+                    if pc is not None:
+                        wan["ping_check"] = pc
+                        passing = pc.get("passing")
+                        if passing is True or passing is False:
+                            wan["internet_access"] = passing
+                            wan["internet_access_source"] = "ping_check"
+                        else:
+                            wan["internet_access_source"] = "heuristic"
                     else:
+                        wan["ping_check"] = None
                         wan["internet_access_source"] = "heuristic"
-                else:
-                    wan["ping_check"] = None
-                    wan["internet_access_source"] = "heuristic"
- 
-                prev = prev_wan_by_id.get(wan_id)
-                if prev and prev.get("_sample_ts"):
-                    dt = now_ts - float(prev.get("_sample_ts") or 0)
-                    wan["rx_throughput"] = counter_rate_bytes_per_second(
-                        rx_bytes,
-                        prev.get("rx_bytes"),
-                        dt,
-                    )
-                    wan["tx_throughput"] = counter_rate_bytes_per_second(
-                        tx_bytes,
-                        prev.get("tx_bytes"),
-                        dt,
-                    )
-                else:
-                    wan["rx_throughput"] = 0.0
-                    wan["tx_throughput"] = 0.0
+
+                    prev = prev_wan_by_id.get(wan_id)
+                    if prev and prev.get("_sample_ts"):
+                        dt = now_ts - float(prev.get("_sample_ts") or 0)
+                        wan["rx_throughput"] = counter_rate_bytes_per_second(
+                            rx_bytes,
+                            prev.get("rx_bytes"),
+                            dt,
+                        )
+                        wan["tx_throughput"] = counter_rate_bytes_per_second(
+                            tx_bytes,
+                            prev.get("tx_bytes"),
+                            dt,
+                        )
+                    else:
+                        wan["rx_throughput"] = 0.0
+                        wan["tx_throughput"] = 0.0
+
+                wan_interfaces = order_wan_interfaces(wan_interfaces)
+                wan_by_id = {
+                    w.get("id"): w
+                    for w in wan_interfaces
+                    if isinstance(w, dict) and w.get("id")
+                }
+            else:
+                wan_by_id = _prev.get("wan_by_id", {})
 
             # ---------- Crypto map (site-to-site IPsec) enrichment ----------
             # Same delta pattern as the WAN block above. Counters reset to
             # zero whenever a phase2 SA rekeys or the tunnel bounces — the
             # negative-delta clamp keeps throughput sensors from spiking
             # to absurd negative values on those events.
-            prev_cmap_by_name: dict[str, dict[str, Any]] = {}
-            if self.data:
-                for pname, pentry in (self.data.get("crypto_maps") or {}).items():
-                    if isinstance(pentry, dict):
-                        prev_cmap_by_name[pname] = dict(pentry)
+            if slow_refresh:
+                prev_cmap_by_name: dict[str, dict[str, Any]] = {}
+                if self.data:
+                    for pname, pentry in (self.data.get("crypto_maps") or {}).items():
+                        if isinstance(pentry, dict):
+                            prev_cmap_by_name[pname] = dict(pentry)
 
-            for cmap_name, cmap in crypto_maps.items():
-                prev_cmap = prev_cmap_by_name.get(cmap_name)
-                if not ipsec_status_refresh and prev_cmap:
-                    cmap["_sample_ts"] = prev_cmap.get("_sample_ts")
-                    cmap["rx_throughput"] = prev_cmap.get("rx_throughput", 0.0)
-                    cmap["tx_throughput"] = prev_cmap.get("tx_throughput", 0.0)
-                    continue
+                now_ts = asyncio.get_running_loop().time()
+                for cmap_name, cmap in crypto_maps.items():
+                    prev_cmap = prev_cmap_by_name.get(cmap_name)
+                    if not ipsec_status_refresh and prev_cmap:
+                        cmap["_sample_ts"] = prev_cmap.get("_sample_ts")
+                        cmap["rx_throughput"] = prev_cmap.get("rx_throughput", 0.0)
+                        cmap["tx_throughput"] = prev_cmap.get("tx_throughput", 0.0)
+                        continue
 
-                cmap["_sample_ts"] = now_ts
-                if prev_cmap and prev_cmap.get("_sample_ts"):
-                    dt = now_ts - float(prev_cmap.get("_sample_ts") or 0)
-                    cmap["rx_throughput"] = counter_rate_bytes_per_second(
-                        coerce_int(cmap.get("rx_bytes")),
-                        prev_cmap.get("rx_bytes"),
-                        dt,
-                    )
-                    cmap["tx_throughput"] = counter_rate_bytes_per_second(
-                        coerce_int(cmap.get("tx_bytes")),
-                        prev_cmap.get("tx_bytes"),
-                        dt,
-                    )
-                else:
-                    cmap["rx_throughput"] = 0.0
-                    cmap["tx_throughput"] = 0.0
+                    cmap["_sample_ts"] = now_ts
+                    if prev_cmap and prev_cmap.get("_sample_ts"):
+                        dt = now_ts - float(prev_cmap.get("_sample_ts") or 0)
+                        cmap["rx_throughput"] = counter_rate_bytes_per_second(
+                            coerce_int(cmap.get("rx_bytes")),
+                            prev_cmap.get("rx_bytes"),
+                            dt,
+                        )
+                        cmap["tx_throughput"] = counter_rate_bytes_per_second(
+                            coerce_int(cmap.get("tx_bytes")),
+                            prev_cmap.get("tx_bytes"),
+                            dt,
+                        )
+                    else:
+                        cmap["rx_throughput"] = 0.0
+                        cmap["tx_throughput"] = 0.0
 
-            wan_interfaces = order_wan_interfaces(wan_interfaces)
+            if slow_refresh:
+                mesh_associations_data = mesh_associations(mesh_nodes)
+                mesh_nodes_by_cid = {
+                    (n.get("cid") or n.get("id")): n
+                    for n in (mesh_nodes if isinstance(mesh_nodes, list) else [])
+                    if isinstance(n, dict) and (n.get("cid") or n.get("id"))
+                }
+            else:
+                mesh_associations_data = _prev.get("mesh_associations", {})
+                mesh_nodes_by_cid = _prev.get("mesh_nodes_by_cid", {})
  
             # ---------- New-client detection ----------
             # Build the MAC->client index once and reuse it for both the
@@ -642,18 +705,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "clients_by_mac": clients_by_mac,
                 "wan_status": wan_status,
                 "wan_interfaces": wan_interfaces,
-                "wan_by_id": {
-                    w.get("id"): w
-                    for w in wan_interfaces
-                    if isinstance(w, dict) and w.get("id")
-                },
+                "wan_by_id": wan_by_id,
                 "mesh_nodes": mesh_nodes,
-                "mesh_associations": mesh_associations(mesh_nodes),
-                "mesh_nodes_by_cid": {
-                    (n.get("cid") or n.get("id")): n
-                    for n in (mesh_nodes if isinstance(mesh_nodes, list) else [])
-                    if isinstance(n, dict) and (n.get("cid") or n.get("id"))
-                },
+                "mesh_associations": mesh_associations_data,
+                "mesh_nodes_by_cid": mesh_nodes_by_cid,
                 "interface_stats": interface_stats,
                 "client_stats": client_stats,
                 "ndns": ndns_info,

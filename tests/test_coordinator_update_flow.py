@@ -369,7 +369,7 @@ def test_neighbour_merge_prefers_live_hotspot_last_seen() -> None:
 
 
 def test_coordinator_fast_refresh_reuses_slow_cached_data_and_rates() -> None:
-    """Fast ticks reuse slow data and calculate monotonic WAN/crypto throughput."""
+    """Fast ticks reuse slow data and preserve cached WAN/crypto throughput."""
     client = FakeKeeneticClient()
     coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
 
@@ -377,6 +377,8 @@ def test_coordinator_fast_refresh_reuses_slow_cached_data_and_rates() -> None:
     first["wan_interfaces"][0]["_sample_ts"] = 1.0
     first["wan_interfaces"][0]["rx_bytes"] = 100
     first["wan_interfaces"][0]["tx_bytes"] = 500
+    first["wan_interfaces"][0]["rx_throughput"] = 9.0
+    first["wan_interfaces"][0]["tx_throughput"] = 11.0
     first["crypto_maps"]["SITE"]["_sample_ts"] = 1.0
     first["crypto_maps"]["SITE"]["rx_bytes"] = 10
     first["crypto_maps"]["SITE"]["tx_bytes"] = 20
@@ -401,8 +403,8 @@ def test_coordinator_fast_refresh_reuses_slow_cached_data_and_rates() -> None:
     assert second["ipsec_diagnostics"]["oom_total"] == 0
     assert second["ipsec_diagnostics"]["oom_last_seen"] is None
     assert second["new_clients"] == set()
-    assert second["wan_interfaces"][0]["rx_throughput"] > 0
-    assert second["wan_interfaces"][0]["tx_throughput"] > 0
+    assert second["wan_interfaces"][0]["rx_throughput"] == pytest.approx(9.0)
+    assert second["wan_interfaces"][0]["tx_throughput"] == pytest.approx(11.0)
     assert second["crypto_maps"]["SITE"]["_sample_ts"] == pytest.approx(1.0)
     assert second["crypto_maps"]["SITE"]["rx_throughput"] == pytest.approx(7.0)
     assert second["crypto_maps"]["SITE"]["tx_throughput"] == pytest.approx(8.0)
@@ -422,8 +424,8 @@ def test_coordinator_fast_refresh_does_not_mutate_cached_crypto_maps() -> None:
 
     second = asyncio.run(coordinator._async_update_data())
 
-    assert second["crypto_maps"] is not first["crypto_maps"]
-    assert second["crypto_maps"]["SITE"] is not first["crypto_maps"]["SITE"]
+    assert second["crypto_maps"] is first["crypto_maps"]
+    assert second["crypto_maps"]["SITE"] is first["crypto_maps"]["SITE"]
     assert first["crypto_maps"]["SITE"]["rx_throughput"] == pytest.approx(7.0)
     assert first["crypto_maps"]["SITE"]["tx_throughput"] == pytest.approx(8.0)
 

@@ -62,9 +62,13 @@ class StageFixtureClient:
         self._hotspot_subpath_winner: str | None = None
         self.prefetch_calls: list[dict] = []
         self.clear_tick_cache_calls = 0
+        self.calls: dict[str, int] = {}
 
     def clear_tick_cache(self) -> None:
         self.clear_tick_cache_calls += 1
+
+    def _record_call(self, name: str) -> None:
+        self.calls[name] = self.calls.get(name, 0) + 1
 
     async def prefetch_tick(self, tree: dict) -> bool:
         self.prefetch_calls.append(tree)
@@ -74,68 +78,89 @@ class StageFixtureClient:
         return _normalize_interfaces(interfaces)
 
     async def async_get_system_info(self) -> dict[str, Any]:
+        self._record_call("system_info")
         return deepcopy(self.system_info)
 
     async def async_get_current_version_info(self) -> dict[str, Any]:
+        self._record_call("current_version")
         return deepcopy(self.current_version)
 
     async def async_get_available_version_info(self) -> dict[str, Any]:
+        self._record_call("available_version")
         return deepcopy(self.available_version)
 
     async def async_get_interfaces(self) -> dict[str, Any]:
+        self._record_call("interfaces")
         return deepcopy(self.interfaces)
 
     async def async_get_clients(self) -> list[dict[str, Any]]:
+        self._record_call("clients")
         return deepcopy(self.clients)
 
     async def async_get_ip_neighbours(self) -> list[dict[str, Any]]:
+        self._record_call("ip_neighbours")
         return deepcopy(self.ip_neighbours)
 
     async def async_get_host_policies(self) -> dict[str, Any]:
+        self._record_call("host_policies")
         return deepcopy(self.host_policies)
 
     async def async_get_ndns_info(self) -> dict[str, Any]:
+        self._record_call("ndns")
         return deepcopy(self.ndns_info)
 
     async def async_get_ping_check_status(self) -> dict[str, Any]:
+        self._record_call("ping_check")
         return deepcopy(self.ping_check)
 
     async def async_get_ipsec_status(self) -> dict[str, Any]:
+        self._record_call("ipsec_status")
         return deepcopy(self.crypto_maps)
 
     async def async_get_dns_proxy_status(self) -> dict[str, Any]:
+        self._record_call("dns_proxy")
         return deepcopy(self.dns_proxy)
 
     async def async_get_ipsec_diagnostics(self) -> dict[str, Any]:
+        self._record_call("ipsec_diagnostics")
         return deepcopy(self.ipsec_diagnostics)
 
     async def async_get_mesh_nodes(
         self, clients: list[dict[str, Any]] | None = None
     ) -> list[dict[str, Any]]:
+        self._record_call("mesh_nodes")
         return deepcopy(self.mesh_nodes)
 
     async def async_get_wifi_networks(self, **kwargs: Any) -> list[dict[str, Any]]:
+        self._record_call("wifi")
         return deepcopy(self.wifi_networks)
 
     async def async_get_wireguard_status(self, **kwargs: Any) -> dict[str, Any]:
+        self._record_call("wireguard")
         return deepcopy(self.wireguard_status)
 
     async def async_get_vpn_tunnels(self, **kwargs: Any) -> dict[str, Any]:
+        self._record_call("vpn_tunnels")
         return deepcopy(self.vpn_tunnels)
 
     async def async_get_wan_status(self, **kwargs: Any) -> dict[str, Any]:
+        self._record_call("wan_status")
         return deepcopy(self.wan_status)
 
     async def async_get_wan_interfaces(self, **kwargs: Any) -> list[dict[str, Any]]:
+        self._record_call("wan_interfaces")
         return deepcopy(self.wan_interfaces)
 
     async def async_get_traffic_stats(self, **kwargs: Any) -> dict[str, Any]:
+        self._record_call("traffic_stats")
         return deepcopy(self.traffic_stats)
 
     async def async_get_port_info(self, **kwargs: Any) -> list[dict[str, Any]]:
+        self._record_call("port_info")
         return deepcopy(self.port_info)
 
     async def async_get_all_interface_stats(self, **kwargs: Any) -> dict[str, Any]:
+        self._record_call("interface_stats")
         return deepcopy(self.interface_stats)
 
     @staticmethod
@@ -275,6 +300,122 @@ async def test_coordinator_pipeline_host_policies_preserves_policy_map() -> None
     data = await _updated_data(_coordinator(client))
 
     assert data["host_policies"] == HOST_POLICIES
+
+
+async def test_coordinator_fast_only_tick_skips_medium_slow_and_very_slow_calls() -> None:
+    client = StageFixtureClient()
+    coordinator = _coordinator(client)
+    previous = await _updated_data(coordinator)
+    coordinator.data = previous
+    coordinator._refresh_count = 1
+    client.calls.clear()
+
+    data = await _updated_data(coordinator)
+
+    assert client.calls["system_info"] == 1
+    assert client.calls["interfaces"] == 1
+    assert client.calls["clients"] == 1
+    assert client.calls["ip_neighbours"] == 1
+    for skipped in (
+        "current_version",
+        "available_version",
+        "host_policies",
+        "ndns",
+        "ping_check",
+        "ipsec_status",
+        "dns_proxy",
+        "ipsec_diagnostics",
+        "mesh_nodes",
+        "wifi",
+        "wireguard",
+        "vpn_tunnels",
+        "wan_status",
+        "wan_interfaces",
+        "traffic_stats",
+        "port_info",
+        "interface_stats",
+    ):
+        assert client.calls.get(skipped, 0) == 0
+    assert data["wan_interfaces"] is previous["wan_interfaces"]
+    assert data["wan_by_id"] is previous["wan_by_id"]
+    assert data["crypto_maps"] is previous["crypto_maps"]
+    assert data["mesh_associations"] is previous["mesh_associations"]
+    assert data["mesh_nodes_by_cid"] is previous["mesh_nodes_by_cid"]
+
+
+async def test_coordinator_medium_tick_refreshes_interface_derived_calls_only() -> None:
+    client = StageFixtureClient()
+    coordinator = _coordinator(client)
+    previous = await _updated_data(coordinator)
+    coordinator.data = previous
+    coordinator._refresh_count = 3
+    client.calls.clear()
+
+    await _updated_data(coordinator)
+
+    for expected in (
+        "system_info",
+        "interfaces",
+        "clients",
+        "ip_neighbours",
+        "ping_check",
+        "wifi",
+        "wireguard",
+        "vpn_tunnels",
+        "wan_status",
+        "traffic_stats",
+        "port_info",
+        "interface_stats",
+    ):
+        assert client.calls.get(expected, 0) == 1
+    assert client.calls.get("wan_interfaces", 0) == 0
+    for skipped in (
+        "current_version",
+        "available_version",
+        "host_policies",
+        "ndns",
+        "ipsec_status",
+        "dns_proxy",
+        "ipsec_diagnostics",
+        "mesh_nodes",
+    ):
+        assert client.calls.get(skipped, 0) == 0
+
+
+async def test_coordinator_slow_tick_refreshes_mesh_policies_and_ipsec_status() -> None:
+    client = StageFixtureClient()
+    coordinator = _coordinator(client)
+    previous = await _updated_data(coordinator)
+    coordinator.data = previous
+    coordinator._refresh_count = 6
+    client.calls.clear()
+
+    await _updated_data(coordinator)
+
+    assert client.calls.get("mesh_nodes", 0) == 1
+    assert client.calls.get("host_policies", 0) == 1
+    assert client.calls.get("ipsec_status", 0) == 1
+    assert client.calls.get("ping_check", 0) == 1
+    assert client.calls.get("available_version", 0) == 0
+    assert client.calls.get("dns_proxy", 0) == 0
+    assert client.calls.get("ipsec_diagnostics", 0) == 0
+
+
+async def test_coordinator_very_slow_tick_refreshes_diagnostics_and_update_data() -> None:
+    client = StageFixtureClient()
+    coordinator = _coordinator(client)
+    previous = await _updated_data(coordinator)
+    coordinator.data = previous
+    coordinator._refresh_count = 30
+    client.calls.clear()
+
+    await _updated_data(coordinator)
+
+    assert client.calls.get("current_version", 0) == 1
+    assert client.calls.get("available_version", 0) == 1
+    assert client.calls.get("ndns", 0) == 1
+    assert client.calls.get("dns_proxy", 0) == 1
+    assert client.calls.get("ipsec_diagnostics", 0) == 1
 
 
 @pytest.mark.parametrize(
@@ -461,6 +602,28 @@ async def test_coordinator_wan_counter_reset_clamps_rate_zero() -> None:
     assert data["wan_by_id"]["PPPoE0"]["rx_throughput"] == pytest.approx(0.0)
 
 
+async def test_coordinator_fast_only_tick_preserves_wan_throughput_samples() -> None:
+    client = StageFixtureClient()
+    coordinator = _coordinator(client)
+    previous = await _updated_data(coordinator)
+    previous["wan_interfaces"][0]["_sample_ts"] = 10.0
+    previous["wan_interfaces"][0]["rx_bytes"] = 1234
+    previous["wan_interfaces"][0]["tx_bytes"] = 5678
+    previous["wan_interfaces"][0]["rx_throughput"] = 9.0
+    previous["wan_interfaces"][0]["tx_throughput"] = 11.0
+    coordinator.data = previous
+    coordinator._refresh_count = 1
+
+    data = await _updated_data(coordinator)
+
+    wan = data["wan_by_id"][previous["wan_interfaces"][0]["id"]]
+    assert wan["_sample_ts"] == pytest.approx(10.0)
+    assert wan["rx_bytes"] == 1234
+    assert wan["tx_bytes"] == 5678
+    assert wan["rx_throughput"] == pytest.approx(9.0)
+    assert wan["tx_throughput"] == pytest.approx(11.0)
+
+
 async def test_coordinator_skips_wan_fetch_when_interfaces_fingerprint_unchanged() -> None:
     """When the interface fingerprint matches the prior tick, `async_get_wan_interfaces`
     is not called again — saves one RCI round-trip per fast tick on the common path."""
@@ -496,7 +659,7 @@ async def test_coordinator_refetches_wan_when_interface_state_changes() -> None:
     coordinator = _coordinator(client)
     await _updated_data(coordinator)
     coordinator.data = await _updated_data(coordinator)
-    coordinator._refresh_count = 2
+    coordinator._refresh_count = 3
 
     # Mutate one interface's link state to invalidate the fingerprint.
     first_key = next(iter(client.interfaces))
@@ -534,8 +697,8 @@ async def test_coordinator_clients_by_mac_index_is_shared_with_new_mac_diff() ->
         assert ":" in mac or mac == ""
 
 
-async def test_coordinator_caches_ping_check_status_between_slow_ticks() -> None:
-    """P4: ping_check_status is fetched only on slow ticks; fast ticks reuse cache."""
+async def test_coordinator_caches_ping_check_status_between_fast_ticks() -> None:
+    """P4: ping_check_status is fetched on medium ticks; fast ticks reuse cache."""
     client = StageFixtureClient()
     coordinator = _coordinator(client)
     await _updated_data(coordinator)  # first refresh = slow
