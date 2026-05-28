@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tests.conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
+from conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
 
 import asyncio
 from copy import deepcopy
@@ -79,6 +79,16 @@ async def test_async_ping_multiple_keeps_results_when_one_ping_raises() -> None:
         "8.8.8.8": False,
         "9.9.9.9": False,
     }
+
+
+async def test_async_ping_multiple_propagates_cancelled_error() -> None:
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    client.async_ping_ip = AsyncMock(
+        side_effect=[True, asyncio.CancelledError(), False]
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await client.async_ping_multiple(["1.1.1.1", "8.8.8.8", "9.9.9.9"])
 
 
 async def test_async_ping_multiple_empty_input_returns_empty_without_work() -> None:
@@ -176,3 +186,52 @@ async def test_async_get_all_interface_stats_targets_wans_and_skips_lan_bridges(
             "state": "up",
         },
     }
+
+
+async def test_async_get_all_interface_stats_propagates_cancelled_error() -> None:
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+
+    async def fake_stat(name: str) -> dict:
+        if name == "PPPoE0":
+            raise asyncio.CancelledError()
+        return deepcopy(INTERFACE_STATS_BY_NAME[name])
+
+    client.async_get_interface_stat = fake_stat  # type: ignore[method-assign]
+
+    with pytest.raises(asyncio.CancelledError):
+        await client.async_get_all_interface_stats(
+            interfaces=deepcopy(MULTI_WAN_INTERFACES)
+        )
+
+
+async def test_async_get_interface_stat_latches_get_only_after_get_success() -> None:
+    """Once GET path returns real stats, parse-mode is skipped on future calls."""
+    from custom_components.keenetic_router_pro.api import KeeneticClient
+    from conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
+
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    parse_calls = []
+    get_calls = []
+
+    async def fake_parse(cmd: str):
+        parse_calls.append(cmd)
+        return {}  # No useful keys -> falls through to GET.
+
+    async def fake_get(subpath: str, **kw):
+        get_calls.append((subpath, kw.get("params")))
+        return {"rxbytes": 1, "txbytes": 2}
+
+    client._rci_parse = fake_parse
+    client._rci_get = fake_get
+
+    result = await client.async_get_interface_stat("Wireguard0")
+    assert result["rxbytes"] == 1
+    assert client._iface_stat_get_only is True
+    assert len(parse_calls) == 1
+    assert len(get_calls) == 1
+
+    # Second call must skip _rci_parse entirely.
+    result = await client.async_get_interface_stat("Wireguard0")
+    assert result["rxbytes"] == 1
+    assert len(parse_calls) == 1, "parse-mode must be latched off"
+    assert len(get_calls) == 2

@@ -84,9 +84,10 @@ class WanMixin:
         ) -> Dict[str, Any]:
             wan_ip = _extract_ip(iface)
             link_state = str(iface.get("state") or "").lower()
-            status = WAN_STATUS_CONNECTED if (link_state == LINK_STATE_UP and wan_ip) else (
-                WAN_STATUS_LINK_UP if link_state == LINK_STATE_UP else WAN_STATUS_DOWN
-            )
+            if link_state == LINK_STATE_UP:
+                status = WAN_STATUS_CONNECTED if wan_ip else WAN_STATUS_LINK_UP
+            else:
+                status = WAN_STATUS_DOWN
             return {
                 "status": status,
                 "ip": wan_ip,

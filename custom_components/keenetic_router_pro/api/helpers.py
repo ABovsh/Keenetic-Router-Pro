@@ -161,6 +161,41 @@ def _normalize_interfaces(raw: Any) -> List[Dict[str, Any]]:
     return []
 
 
+def _extract_log_entries(data: Any) -> List[dict]:
+    """Return ``[{"time": ..., "message": ...}, ...]`` from a log payload.
+
+    Unlike :func:`_extract_parse_messages`, this preserves the per-record
+    ``time`` field emitted by the router's structured ``show/log``
+    response — required by the coordinator's monotonic OOM counter to
+    dedup events against a persisted last-seen timestamp.
+
+    Robust to nesting depth: a record is recognised by having both a
+    ``message`` (string) and a sibling ``time`` field. Order is preserved
+    in document order, which on Keenetic is newest → oldest.
+    """
+    entries: List[dict] = []
+
+    def _walk(v: Any) -> None:
+        if isinstance(v, dict):
+            msg = v.get("message")
+            if isinstance(msg, str):
+                entries.append({
+                    "time": v.get("time"),
+                    "level": v.get("level"),
+                    "module": v.get("module") or v.get("service") or v.get("ident"),
+                    "message": msg,
+                })
+                return
+            for nested in v.values():
+                _walk(nested)
+        elif isinstance(v, list):
+            for item in v:
+                _walk(item)
+
+    _walk(data)
+    return entries
+
+
 def _extract_parse_messages(data: Any) -> List[str]:
     """Return textual log/message lines from a Keenetic response."""
     lines: List[str] = []

@@ -67,6 +67,21 @@ class _Transport:
         # Hotspot host RCI subpaths that have responded "not found" — skip
         # them on subsequent polls so we stop spamming the router log.
         self._hotspot_subpath_skip: set[str] = set()
+        # Latched "winner" hotspot subpath for fast path on the next poll.
+        self._hotspot_subpath_winner: str | None = None
+        # Latched per-interface stat fetch mode. None -> probe both, True ->
+        # GET path works (skip the parse-mode attempt on every call),
+        # False -> parse-mode needed.
+        self._iface_stat_get_only: bool | None = None
+        # RCI tree-batching capability. None -> never tried, True -> batch
+        # POST succeeded, False -> batch POST failed once and we've latched
+        # back to per-call mode for the rest of the session.
+        self._rci_batch_supported: bool | None = None
+        # Tick-scoped cache populated by ``prefetch_tick`` at the top of a
+        # coordinator refresh. ``_rci_get`` walks this tree (segment by
+        # segment) before issuing an HTTP request, so many params-less GETs
+        # collapse into a single composite POST. Cleared at end of tick.
+        self._tick_cache: Dict[str, Any] | None = None
         # Serialise authentication refreshes so concurrent RCI calls do not
         # race on `_auth_header` / `_authenticated`.
         self._auth_lock: asyncio.Lock = asyncio.Lock()
@@ -209,9 +224,39 @@ class _Transport:
         *,
         params: Dict[str, Any] | None = None,
     ) -> Any:
-        """GET /rci/<subpath>."""
+        """GET /rci/<subpath>, served from the tick cache when possible."""
+        if params is None and self._tick_cache is not None:
+            cached = self._lookup_tick_cache(subpath)
+            if cached is not None:
+                return cached
         path = f"{RCI_ROOT}/{subpath.lstrip('/')}"
         return await self._request("GET", path, params=params)
+
+    def _lookup_tick_cache(self, subpath: str) -> Any | None:
+        """Walk the prefetched batch tree by subpath segments."""
+        node: Any = self._tick_cache
+        for seg in subpath.strip("/").split("/"):
+            if not isinstance(node, dict) or seg not in node:
+                return None
+            node = node[seg]
+        return node
+
+    async def prefetch_tick(self, tree: Dict[str, Any]) -> bool:
+        """Prefetch ``tree`` into the tick cache via one composite POST.
+
+        Returns True if the cache was populated, False on any failure
+        (callers then proceed with per-call ``_rci_get`` as before).
+        """
+        result = await self._rci_batch(tree)
+        if result is None:
+            self._tick_cache = None
+            return False
+        self._tick_cache = result
+        return True
+
+    def clear_tick_cache(self) -> None:
+        """Drop any prefetched tree so the next refresh starts clean."""
+        self._tick_cache = None
 
     async def _rci_post(
         self,
@@ -228,3 +273,45 @@ class _Transport:
         """Execute a CLI-like command via /rci/parse."""
         # JSON body sadece string: "interface Wireguard0 up"
         return await self._rci_post("parse", command, allow_text=True)
+
+    async def _rci_batch(self, tree: Dict[str, Any]) -> Dict[str, Any] | None:
+        """Send a composite RCI tree request in a single HTTP round-trip.
+
+        Keenetic's RCI accepts a JSON tree at ``POST /rci/`` where each
+        top-level key corresponds to a subtree command (e.g. ``{"show":
+        {"system": {}, "interface": {}}}``) and the response mirrors the
+        structure. One POST can replace up to a dozen individual GETs.
+
+        This helper is **deliberately conservative**:
+
+        * It returns ``None`` (never raises) on any failure, so callers
+          can transparently fall back to per-call ``_rci_get`` mode.
+        * The first failure latches ``_rci_batch_supported = False`` for
+          the rest of the session, so a router that doesn't support the
+          composite endpoint isn't probed every coordinator tick.
+        * A successful response latches ``_rci_batch_supported = True``.
+
+        Wiring it into the coordinator is opt-in; the helper exists so
+        a future release can flip the switch after empirical
+        per-firmware verification.
+        """
+        if not tree or not isinstance(tree, dict):
+            return None
+        if self._rci_batch_supported is False:
+            return None
+        path = RCI_ROOT
+        try:
+            result = await self._request("POST", path, json=tree)
+        except asyncio.CancelledError:
+            raise
+        except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError) as err:
+            _LOGGER.debug(
+                "RCI batch POST failed; latching off for this session: %s", err
+            )
+            self._rci_batch_supported = False
+            return None
+        if not isinstance(result, dict):
+            self._rci_batch_supported = False
+            return None
+        self._rci_batch_supported = True
+        return result

@@ -136,13 +136,21 @@ class DnsMixin:
                     }
                 )
 
-            if not proxies:
-                status = "unknown"
-            elif total_servers == 0:
+            # Status thresholds:
+            #   "down"     — traffic is flowing but no upstream answered any query
+            #   "degraded" — meaningful failure rate on a non-trivial sample
+            #                (>=5% failed of >=50 sent). The router's DNS proxy
+            #                races DoH upstreams and prunes losers; race-loser
+            #                probes routinely accumulate 1-2 timeouts that the
+            #                cumulative `show dns-proxy` counters never zero,
+            #                so a strict ">0 failed" rule sticks at "degraded"
+            #                forever on a perfectly healthy resolver.
+            failure_rate = (failed_requests / sent_requests) if sent_requests else 0.0
+            if not proxies or total_servers == 0:
                 status = "unknown"
             elif active_servers == 0 and sent_requests > 0:
                 status = "down"
-            elif failed_requests > 0:
+            elif sent_requests >= 50 and failure_rate >= 0.05:
                 status = "degraded"
             else:
                 status = "ok"

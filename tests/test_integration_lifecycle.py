@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tests.conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
+from conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
 
 import asyncio
 from types import SimpleNamespace
@@ -101,14 +101,21 @@ class _FakeCoordinator:
         self.data = {
             "mesh_nodes": [],
             "new_clients": {"aa:bb:cc:dd:ee:ff"},
-            "clients": [
-                {
-                    "mac": "AA:BB:CC:DD:EE:FF",
+            "clients_by_mac": {
+                "aa:bb:cc:dd:ee:ff": {
+                    "mac": "AA-BB-CC-DD-EE-FF",
                     "name": "Kitchen Tablet",
                     "ip": "192.0.2.40",
                     "hostname": "tablet",
                     "interface": {"name": "Home"},
                     "ssid": "Main",
+                }
+            },
+            "clients": [
+                {
+                    "mac": "AA-BB-CC-DD-EE-FF",
+                    "name": "Fallback Should Not Be Used",
+                    "ip": "192.0.2.41",
                 }
             ],
         }

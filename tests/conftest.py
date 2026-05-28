@@ -257,6 +257,27 @@ update_coordinator.UpdateFailed = _UpdateFailed
 update_coordinator.CoordinatorEntity = _CoordinatorEntity
 helpers.update_coordinator = update_coordinator
 
+# Stub homeassistant.helpers.storage with a minimal in-memory Store
+# so tests can exercise coordinator code paths that persist state
+# without touching the filesystem.
+class _Store:
+    _files: dict[str, Any] = {}
+
+    def __init__(self, hass, version, key, **kwargs):
+        self._key = key
+
+    async def async_load(self):
+        return _Store._files.get(self._key)
+
+    async def async_save(self, data):
+        _Store._files[self._key] = data
+
+
+storage = types.ModuleType("homeassistant.helpers.storage")
+storage.Store = _Store
+helpers.storage = storage
+sys.modules["homeassistant.helpers.storage"] = storage
+
 device_registry = types.ModuleType("homeassistant.helpers.device_registry")
 device_registry.DeviceInfo = dict
 device_registry.format_mac = lambda mac: str(mac).lower()

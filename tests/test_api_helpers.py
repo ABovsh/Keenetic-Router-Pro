@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tests.conftest import (
+from conftest import (
     TEST_BASE_URL,
     TEST_HOST,
     TEST_HOST_ALT,

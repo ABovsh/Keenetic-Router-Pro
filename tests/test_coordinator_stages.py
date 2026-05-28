@@ -58,6 +58,17 @@ class StageFixtureClient:
         self.traffic_stats = deepcopy(TRAFFIC_STATS)
         self.port_info = deepcopy(PORT_INFO)
         self.interface_stats = deepcopy(INTERFACE_STATS)
+        self._rci_batch_supported: bool | None = False  # bypass prefetch
+        self._hotspot_subpath_winner: str | None = None
+        self.prefetch_calls: list[dict] = []
+        self.clear_tick_cache_calls = 0
+
+    def clear_tick_cache(self) -> None:
+        self.clear_tick_cache_calls += 1
+
+    async def prefetch_tick(self, tree: dict) -> bool:
+        self.prefetch_calls.append(tree)
+        return False
 
     def _normalize_interfaces(self, interfaces: Any) -> list[dict[str, Any]]:
         return _normalize_interfaces(interfaces)
@@ -89,7 +100,7 @@ class StageFixtureClient:
     async def async_get_ping_check_status(self) -> dict[str, Any]:
         return deepcopy(self.ping_check)
 
-    async def async_get_crypto_maps(self) -> dict[str, Any]:
+    async def async_get_ipsec_status(self) -> dict[str, Any]:
         return deepcopy(self.crypto_maps)
 
     async def async_get_dns_proxy_status(self) -> dict[str, Any]:
@@ -130,6 +141,27 @@ class StageFixtureClient:
     @staticmethod
     def summarize_client_stats(clients: list[dict[str, Any]]) -> dict[str, Any]:
         return ClientsMixin.summarize_client_stats(clients)
+
+
+class OverlapDetectingStageClient(StageFixtureClient):
+    """Stage client that records whether two coordinator refreshes overlap."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.active_system_fetches = 0
+        self.peak_system_fetches = 0
+
+    async def async_get_system_info(self) -> dict[str, Any]:
+        self.active_system_fetches += 1
+        self.peak_system_fetches = max(
+            self.peak_system_fetches,
+            self.active_system_fetches,
+        )
+        try:
+            await asyncio.sleep(0.01)
+            return deepcopy(self.system_info)
+        finally:
+            self.active_system_fetches -= 1
 
 
 async def _async_update(
@@ -177,11 +209,26 @@ async def test_coordinator_pipeline_fixtures_publishes_expected_data_keys() -> N
         "ndns",
         "host_policies",
         "port_info",
+        "ping_check_status",
+        "_iface_fingerprint",
         "crypto_maps",
         "dns_proxy",
         "ipsec_diagnostics",
         "new_clients",
     }
+
+
+async def test_coordinator_serializes_overlapping_refreshes() -> None:
+    """The client tick cache is instance-scoped, so refresh bodies must not overlap."""
+    client = OverlapDetectingStageClient()
+    coordinator = _coordinator(client)
+
+    await asyncio.gather(
+        _updated_data(coordinator),
+        _updated_data(coordinator),
+    )
+
+    assert client.peak_system_fetches == 1
 
 
 async def test_coordinator_pipeline_clients_index_normalizes_mac_keys() -> None:
@@ -324,7 +371,10 @@ async def test_coordinator_crypto_maps_slow_tick_reuses_previous_timestamp() -> 
     previous["crypto_maps"]["SITE"]["rx_throughput"] = 7.0
     previous["crypto_maps"]["SITE"]["tx_throughput"] = 8.0
     coordinator.data = previous
-    coordinator._refresh_count = 6
+    # refresh_count = 1 is a fast (non-slow) tick under the new
+    # slow_refresh = (count % 6 == 0) cadence — site-to-site IPsec
+    # data should be reused unchanged from the previous tick.
+    coordinator._refresh_count = 1
 
     data = await _updated_data(coordinator)
 
@@ -339,7 +389,10 @@ async def test_coordinator_crypto_maps_slow_tick_reuses_previous_rates() -> None
     previous["crypto_maps"]["SITE"]["rx_throughput"] = 7.0
     previous["crypto_maps"]["SITE"]["tx_throughput"] = 8.0
     coordinator.data = previous
-    coordinator._refresh_count = 6
+    # refresh_count = 1 is a fast (non-slow) tick under the new
+    # slow_refresh = (count % 6 == 0) cadence — site-to-site IPsec
+    # data should be reused unchanged from the previous tick.
+    coordinator._refresh_count = 1
 
     data = await _updated_data(coordinator)
 
@@ -406,3 +459,181 @@ async def test_coordinator_wan_counter_reset_clamps_rate_zero() -> None:
     data = await _updated_data(coordinator)
 
     assert data["wan_by_id"]["PPPoE0"]["rx_throughput"] == pytest.approx(0.0)
+
+
+async def test_coordinator_skips_wan_fetch_when_interfaces_fingerprint_unchanged() -> None:
+    """When the interface fingerprint matches the prior tick, `async_get_wan_interfaces`
+    is not called again — saves one RCI round-trip per fast tick on the common path."""
+    client = StageFixtureClient()
+    coordinator = _coordinator(client)
+    coordinator._refresh_count = 1  # not slow, not first_refresh
+
+    await _updated_data(coordinator)  # priming tick — wan fetched
+    coordinator.data = await _updated_data(coordinator)  # build prior fingerprint
+    coordinator._refresh_count = 2
+
+    call_count = 0
+    original = client.async_get_wan_interfaces
+
+    async def counting_wan(**kwargs: Any):
+        nonlocal call_count
+        call_count += 1
+        return await original(**kwargs)
+
+    client.async_get_wan_interfaces = counting_wan
+
+    data = await _updated_data(coordinator)
+
+    assert call_count == 0, "WAN fetch must be skipped when fingerprint matches"
+    # Cached WAN payload is still returned, with correct shape.
+    assert data["wan_interfaces"]
+    assert data["wan_interfaces"][0]["id"] == coordinator.data["wan_interfaces"][0]["id"]
+
+
+async def test_coordinator_refetches_wan_when_interface_state_changes() -> None:
+    """Fingerprint includes link/state — a flap on any iface must trigger refetch."""
+    client = StageFixtureClient()
+    coordinator = _coordinator(client)
+    await _updated_data(coordinator)
+    coordinator.data = await _updated_data(coordinator)
+    coordinator._refresh_count = 2
+
+    # Mutate one interface's link state to invalidate the fingerprint.
+    first_key = next(iter(client.interfaces))
+    if isinstance(client.interfaces[first_key], dict):
+        client.interfaces[first_key]["link"] = (
+            "down" if client.interfaces[first_key].get("link") == "up" else "up"
+        )
+
+    call_count = 0
+    original = client.async_get_wan_interfaces
+
+    async def counting_wan(**kwargs: Any):
+        nonlocal call_count
+        call_count += 1
+        return await original(**kwargs)
+
+    client.async_get_wan_interfaces = counting_wan
+
+    await _updated_data(coordinator)
+
+    assert call_count == 1, "fingerprint mismatch must trigger WAN refetch"
+
+
+async def test_coordinator_clients_by_mac_index_is_shared_with_new_mac_diff() -> None:
+    """P3: building the MAC index once means the index in data['clients_by_mac']
+    and the keys used for new-MAC detection refer to the same MACs (no double walk)."""
+    client = StageFixtureClient()
+    coordinator = _coordinator(client)
+
+    data = await _updated_data(coordinator)
+    assert set(data["clients_by_mac"]).issuperset(data["new_clients"])
+    # Every MAC in clients_by_mac must be normalized (lowercase colon form).
+    for mac in data["clients_by_mac"]:
+        assert mac == mac.lower()
+        assert ":" in mac or mac == ""
+
+
+async def test_coordinator_caches_ping_check_status_between_slow_ticks() -> None:
+    """P4: ping_check_status is fetched only on slow ticks; fast ticks reuse cache."""
+    client = StageFixtureClient()
+    coordinator = _coordinator(client)
+    await _updated_data(coordinator)  # first refresh = slow
+
+    fetch_count = 0
+    original = client.async_get_ping_check_status
+
+    async def counting_pc() -> dict[str, Any]:
+        nonlocal fetch_count
+        fetch_count += 1
+        return await original()
+
+    client.async_get_ping_check_status = counting_pc
+    coordinator.data = await _updated_data(coordinator)
+    coordinator._refresh_count = 1  # fast tick (not slow, not very_slow)
+
+    fetch_count = 0
+    data = await _updated_data(coordinator)
+
+    assert fetch_count == 0, "ping_check_status must be cached on fast ticks"
+    assert "ping_check_status" in data
+
+
+async def test_coordinator_calls_prefetch_tick_on_each_refresh() -> None:
+    """When batch is supported, coordinator must prefetch a composite tree."""
+    client = StageFixtureClient()
+    client._rci_batch_supported = None  # not latched off
+    coordinator = _coordinator(client)
+
+    await _updated_data(coordinator)
+
+    assert len(client.prefetch_calls) == 1
+    tree = client.prefetch_calls[0]
+    # Always-on subpaths on the first (=slow=very_slow) refresh.
+    show = tree["show"]
+    assert "system" in show
+    assert "interface" in show
+    assert "ip" in show and "neighbour" in show["ip"]
+    # Slow-tier subpaths present on first refresh.
+    assert "version" in show
+    assert "ping-check" in show
+    assert "ipsec" in show
+    # Very-slow-tier subpaths present on first refresh. Do not prefetch
+    # show/crypto/map: that VICI path is the IPsec OOM source this release
+    # avoids by using show/ipsec instead.
+    assert "ndns" in show
+    assert "dns-proxy" in show
+    assert "crypto" not in show
+
+
+async def test_coordinator_clears_prefetch_cache_after_successful_refresh() -> None:
+    """Tick cache must not leak into calls made after the coordinator tick."""
+    client = StageFixtureClient()
+    client._rci_batch_supported = None
+    coordinator = _coordinator(client)
+
+    await _updated_data(coordinator)
+
+    assert client.clear_tick_cache_calls >= 2
+
+
+async def test_coordinator_clears_prefetch_cache_after_failed_refresh() -> None:
+    """Critical failures must also clear the tick cache before surfacing."""
+    client = StageFixtureClient()
+    client._rci_batch_supported = None
+
+    async def fail_system_info() -> dict[str, Any]:
+        raise RuntimeError("router offline")
+
+    client.async_get_system_info = fail_system_info  # type: ignore[method-assign]
+    coordinator = _coordinator(client)
+
+    with pytest.raises(Exception):
+        await _updated_data(coordinator)
+
+    assert client.clear_tick_cache_calls >= 2
+
+
+async def test_coordinator_skips_prefetch_when_batch_latched_off() -> None:
+    """A router that doesn't support tree-batching must not be re-probed."""
+    client = StageFixtureClient()
+    client._rci_batch_supported = False
+    coordinator = _coordinator(client)
+
+    await _updated_data(coordinator)
+
+    assert client.prefetch_calls == []
+
+
+async def test_coordinator_excludes_hotspot_winner_from_prefetch_tree() -> None:
+    """Optional hotspot subpaths must not poison composite batch capability."""
+    client = StageFixtureClient()
+    client._rci_batch_supported = None
+    client._hotspot_subpath_winner = "show/ip/hotspot/host"
+    coordinator = _coordinator(client)
+
+    await _updated_data(coordinator)
+
+    tree = client.prefetch_calls[0]
+    assert "hotspot" not in tree["show"]["ip"]
+    assert "hotspot" not in tree.get("ip", {})

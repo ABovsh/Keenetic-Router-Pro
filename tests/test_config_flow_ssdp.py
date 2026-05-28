@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tests.conftest import TEST_BASE_URL, TEST_HOST
+from conftest import TEST_BASE_URL, TEST_HOST
 
 from types import SimpleNamespace
 

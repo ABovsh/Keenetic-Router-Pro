@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tests.conftest import (
+from conftest import (
     TEST_BASE_URL_ALT,
     TEST_HOST,
     TEST_HOST_ALT,
@@ -61,8 +61,7 @@ from custom_components.keenetic_router_pro.sensor.dns import (
     KeeneticDnsProxyStatusSensor,
 )
 from custom_components.keenetic_router_pro.sensor.ipsec import (
-    KeeneticIpsecViciOutOfMemorySensor,
-    KeeneticIpsecViciStatusSensor,
+    KeeneticIpsecViciOomTotalSensor,
 )
 from custom_components.keenetic_router_pro.sensor.system import (
     KeeneticFirmwareVersionSensor,
@@ -256,28 +255,30 @@ def test_dns_and_ipsec_diagnostic_sensors_pin_icons_and_bad_counts() -> None:
     assert dns.extra_state_attributes["failed_requests"] == "7"
     assert KeeneticDnsProxyFailedRequestsSensor(coordinator, entry).native_value == 7
 
-    ipsec = KeeneticIpsecViciStatusSensor(coordinator, entry)
-    assert ipsec.native_value == "warning"
-    assert ipsec.icon == "mdi:shield-alert"
-    assert ipsec.extra_state_attributes["poll_interval_seconds"] > 0
-    assert KeeneticIpsecViciOutOfMemorySensor(coordinator, entry).native_value == 3
+    data_with_total = dict(data)
+    data_with_total["ipsec_diagnostics"] = dict(data["ipsec_diagnostics"])
+    data_with_total["ipsec_diagnostics"]["oom_total"] = 42
+    data_with_total["ipsec_diagnostics"]["oom_last_seen"] = "2026-05-27T17:33:48"
+    coord_total = _coordinator(data_with_total)
+    oom = KeeneticIpsecViciOomTotalSensor(coord_total, entry)
+    assert oom.native_value == 42
+    attrs = oom.extra_state_attributes
+    assert attrs["last_event_router_time"] == "2026-05-27T17:33:48"
 
     empty = _coordinator({"dns_proxy": {}, "ipsec_diagnostics": {}})
     assert KeeneticDnsProxyStatusSensor(empty, entry).extra_state_attributes is None
     assert KeeneticDnsProxyFailedRequestsSensor(empty, entry).native_value is None
-    assert KeeneticIpsecViciStatusSensor(empty, entry).extra_state_attributes is None
-    assert KeeneticIpsecViciOutOfMemorySensor(empty, entry).native_value is None
+    assert KeeneticIpsecViciOomTotalSensor(empty, entry).native_value is None
 
     bad = _coordinator(
         {
             "dns_proxy": {"failed_requests": "bad", "status": "down"},
-            "ipsec_diagnostics": {"vici_out_of_memory_count": "bad", "status": "ok"},
+            "ipsec_diagnostics": {"oom_total": "bad"},
         }
     )
     assert KeeneticDnsProxyStatusSensor(bad, entry).icon == "mdi:dns-outline"
     assert KeeneticDnsProxyFailedRequestsSensor(bad, entry).native_value is None
-    assert KeeneticIpsecViciStatusSensor(bad, entry).icon == "mdi:shield-check"
-    assert KeeneticIpsecViciOutOfMemorySensor(bad, entry).native_value is None
+    assert KeeneticIpsecViciOomTotalSensor(bad, entry).native_value is None
 
 
 def test_system_and_wifi_sensors_cover_alternate_payload_shapes() -> None:
@@ -762,7 +763,7 @@ async def test_dns_proxy_status_handles_collapsed_doh_and_latches_missing_endpoi
                 {
                     "proxy-name": "Proxy",
                     "proxy-config": "https://dns.example/doh",
-                    "proxy-stat": "8.8.8.8 53 10 8 1 20ms 30ms 1",
+                    "proxy-stat": "8.8.8.8 53 100 80 10 20ms 30ms 1",
                     "proxy-https": {
                         "server-https": {"uri": "https://nextdns.io/private-id?x=1"}
                     },
@@ -776,7 +777,7 @@ async def test_dns_proxy_status_handles_collapsed_doh_and_latches_missing_endpoi
 
     assert result["status"] == "degraded"
     assert result["doh_server_count"] == 1
-    assert result["failed_requests"] == 1
+    assert result["failed_requests"] == 10
     assert result["proxies"][0]["configured_doh_uris"] == ["https://nextdns.io/"]
 
     client._rci_get = AsyncMock(side_effect=aiohttp.ClientError("404 missing"))

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tests.conftest import TEST_HOST, TEST_HOST_ALT, TEST_PASSWORD, TEST_USERNAME
+from conftest import TEST_HOST, TEST_HOST_ALT, TEST_PASSWORD, TEST_USERNAME
 
 import asyncio
 from unittest.mock import AsyncMock
@@ -148,7 +148,7 @@ def test_dns_proxy_status_normalizes_malformed_and_single_doh_payloads() -> None
                 {
                     "proxy-name": "main",
                     "proxy-config": "server https://dns.example/dns-query",
-                    "proxy-stat": "1.1.1.1 53 3 1 0 7ms 9ms 50\nbad",
+                    "proxy-stat": "1.1.1.1 53 100 60 0 7ms 9ms 50\nbad",
                     "proxy-https": {
                         "server-https": {"uri": "https://dns.example/dns-query"}
                     },
@@ -165,8 +165,8 @@ def test_dns_proxy_status_normalizes_malformed_and_single_doh_payloads() -> None
     assert status["proxy_count"] == 2
     assert status["doh_server_count"] == 1
     assert status["dns_server_count"] == 1
-    assert status["requests_sent"] == 3
-    assert status["failed_requests"] == 2
+    assert status["requests_sent"] == 100
+    assert status["failed_requests"] == 40
     assert status["client_path_uses_doh"] is True
 
 
@@ -178,45 +178,53 @@ def test_parse_ipsec_vici_diagnostics_golden_values() -> None:
         "May 3 ipsec::vici::stats: out of memory [LOW]",
     ]
 
-    assert KeeneticClient._parse_ipsec_vici_diagnostics(lines) == {
-        "status": "warning",
-        "vici_out_of_memory_count": 3,
-        "last_vici_out_of_memory": "May 3 ipsec::vici::stats: out of memory [LOW]",
-        "last_error_code": "LOW",
-        "recent_matches": [
-            "May 1 IpSec::Vici::Stats: out of memory",
-            "May 2 IpSec::Vici::Stats: out of memory [ENOMEM]",
-            "May 3 ipsec::vici::stats: out of memory [LOW]",
-        ],
-        "scanned_log_lines": 4,
-    }
-    assert KeeneticClient._parse_ipsec_vici_diagnostics(["unrelated"]) == {
-        "status": "ok",
-        "vici_out_of_memory_count": 0,
-        "last_vici_out_of_memory": None,
-        "last_error_code": None,
-        "recent_matches": [],
-        "scanned_log_lines": 1,
-    }
+    result = KeeneticClient._parse_ipsec_vici_diagnostics(lines)
+    assert result["status"] == "warning"
+    assert result["vici_out_of_memory_count"] == 3
+    assert result["last_vici_out_of_memory"] == "May 3 ipsec::vici::stats: out of memory [LOW]"
+    assert result["last_error_code"] == "LOW"
+    assert result["recent_matches"] == [
+        "May 1 IpSec::Vici::Stats: out of memory",
+        "May 2 IpSec::Vici::Stats: out of memory [ENOMEM]",
+        "May 3 ipsec::vici::stats: out of memory [LOW]",
+    ]
+    assert result["scanned_log_lines"] == 4
+    assert result["events"] == [(None, m) for m in result["recent_matches"]]
+
+    ok = KeeneticClient._parse_ipsec_vici_diagnostics(["unrelated"])
+    assert ok["status"] == "ok"
+    assert ok["vici_out_of_memory_count"] == 0
+    assert ok["recent_matches"] == []
+    assert ok["events"] == []
 
 
 def test_parse_ipsec_vici_diagnostics_empty_and_malformed_values() -> None:
-    assert KeeneticClient._parse_ipsec_vici_diagnostics([]) == {
-        "status": "ok",
-        "vici_out_of_memory_count": 0,
-        "last_vici_out_of_memory": None,
-        "last_error_code": None,
-        "recent_matches": [],
-        "scanned_log_lines": 0,
-    }
-    assert KeeneticClient._parse_ipsec_vici_diagnostics([None, 7, {"msg": "x"}]) == {
-        "status": "ok",
-        "vici_out_of_memory_count": 0,
-        "last_vici_out_of_memory": None,
-        "last_error_code": None,
-        "recent_matches": [],
-        "scanned_log_lines": 3,
-    }
+    empty = KeeneticClient._parse_ipsec_vici_diagnostics([])
+    assert empty["status"] == "ok"
+    assert empty["vici_out_of_memory_count"] == 0
+    assert empty["scanned_log_lines"] == 0
+    assert empty["events"] == []
+
+    bad = KeeneticClient._parse_ipsec_vici_diagnostics([None, 7, {"msg": "x"}])
+    assert bad["status"] == "ok"
+    assert bad["vici_out_of_memory_count"] == 0
+    assert bad["scanned_log_lines"] == 3
+    assert bad["events"] == []
+
+    # Modern path: pass entries with time/message — events carry timestamps.
+    entries = [
+        {"time": "May 1 12:05:00", "message": "IpSec::Vici::Stats: out of memory [X]"},
+        {"time": "May 1 12:00:00", "message": "IpSec::Vici::Stats: out of memory"},
+        {"time": "May 1 11:55:00", "message": "harmless"},
+    ]
+    modern = KeeneticClient._parse_ipsec_vici_diagnostics([], entries=entries)
+    assert modern["vici_out_of_memory_count"] == 2
+    assert modern["last_vici_out_of_memory"] == "IpSec::Vici::Stats: out of memory [X]"
+    assert modern["events"] == [
+        ("May 1 12:05:00", "IpSec::Vici::Stats: out of memory [X]"),
+        ("May 1 12:00:00", "IpSec::Vici::Stats: out of memory"),
+    ]
+    assert modern["scanned_log_lines"] == 3
 
 
 def test_async_get_crypto_maps_normalizes_single_phase2_sa_and_placeholders() -> None:

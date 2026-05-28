@@ -35,7 +35,7 @@ def coerce_int(value: Any, default: int = 0) -> int:
     """Return an int from loosely typed Keenetic RCI values."""
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (OverflowError, TypeError, ValueError):
         return default
 
 
@@ -74,7 +74,7 @@ def normalize_mac(value: Any) -> str:
     compact = re.sub(r"[^0-9a-f]", "", text)
     if len(compact) == 12:
         return ":".join(compact[i : i + 2] for i in range(0, 12, 2))
-    return text
+    return ""
 
 
 def usable_ip(value: Any) -> str | None:

@@ -91,10 +91,7 @@ from .dns import (
     KeeneticDnsProxyStatusSensor,
     KeeneticDnsProxyFailedRequestsSensor,
 )
-from .ipsec import (
-    KeeneticIpsecViciStatusSensor,
-    KeeneticIpsecViciOutOfMemorySensor,
-)
+from .ipsec import KeeneticIpsecViciOomTotalSensor
 
 
 async def async_setup_entry(
@@ -121,8 +118,7 @@ async def async_setup_entry(
     entities.append(KeeneticActiveConnectionsSensor(coordinator, entry))
     entities.append(KeeneticDnsProxyStatusSensor(coordinator, entry))
     entities.append(KeeneticDnsProxyFailedRequestsSensor(coordinator, entry))
-    entities.append(KeeneticIpsecViciStatusSensor(coordinator, entry))
-    entities.append(KeeneticIpsecViciOutOfMemorySensor(coordinator, entry))
+    entities.append(KeeneticIpsecViciOomTotalSensor(coordinator, entry))
     entities.append(KeeneticConnectedClientsSensor(coordinator, entry))
     entities.append(KeeneticRouterClientsSensor(coordinator, entry))
     entities.append(KeeneticDisconnectedClientsSensor(coordinator, entry))

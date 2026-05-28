@@ -24,7 +24,7 @@ from .const import (
     EVENT_NEW_DEVICE,
 )
 from .coordinator import KeeneticCoordinator
-from .utils import mesh_unique_id
+from .utils import mesh_unique_id, normalize_mac
 
 
 @dataclass
@@ -249,14 +249,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     def _async_handle_new_device() -> None:
         """Yeni cihaz bağlandığında event tetikle."""
         new_clients = coordinator.data.get("new_clients", set())
+        clients_by_mac = coordinator.data.get("clients_by_mac", {})
         clients = coordinator.data.get("clients", [])
         
         for mac in new_clients:
             client_info = None
-            for c in clients:
-                if str(c.get("mac") or "").lower() == mac:
-                    client_info = c
-                    break
+            if isinstance(clients_by_mac, dict):
+                indexed = clients_by_mac.get(mac)
+                if isinstance(indexed, dict):
+                    client_info = indexed
+            if client_info is None:
+                for c in clients:
+                    if not isinstance(c, dict):
+                        continue
+                    if normalize_mac(c.get("mac")) == mac:
+                        client_info = c
+                        break
             
             if client_info:
                 name = client_info.get("name") or client_info.get("hostname") or mac.upper()

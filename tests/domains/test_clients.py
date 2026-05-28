@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tests.conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
+from conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
 
 import asyncio
 from unittest.mock import AsyncMock
@@ -59,3 +59,31 @@ async def test_clients_error_paths_return_empty_shapes(exc: Exception) -> None:
     assert await client.async_get_policies() == {}
     assert await client.async_get_host_policies() == {}
 
+
+
+async def test_async_get_clients_latches_winner_subpath_for_next_call() -> None:
+    """After a hotspot subpath returns real data once, future calls try it first."""
+    from custom_components.keenetic_router_pro.const import RCI_HOTSPOT_HOST_PATHS
+
+    client = _client()
+    winner_path = RCI_HOTSPOT_HOST_PATHS[-1]
+    payload = {"host": [{"mac": "AA:BB:CC:00:00:01", "active": "yes"}]}
+
+    call_log: list[str] = []
+
+    async def fake_get(subpath: str, **_):
+        call_log.append(subpath)
+        return payload if subpath == winner_path else {}
+
+    client._rci_get = fake_get
+
+    items = await client.async_get_clients()
+    assert items and items[0]["mac"] == "AA:BB:CC:00:00:01"
+    assert client._hotspot_subpath_winner == winner_path
+    assert call_log == list(RCI_HOTSPOT_HOST_PATHS)
+
+    call_log.clear()
+    items = await client.async_get_clients()
+    assert items and items[0]["mac"] == "AA:BB:CC:00:00:01"
+    assert call_log[0] == winner_path
+    assert len(call_log) == 1

@@ -8,6 +8,53 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.46
+
+### 🐛 Bug fixes
+- **DNS Proxy Status** no longer sticks at `degraded` on healthy
+  routers. A handful of timeouts from DoH probes against unused
+  upstreams are now treated as normal noise; the sensor only flags
+  `degraded` when the failure rate is meaningfully high.
+- **DNS Proxy Failed Requests** now produces a clean per-hour rate
+  graph in HA Statistics instead of a sawtooth — useful for
+  spotting actual DNS health regressions over time.
+- **Mesh client counts** no longer flicker to zero on a transient
+  router hiccup. The previous client snapshot is kept until the
+  next successful poll.
+- **New device** events no longer fire repeatedly for the same
+  client when the router uses different MAC formatting between
+  payloads.
+- **IPsec site-to-site** stays connected during normal IKE
+  re-keying instead of briefly flipping to disconnected.
+- Reload and shutdown of the integration are now clean — no more
+  spurious "fetch failed" warnings during normal HA restarts.
+
+### ✨ Improvements
+- **Site-to-site IPsec** data now updates every minute (matching
+  WAN/traffic stats) instead of every 10 minutes, so `Connected`,
+  `Tunnel state`, `IKE state`, and RX/TX sensors react much faster
+  to real changes. The underlying router-side memory issue that
+  forced the 10-minute throttle in 1.7.45 has been worked around
+  by switching to a different router endpoint.
+- New **IPsec VICI OOM Total** sensor: a single cumulative counter
+  that survives HA restarts, so HA Statistics gives you a real
+  "events per hour / per day" graph instead of a snapshot of the
+  log window.
+- Each integration refresh now uses fewer HTTP round-trips to the
+  router on supported firmware (KeeneticOS 5.x), reducing router
+  CPU load and giving slightly snappier sensor updates. Older
+  firmwares automatically fall back to the previous behavior.
+
+### 🧹 Cleanup (only affects diagnostic sensors)
+- The `IPsec VICI Status` and `IPsec VICI Out Of Memory` sensors
+  have been removed — replaced by the single cumulative counter
+  above.
+- All other IPsec entities keep their unique IDs and history.
+
+### 🔧 Maintenance
+- Internal cleanup, reliability fixes, and expanded test coverage
+  across the coordinator, IPsec parsing, and client tracking.
+
 ## 1.7.45
 
 ### 🐛 Bug fixes

@@ -23,10 +23,22 @@ _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.api.clients")
 
 class ClientsMixin:
     async def async_get_clients(self) -> List[Dict[str, Any]]:
+        # Fast path: once we've found a hotspot subpath that returns real
+        # data, latch it and try it first on every subsequent call. This
+        # skips up to 2 wasted round-trips per coordinator tick on routers
+        # whose firmware doesn't expose the canonical first path.
+        winner = getattr(self, "_hotspot_subpath_winner", None)
+        ordered_paths: List[str]
+        if winner and winner not in self._hotspot_subpath_skip:
+            ordered_paths = [winner] + [
+                p for p in RCI_HOTSPOT_HOST_PATHS if p != winner
+            ]
+        else:
+            ordered_paths = list(RCI_HOTSPOT_HOST_PATHS)
 
         last_data: Any = None
 
-        for subpath in RCI_HOTSPOT_HOST_PATHS:
+        for subpath in ordered_paths:
             if subpath in self._hotspot_subpath_skip:
                 continue
             try:
@@ -43,6 +55,7 @@ class ClientsMixin:
             items = _nested_dict_items(data, "hosts", "host", "items")
 
             if items:
+                self._hotspot_subpath_winner = subpath
                 return items
 
         _LOGGER.debug(

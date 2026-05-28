@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tests.conftest import TEST_HOST
+from conftest import TEST_HOST
 
 import asyncio
 from types import SimpleNamespace

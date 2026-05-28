@@ -62,13 +62,21 @@ class KeeneticDnsProxyStatusSensor(ControllerEntity, SensorEntity):
 
 
 class KeeneticDnsProxyFailedRequestsSensor(ControllerEntity, SensorEntity):
-    """Number of failed DNS proxy upstream requests in router stats."""
+    """Number of failed DNS proxy upstream requests in router stats.
+
+    Declared as ``TOTAL_INCREASING`` because the router's underlying
+    counter only ever grows — it resets only when the DNS proxy itself
+    restarts (firmware reboot, profile reload). ``MEASUREMENT`` would
+    make HA Statistics chart this as an absolute-value sawtooth, but
+    what users actually want is a "failed-DNS-queries per hour" rate,
+    which ``TOTAL_INCREASING`` derives correctly with reset detection.
+    """
 
     _attr_has_entity_name = True
     _attr_name = "DNS Proxy Failed Requests"
     _attr_icon = "mdi:alert-circle-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:

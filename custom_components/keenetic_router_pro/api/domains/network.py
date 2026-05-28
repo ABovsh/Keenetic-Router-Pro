@@ -25,7 +25,8 @@ class NetworkMixin:
         try:
             ip_address = _validate_cli_arg(ip_address, "IP address")
 
-            result = await self._rci_parse(f"ip ping {ip_address} count 1")
+            async with asyncio.timeout(timeout):
+                result = await self._rci_parse(f"ip ping {ip_address} count 1")
 
             if result is None:
                 return False
@@ -68,6 +69,8 @@ class NetworkMixin:
 
         ping_results: Dict[str, bool] = {}
         for ip, result in zip(ip_addresses, results):
+            if isinstance(result, asyncio.CancelledError):
+                raise result
             if isinstance(result, Exception):
                 ping_results[ip] = False
             else:
@@ -179,25 +182,39 @@ class NetworkMixin:
         return data or {}
 
     async def async_get_interface_stat(self, name: str) -> Dict[str, Any]:
-        """Return statistics (traffic, speed) for a specific interface."""
+        """Return statistics (traffic, speed) for a specific interface.
+
+        We prefer the cheaper GET ``show/interface/stat`` once we've seen
+        it succeed; ``_rci_parse`` (CLI parse mode) is heavier on the
+        router. After the first successful GET, ``_iface_stat_get_only``
+        latches True and we skip the parse-mode attempt for the rest of
+        the session. The parse-mode fallback is still used on the very
+        first call (or after auth/recovery) so older firmwares that only
+        expose the parse path keep working.
+        """
         safe_name = _validate_cli_arg(name, "interface name")
-        try:
-            data = await self._rci_parse(f"show interface {safe_name} stat")
-            if isinstance(data, dict):
-                stat_keys = {"rxbytes", "txbytes", "rxspeed", "txspeed"}
-                if stat_keys.intersection(data):
-                    return data
-        except asyncio.CancelledError:
-            raise
-        except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError) as err:
-            _LOGGER.debug(
-                "Parse-style interface stat failed for %s: %s; trying GET fallback",
-                safe_name,
-                err,
-            )
-        return await self._rci_get(
+        get_only = getattr(self, "_iface_stat_get_only", None)
+        if get_only is not True:
+            try:
+                data = await self._rci_parse(f"show interface {safe_name} stat")
+                if isinstance(data, dict):
+                    stat_keys = {"rxbytes", "txbytes", "rxspeed", "txspeed"}
+                    if stat_keys.intersection(data):
+                        return data
+            except asyncio.CancelledError:
+                raise
+            except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError) as err:
+                _LOGGER.debug(
+                    "Parse-style interface stat failed for %s: %s; trying GET fallback",
+                    safe_name,
+                    err,
+                )
+        result = await self._rci_get(
             "show/interface/stat", params={"name": safe_name}
         ) or {}
+        if isinstance(result, dict) and result:
+            self._iface_stat_get_only = True
+        return result
 
     async def async_set_interface_enabled(self, interface_name: str, enabled: bool) -> None:
         """Enable or disable any interface via RCI 'interface X up/down'."""
@@ -350,6 +367,8 @@ class NetworkMixin:
 
         all_stats: Dict[str, Dict[str, Any]] = {}
         for target, stats in zip(targets, results):
+            if isinstance(stats, asyncio.CancelledError):
+                raise stats
             if isinstance(stats, Exception):
                 _LOGGER.debug("Failed to get stats for %s: %s", target["name"], stats)
                 continue

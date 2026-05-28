@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from tests.conftest import TEST_HOST, TEST_HOST_ALT, TEST_PASSWORD, TEST_USERNAME
+from conftest import TEST_HOST, TEST_HOST_ALT, TEST_PASSWORD, TEST_USERNAME
 
 import asyncio
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -16,6 +17,7 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from custom_components.keenetic_router_pro.api import KeeneticAuthError, KeeneticClient
 from custom_components.keenetic_router_pro.coordinator import (
     KeeneticCoordinator,
+    _advance_oom_state,
     _merge_clients_with_neighbours,
 )
 from custom_components.keenetic_router_pro.device_tracker import KeeneticClientTracker
@@ -69,13 +71,22 @@ class FakeKeeneticClient:
             }
         ]
         self.mesh_nodes = [{"cid": "node-1", "ip": "192.0.2.20"}]
+        self.mesh_clients_args: list[list[dict[str, Any]] | None] = []
         self.interface_stats = {
             "PPPoE0": {"rxbytes": "1000", "txbytes": "2000"},
             "Wireguard0": {"rxbytes": "3000", "txbytes": "4000"},
         }
+        self._rci_batch_supported: bool | None = False
+        self._hotspot_subpath_winner: str | None = None
         self.ping_check = {
             "PPPoE0": {"passing": False, "status": "fail", "profile": "default"}
         }
+
+    def clear_tick_cache(self) -> None:
+        pass
+
+    async def prefetch_tick(self, tree: dict) -> bool:
+        return False
 
     def _normalize_interfaces(self, interfaces: Any) -> list[dict[str, Any]]:
         return KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)._normalize_interfaces(
@@ -109,7 +120,7 @@ class FakeKeeneticClient:
     async def async_get_ping_check_status(self) -> dict[str, Any]:
         return self.ping_check
 
-    async def async_get_crypto_maps(self) -> dict[str, Any]:
+    async def async_get_ipsec_status(self) -> dict[str, Any]:
         return {
             "SITE": {
                 "rx_bytes": 100,
@@ -127,6 +138,7 @@ class FakeKeeneticClient:
     async def async_get_mesh_nodes(
         self, clients: list[dict[str, Any]] | None = None
     ) -> list[dict[str, Any]]:
+        self.mesh_clients_args.append(clients)
         assert clients == self.clients
         return self.mesh_nodes
 
@@ -167,6 +179,7 @@ class FakeKeeneticClient:
         return [{"label": "0", "link": "up"}]
 
     async def async_get_all_interface_stats(self, **kwargs: Any) -> dict[str, Any]:
+        assert kwargs.get("wan_interfaces") is not None
         return self.interface_stats
 
     @staticmethod
@@ -381,7 +394,12 @@ def test_coordinator_fast_refresh_reuses_slow_cached_data_and_rates() -> None:
     assert second["host_policies"] == {"cached": {"policy": "Policy1"}}
     assert second["ndns"] == {"cached": True}
     assert second["dns_proxy"] == {"cached": True}
-    assert second["ipsec_diagnostics"] == {"cached": True}
+    # ipsec_diagnostics gets the in-memory OOM tracker state appended on
+    # every tick (even cached), so the cached payload is preserved but
+    # surfaced alongside ``oom_total`` / ``oom_last_seen`` for sensors.
+    assert second["ipsec_diagnostics"]["cached"] is True
+    assert second["ipsec_diagnostics"]["oom_total"] == 0
+    assert second["ipsec_diagnostics"]["oom_last_seen"] is None
     assert second["new_clients"] == set()
     assert second["wan_interfaces"][0]["rx_throughput"] > 0
     assert second["wan_interfaces"][0]["tx_throughput"] > 0
@@ -424,7 +442,7 @@ def test_coordinator_tolerates_malformed_optional_dict_payloads() -> None:
     async def malformed_ping_check_status() -> list[Any]:
         return ["not-a-dict"]
 
-    client.async_get_crypto_maps = malformed_crypto_maps  # type: ignore[assignment]
+    client.async_get_ipsec_status = malformed_crypto_maps  # type: ignore[assignment]
     client.async_get_ping_check_status = malformed_ping_check_status  # type: ignore[assignment]
 
     data = asyncio.run(coordinator._async_update_data())
@@ -465,6 +483,198 @@ def test_coordinator_preserves_tracked_client_presence_on_fetch_failure() -> Non
     assert second["clients_by_mac"] == first["clients_by_mac"]
     assert tracker.is_connected is True
     assert tracker.extra_state_attributes["presence_source"] == "active"
+
+
+def test_coordinator_new_client_detection_normalizes_mac_formats() -> None:
+    """A MAC separator/case change must not fire a duplicate new-device event."""
+    client = FakeKeeneticClient()
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+
+    first = asyncio.run(coordinator._async_update_data())
+    first["clients"] = [{"mac": "AA-BB-CC-DD-EE-FF"}]
+    coordinator.data = first
+
+    client.clients = [{"mac": "aa:bb:cc:dd:ee:ff", "active": True}]
+
+    second = asyncio.run(coordinator._async_update_data())
+
+    assert second["new_clients"] == set()
+
+
+def test_coordinator_new_client_detection_rejects_non_mac_tokens() -> None:
+    """IPv6/link-local neighbour tokens and blanks must not become client IDs."""
+    client = FakeKeeneticClient()
+    client.clients = [
+        {"mac": "fe80::1", "active": True},
+        {"mac": "", "active": True},
+        {"mac": "AA-BB-CC-DD-EE-FF", "active": True},
+    ]
+    client.ip_neighbours = [
+        {"mac": "fe80::2", "address": "fe80::2"},
+        {"mac": "aa.bb.cc.dd.ee.ff", "address": "192.0.2.55"},
+    ]
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+
+    data = asyncio.run(coordinator._async_update_data())
+
+    assert set(data["clients_by_mac"]) == {"aa:bb:cc:dd:ee:ff"}
+    assert data["new_clients"] == {"aa:bb:cc:dd:ee:ff"}
+
+
+def test_coordinator_new_client_detection_normalizes_previous_index_keys() -> None:
+    """A stale uppercase/index format must not emit a duplicate new-device event."""
+    client = FakeKeeneticClient()
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+    first = asyncio.run(coordinator._async_update_data())
+    first["clients_by_mac"] = {"AA-BB-CC-DD-EE-FF": first["clients"][0]}
+    coordinator.data = first
+
+    client.clients = [{"mac": "aa:bb:cc:dd:ee:ff", "active": True}]
+
+    second = asyncio.run(coordinator._async_update_data())
+
+    assert second["new_clients"] == set()
+
+
+def test_coordinator_ignores_invalid_stored_oom_timestamp() -> None:
+    """A corrupt Store timestamp should not crash a coordinator refresh."""
+    client = FakeKeeneticClient()
+
+    async def ipsec_diagnostics() -> dict[str, Any]:
+        return {
+            "events": [
+                ("May 1 12:00:00", "IpSec::Vici::Stats: out of memory"),
+            ]
+        }
+
+    client.async_get_ipsec_diagnostics = ipsec_diagnostics  # type: ignore[assignment]
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+    coordinator._oom_state_loaded = True
+    coordinator._oom_state = {"last_seen_iso": "not-a-timestamp", "total": 4}
+    coordinator._oom_store = None  # type: ignore[assignment]
+
+    data = asyncio.run(coordinator._async_update_data())
+
+    assert data["ipsec_diagnostics"]["oom_total"] == 5
+    assert data["ipsec_diagnostics"]["oom_last_seen"].startswith("202")
+
+
+def test_oom_state_counts_new_events_sharing_last_seen_second() -> None:
+    """Keenetic log timestamps have second precision; overlapping windows can add events in the same second."""
+    state = {
+        "last_seen_iso": "2026-05-01T12:00:00",
+        "last_seen_count": 1,
+        "total": 4,
+    }
+    events = [
+        ("May 1 12:00:00", "IpSec::Vici::Stats: out of memory [0xcffe02a7]"),
+        ("May 1 12:00:00", "IpSec::Vici::Stats: out of memory [0xcffe02a7]"),
+        ("May 1 11:59:59", "IpSec::Vici::Stats: out of memory [0xcffe02a7]"),
+    ]
+
+    next_state = _advance_oom_state(
+        state,
+        events,
+        now=datetime(2026, 5, 1, 12, 1, 0),
+    )
+
+    assert next_state == {
+        "last_seen_iso": "2026-05-01T12:00:00",
+        "last_seen_count": 2,
+        "total": 5,
+    }
+
+
+def test_oom_state_ignores_future_watermark_after_clock_rollback() -> None:
+    """A future stored timestamp must not suppress all newly visible log events."""
+    state = {
+        "last_seen_iso": "2026-06-01T00:00:00",
+        "last_seen_count": 1,
+        "total": 4,
+    }
+    events = [
+        ("May 1 12:00:00", "IpSec::Vici::Stats: out of memory [0xcffe02a7]"),
+    ]
+
+    next_state = _advance_oom_state(
+        state,
+        events,
+        now=datetime(2026, 5, 1, 12, 1, 0),
+    )
+
+    assert next_state == {
+        "last_seen_iso": "2026-05-01T12:00:00",
+        "last_seen_count": 1,
+        "total": 5,
+    }
+
+
+def test_oom_state_tolerates_infinite_corrupt_last_seen_count() -> None:
+    """JSON Store accepts Infinity; treating it as corrupt avoids a refresh crash."""
+    state = {
+        "last_seen_iso": "2026-05-01T12:00:00",
+        "last_seen_count": float("inf"),
+        "total": 4,
+    }
+    events = [
+        ("May 1 12:00:00", "IpSec::Vici::Stats: out of memory [0xcffe02a7]"),
+        ("May 1 12:00:00", "IpSec::Vici::Stats: out of memory [0xcffe02a7]"),
+    ]
+
+    next_state = _advance_oom_state(
+        state,
+        events,
+        now=datetime(2026, 5, 1, 12, 1, 0),
+    )
+
+    assert next_state == {
+        "last_seen_iso": "2026-05-01T12:00:00",
+        "last_seen_count": 2,
+        "total": 5,
+    }
+
+
+def test_coordinator_reuses_preserved_clients_for_mesh_on_fetch_failure() -> None:
+    """Mesh fallback should not see an empty list during transient client failures."""
+    client = FakeKeeneticClient()
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+
+    first = asyncio.run(coordinator._async_update_data())
+    coordinator.data = first
+    coordinator._refresh_count = 6
+    client.mesh_clients_args.clear()
+
+    async def fail_clients() -> list[dict[str, Any]]:
+        raise RuntimeError("hotspot table unavailable")
+
+    async def mesh_from_clients(
+        clients: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        client.mesh_clients_args.append(clients)
+        return [{"cid": "node-from-stale-clients"}] if clients else []
+
+    client.async_get_clients = fail_clients  # type: ignore[assignment]
+    client.async_get_mesh_nodes = mesh_from_clients  # type: ignore[assignment]
+
+    second = asyncio.run(coordinator._async_update_data())
+
+    assert second["clients_stale"] is True
+    assert client.mesh_clients_args == [first["clients"]]
+    assert second["mesh_nodes"] == [{"cid": "node-from-stale-clients"}]
+
+
+def test_coordinator_propagates_gathered_cancelled_error() -> None:
+    """A gathered child cancellation must cancel the update, not become empty data."""
+    client = FakeKeeneticClient()
+
+    async def cancel_clients() -> list[dict[str, Any]]:
+        raise asyncio.CancelledError()
+
+    client.async_get_clients = cancel_clients  # type: ignore[assignment]
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(coordinator._async_update_data())
 
 
 @pytest.mark.parametrize(

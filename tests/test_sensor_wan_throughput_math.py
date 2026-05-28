@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import TEST_HOST
+from conftest import TEST_HOST
 
 from types import SimpleNamespace
 

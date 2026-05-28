@@ -8,7 +8,7 @@ off on the first ``not found`` response and stop calling it.
 
 from __future__ import annotations
 
-from tests.conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
+from conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
 
 import asyncio
 from typing import Any
