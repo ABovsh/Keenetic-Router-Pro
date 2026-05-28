@@ -14,13 +14,29 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import KeeneticAuthError, KeeneticClient
 from .const import DOMAIN, FAST_SCAN_INTERVAL
+from .coordinator_parts.derived import (
+    build_clients_by_mac,
+    counter_rate_bytes_per_second,
+    mesh_associations,
+    order_wan_interfaces,
+)
 from .coordinator_parts.oom import advance_oom_state, parse_keenetic_log_ts
-from .utils import coerce_int, first_present, is_client_online, normalize_mac, usable_ip
+from .coordinator_parts.payloads import (
+    dict_or_empty,
+    list_or_empty,
+    merge_clients_with_neighbours,
+)
+from .utils import coerce_int, first_present, normalize_mac
 
 
 _OOM_STORE_VERSION = 1
 _parse_keenetic_log_ts = parse_keenetic_log_ts
 _advance_oom_state = advance_oom_state
+_dict_or_empty = dict_or_empty
+_list_or_empty = list_or_empty
+_counter_rate_bytes_per_second = counter_rate_bytes_per_second
+_merge_clients_with_neighbours = merge_clients_with_neighbours
+_mesh_associations = mesh_associations
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.coordinator")
 
@@ -43,122 +59,6 @@ _VERSION_CACHE_KEYS = (
 def _first_stat_int(stats: dict[str, Any], *keys: str) -> int:
     """Return the first non-empty integer stat from several firmware key names."""
     return coerce_int(first_present(stats, *keys, default=0))
-
-
-def _mesh_associations(mesh_nodes: Any) -> dict[str, Any]:
-    """Return total and per-node mesh client association counts."""
-    by_node: dict[str, int] = {}
-    total = 0
-    for node in mesh_nodes or []:
-        if not isinstance(node, dict):
-            continue
-        node_id = node.get("cid") or node.get("id")
-        if not node_id:
-            continue
-        count = coerce_int(node.get("associations"), 0)
-        by_node[str(node_id)] = count
-        total += count
-    return {"total": total, "by_node": by_node}
-
-
-def _dict_or_empty(value: Any) -> dict[str, Any]:
-    """Return a dict payload, or an empty dict for malformed endpoint data."""
-    return value if isinstance(value, dict) else {}
-
-
-def _list_or_empty(value: Any) -> list[Any]:
-    """Return a list payload, or an empty list for malformed endpoint data."""
-    return value if isinstance(value, list) else []
-
-
-def _counter_rate_bytes_per_second(
-    current: int,
-    previous: Any,
-    elapsed_seconds: float,
-) -> float:
-    """Calculate a monotonic byte-counter rate, clamping resets to zero."""
-    if elapsed_seconds <= 0:
-        return 0.0
-    delta = current - coerce_int(previous)
-    if delta < 0:
-        return 0.0
-    return max(0.0, delta / elapsed_seconds)
-
-
-def _merge_clients_with_neighbours(
-    clients: list[dict[str, Any]],
-    neighbours: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Attach IP-neighbour discovery data to hotspot client records."""
-    neighbours_by_mac = {
-        normalize_mac(neighbour.get("mac")): neighbour
-        for neighbour in neighbours
-        if isinstance(neighbour, dict) and neighbour.get("mac")
-    }
-    merged: list[dict[str, Any]] = []
-    seen_macs: set[str] = set()
-
-    for client in clients:
-        if not isinstance(client, dict):
-            continue
-        mac = normalize_mac(client.get("mac"))
-        if not mac:
-            merged.append(client)
-            continue
-        seen_macs.add(mac)
-        neighbour = neighbours_by_mac.get(mac)
-        if not neighbour:
-            merged.append(client)
-            continue
-
-        item = dict(client)
-        item["neighbour"] = neighbour
-        if (
-            not is_client_online(item)
-            and neighbour.get("last-seen") not in (None, "")
-        ):
-            item["last-seen"] = neighbour.get("last-seen")
-            item["last-seen-source"] = "neighbour"
-        elif item.get("last-seen") in (None, "", 0, "0"):
-            item["last-seen"] = neighbour.get("last-seen")
-            item.setdefault("last-seen-source", "neighbour")
-        else:
-            item.setdefault("last-seen-source", "hotspot")
-        if item.get("first-seen") in (None, ""):
-            item["first-seen"] = neighbour.get("first-seen")
-            item.setdefault("first-seen-source", "neighbour")
-        else:
-            item.setdefault("first-seen-source", "hotspot")
-        if usable_ip(item.get("ip")) is None and neighbour.get("address-family") == "ipv4":
-            item["ip"] = neighbour.get("address")
-        item["neighbour-expired"] = neighbour.get("expired")
-        item["neighbour-wireless"] = neighbour.get("wireless")
-        item["neighbour-leasetime"] = neighbour.get("leasetime")
-        merged.append(item)
-
-    for mac, neighbour in neighbours_by_mac.items():
-        if mac in seen_macs:
-            continue
-        merged.append(
-            {
-                "mac": mac,
-                "via": neighbour.get("via"),
-                "ip": neighbour.get("address")
-                if neighbour.get("address-family") == "ipv4"
-                else None,
-                "active": False,
-                "last-seen": neighbour.get("last-seen"),
-                "last-seen-source": "neighbour",
-                "first-seen": neighbour.get("first-seen"),
-                "first-seen-source": "neighbour",
-                "neighbour": neighbour,
-                "neighbour-expired": neighbour.get("expired"),
-                "neighbour-wireless": neighbour.get("wireless"),
-                "neighbour-leasetime": neighbour.get("leasetime"),
-            }
-        )
-
-    return merged
 
 
 class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -399,11 +299,11 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             version_available = _ok("available_version", version_available, {})
             interfaces = _ok("interfaces", interfaces, [])
             ip_neighbours = _ok("ip_neighbours", ip_neighbours, [], silent=True)
-            clients = _merge_clients_with_neighbours(clients, ip_neighbours)
+            clients = merge_clients_with_neighbours(clients, ip_neighbours)
             mesh_nodes = _ok("mesh_nodes", mesh_nodes, [])
-            host_policies = _dict_or_empty(_ok("host_policies", host_policies, {}))
-            ndns_info = _dict_or_empty(_ok("ndns_info", ndns_info, {}))
-            ping_check_status = _dict_or_empty(
+            host_policies = dict_or_empty(_ok("host_policies", host_policies, {}))
+            ndns_info = dict_or_empty(_ok("ndns_info", ndns_info, {}))
+            ping_check_status = dict_or_empty(
                 _ok("ping_check_status", ping_check_status, {})
             )
             # Crypto maps: not every router/firmware has the IPsec component,
@@ -412,20 +312,20 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # the api layer already debug-logs the reason.
             crypto_maps = {
                 name: dict(cmap)
-                for name, cmap in _dict_or_empty(
+                for name, cmap in dict_or_empty(
                     _ok("crypto_maps", crypto_maps, {}, silent=True)
                 ).items()
                 if isinstance(cmap, dict)
             }
             # DNS proxy is diagnostic-only and intentionally slow-cadence;
             # routers without the endpoint should not warn every refresh.
-            dns_proxy = _dict_or_empty(
+            dns_proxy = dict_or_empty(
                 _ok("dns_proxy", dns_proxy, {}, silent=True)
             )
             # IPsec diagnostics read recent router log lines on the same
             # very-slow cadence as DNS diagnostics. Missing log access is
             # non-critical and should not affect normal polling.
-            ipsec_diagnostics = _dict_or_empty(
+            ipsec_diagnostics = dict_or_empty(
                 _ok("ipsec_diagnostics", ipsec_diagnostics, {}, silent=True)
             )
             # Monotonic OOM counter — persists across HA restarts via Store,
@@ -564,11 +464,11 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             wifi = _ok("wifi", wifi, [])
             wireguard = _ok("wireguard", wireguard, [])
             vpn_tunnels = _ok("vpn_tunnels", vpn_tunnels, [])
-            wan_status = _dict_or_empty(_ok("wan_status", wan_status, {}))
+            wan_status = dict_or_empty(_ok("wan_status", wan_status, {}))
             wan_interfaces = _ok("wan_interfaces", wan_interfaces, [])
-            traffic_stats = _dict_or_empty(_ok("traffic_stats", traffic_stats, {}))
-            port_info = _list_or_empty(_ok("port_info", port_info, []))
-            interface_stats = _dict_or_empty(_ok("interface_stats", interface_stats, {}))
+            traffic_stats = dict_or_empty(_ok("traffic_stats", traffic_stats, {}))
+            port_info = list_or_empty(_ok("port_info", port_info, []))
+            interface_stats = dict_or_empty(_ok("interface_stats", interface_stats, {}))
 
             # Emit a single aggregated warning per tick for any non-critical
             # fetches that fell back to defaults. Keeping this above debug
@@ -664,12 +564,12 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 prev = prev_wan_by_id.get(wan_id)
                 if prev and prev.get("_sample_ts"):
                     dt = now_ts - float(prev.get("_sample_ts") or 0)
-                    wan["rx_throughput"] = _counter_rate_bytes_per_second(
+                    wan["rx_throughput"] = counter_rate_bytes_per_second(
                         rx_bytes,
                         prev.get("rx_bytes"),
                         dt,
                     )
-                    wan["tx_throughput"] = _counter_rate_bytes_per_second(
+                    wan["tx_throughput"] = counter_rate_bytes_per_second(
                         tx_bytes,
                         prev.get("tx_bytes"),
                         dt,
@@ -700,12 +600,12 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 cmap["_sample_ts"] = now_ts
                 if prev_cmap and prev_cmap.get("_sample_ts"):
                     dt = now_ts - float(prev_cmap.get("_sample_ts") or 0)
-                    cmap["rx_throughput"] = _counter_rate_bytes_per_second(
+                    cmap["rx_throughput"] = counter_rate_bytes_per_second(
                         coerce_int(cmap.get("rx_bytes")),
                         prev_cmap.get("rx_bytes"),
                         dt,
                     )
-                    cmap["tx_throughput"] = _counter_rate_bytes_per_second(
+                    cmap["tx_throughput"] = counter_rate_bytes_per_second(
                         coerce_int(cmap.get("tx_bytes")),
                         prev_cmap.get("tx_bytes"),
                         dt,
@@ -714,38 +614,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     cmap["rx_throughput"] = 0.0
                     cmap["tx_throughput"] = 0.0
 
-            # Role labels: the interface with ``defaultgw: true`` is the
-            # Default connection. The rest are Backup connection 1..N
-            # ordered by priority descending (higher Keenetic priority =
-            # next in line for failover).
-            default_idx: int | None = None
-            for i, wan in enumerate(wan_interfaces):
-                if wan.get("defaultgw"):
-                    default_idx = i
-                    break
- 
-            def _prio_key(w: dict[str, Any]) -> int:
-                p = w.get("priority")
-                return -coerce_int(p)
- 
-            if default_idx is not None:
-                default = wan_interfaces[default_idx]
-                backups = [
-                    w for i, w in enumerate(wan_interfaces) if i != default_idx
-                ]
-                backups.sort(key=_prio_key)
-                ordered = [default] + backups
-            else:
-                ordered = sorted(wan_interfaces, key=_prio_key)
- 
-            for position, wan in enumerate(ordered):
-                if position == 0 and (wan.get("defaultgw") or default_idx is None):
-                    wan["role_label"] = "Default connection"
-                    wan["role_index"] = 0
-                else:
-                    wan["role_label"] = f"Backup connection {position}"
-                    wan["role_index"] = position
-            wan_interfaces = ordered
+            wan_interfaces = order_wan_interfaces(wan_interfaces)
  
             # ---------- New-client detection ----------
             # Build the MAC->client index once and reuse it for both the
@@ -753,14 +622,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # ``clients`` three times and called ``normalize_mac`` 2N+ times
             # per tick; one walk now suffices and the index is the same
             # object that ends up in the coordinator data dict.
-            clients_by_mac: dict[str, dict[str, Any]] = {}
-            for c in clients:
-                if not isinstance(c, dict):
-                    continue
-                mac = normalize_mac(c.get("mac"))
-                if not mac:
-                    continue
-                clients_by_mac[mac] = c
+            clients_by_mac = build_clients_by_mac(clients)
             current_macs = set(clients_by_mac.keys())
 
             previous_by_mac = (
@@ -800,7 +662,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     if isinstance(w, dict) and w.get("id")
                 },
                 "mesh_nodes": mesh_nodes,
-                "mesh_associations": _mesh_associations(mesh_nodes),
+                "mesh_associations": mesh_associations(mesh_nodes),
                 "mesh_nodes_by_cid": {
                     (n.get("cid") or n.get("id")): n
                     for n in (mesh_nodes if isinstance(mesh_nodes, list) else [])
