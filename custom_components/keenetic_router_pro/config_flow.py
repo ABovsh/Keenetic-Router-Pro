@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 import asyncio
 import logging
 import voluptuous as vol
+import aiohttp
 
 from homeassistant import config_entries
 from homeassistant.const import (
@@ -163,6 +164,28 @@ def _normalized_clients(clients: list[dict[str, Any]]) -> list[dict[str, str]]:
         for client in (_normalize_client(c) for c in clients)
         if client is not None
     ]
+
+
+async def _async_optional_clients(
+    client: KeeneticClient,
+    *,
+    log_context: str,
+) -> list[dict[str, Any]]:
+    """Fetch clients while soft-failing only on expected transport/payload errors."""
+    try:
+        available_clients = await client.async_get_clients()
+    except asyncio.CancelledError:
+        raise
+    except KeeneticAuthError:
+        raise
+    except (aiohttp.ClientError, asyncio.TimeoutError, KeeneticApiError, ValueError, TypeError, KeyError) as err:
+        _LOGGER.debug("Could not fetch clients for %s: %s", log_context, err)
+        return []
+
+    if not available_clients and not getattr(client, "_authenticated", True):
+        raise KeeneticAuthError("Authentication rejected while fetching clients")
+
+    return available_clients
 
 
 def _connection_mode(defaults: dict[str, Any]) -> str:
@@ -466,28 +489,24 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._user_input = data
                 self._title = title
                 
-                try:
-                    available_clients = await client.async_get_clients()
-                    _LOGGER.debug("Found %d clients", len(available_clients) if available_clients else 0)
-                    
-                    self._available_clients = _normalized_clients(available_clients)
-                    if self._available_clients:
-                        return await self.async_step_select_clients()
+                available_clients = await _async_optional_clients(
+                    client,
+                    log_context="setup",
+                )
+                _LOGGER.debug(
+                    "Found %d clients",
+                    len(available_clients) if available_clients else 0,
+                )
 
-                    _LOGGER.debug("No clients found, creating entry directly")
-                    return self.async_create_entry(
-                        title=self._title,
-                        data={**data, CONF_TRACKED_CLIENTS: []},
-                    )
-                        
-                except asyncio.CancelledError:
-                    raise
-                except Exception as err:  # noqa: BLE001
-                    _LOGGER.debug("Could not fetch clients: %s", err)
-                    return self.async_create_entry(
-                        title=self._title,
-                        data={**data, CONF_TRACKED_CLIENTS: []},
-                    )
+                self._available_clients = _normalized_clients(available_clients)
+                if self._available_clients:
+                    return await self.async_step_select_clients()
+
+                _LOGGER.debug("No clients found, creating entry directly")
+                return self.async_create_entry(
+                    title=self._title,
+                    data={**data, CONF_TRACKED_CLIENTS: []},
+                )
 
             except KeeneticAuthError:
                 errors["base"] = "invalid_auth"
@@ -716,40 +735,34 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
         _LOGGER.debug("Loaded %d existing tracked MACs", len(current_macs))
         
         # Try to get current clients from router
-        try:
-            client = self._runtime_client()
-            if client is None:
-                data = self._config_entry.data
-                session = async_get_clientsession(self.hass)
-                client = KeeneticClient(
-                    host=data[CONF_HOST],
-                    username=data[CONF_USERNAME],
-                    password=data[CONF_PASSWORD],
-                    port=data.get(CONF_PORT, DEFAULT_PORT),
-                    ssl=data.get(CONF_SSL, DEFAULT_SSL),
-                    use_challenge_auth=data.get(CONF_USE_CHALLENGE_AUTH, False),
-                )
-                await client.async_start(session)
-            available_clients = await client.async_get_clients()
-            _LOGGER.debug("Found %d clients from router", len(available_clients) if available_clients else 0)
-
-            self._available_clients = _normalized_clients(available_clients)
-            client_options = _client_options_with_offline_tracked(
-                self._available_clients,
-                current_tracked,
+        client = self._runtime_client()
+        if client is None:
+            data = self._config_entry.data
+            session = async_get_clientsession(self.hass)
+            client = KeeneticClient(
+                host=data[CONF_HOST],
+                username=data[CONF_USERNAME],
+                password=data[CONF_PASSWORD],
+                port=data.get(CONF_PORT, DEFAULT_PORT),
+                ssl=data.get(CONF_SSL, DEFAULT_SSL),
+                use_challenge_auth=data.get(CONF_USE_CHALLENGE_AUTH, False),
             )
-            _LOGGER.debug("Prepared %d client options", len(client_options))
-            
-        except asyncio.CancelledError:
-            raise
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.debug("Could not fetch clients for options: %s", err)
-            # Use only previously tracked clients
-            client_options = {
-                tracked["mac"]: _client_label(tracked)
-                for tracked in current_tracked
-                if isinstance(tracked, dict) and tracked.get("mac")
-            }
+            await client.async_start(session)
+        available_clients = await _async_optional_clients(
+            client,
+            log_context="options",
+        )
+        _LOGGER.debug(
+            "Found %d clients from router",
+            len(available_clients) if available_clients else 0,
+        )
+
+        self._available_clients = _normalized_clients(available_clients)
+        client_options = _client_options_with_offline_tracked(
+            self._available_clients,
+            current_tracked,
+        )
+        _LOGGER.debug("Prepared %d client options", len(client_options))
         
         # Show form
         return self.async_show_form(

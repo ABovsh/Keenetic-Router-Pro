@@ -5,6 +5,9 @@ from __future__ import annotations
 from conftest import TEST_HOST, TEST_USERNAME
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
 
 from homeassistant.const import (
     CONF_HOST,
@@ -15,6 +18,7 @@ from homeassistant.const import (
 )
 
 from custom_components.keenetic_router_pro.config_flow import KeeneticRouterProConfigFlow
+from custom_components.keenetic_router_pro.api import KeeneticApiError, KeeneticAuthError
 from custom_components.keenetic_router_pro.const import (
     CONF_CONNECTION_MODE,
     CONNECTION_MODE_DIRECT,
@@ -112,6 +116,30 @@ async def test_reauth_accepts_rotated_password_and_updates_entry() -> None:
             CONF_PASSWORD: "new-password",
         }
     ]
+
+
+@pytest.mark.parametrize(
+    ("exc", "expected"),
+    [
+        (KeeneticAuthError("bad auth"), {"base": "invalid_auth"}),
+        (KeeneticApiError("offline"), {"base": "cannot_connect"}),
+        (RuntimeError("boom"), {"base": "unknown"}),
+    ],
+)
+async def test_reauth_validation_maps_router_errors(
+    exc: Exception, expected: dict[str, str]
+) -> None:
+    flow = KeeneticRouterProConfigFlow()
+    flow._async_connect = AsyncMock(side_effect=exc)
+
+    assert await flow._async_validate_and_update(
+        _entry(),
+        {
+            CONF_USERNAME: TEST_USERNAME,
+            CONF_PASSWORD: "new-password",
+        },
+        "reauth",
+    ) == expected
 
 
 async def test_reauth_unknown_entry_aborts() -> None:

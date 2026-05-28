@@ -10,7 +10,9 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.keenetic_router_pro.config_flow import (
+    KeeneticRouterProConfigFlow,
     KeeneticOptionsFlow,
+    _async_optional_clients,
     _client_options_with_offline_tracked,
     _normalize_connection_data,
     _tracked_client_lookup,
@@ -29,6 +31,7 @@ from custom_components.keenetic_router_pro.const import (
     CONNECTION_MODE_DIRECT,
     CONNECTION_MODE_KEENDNS_PROTECTED,
 )
+from custom_components.keenetic_router_pro.api import KeeneticAuthError
 
 
 def test_connection_data_normalizes_keendns_defaults() -> None:
@@ -148,3 +151,105 @@ def test_options_flow_prefers_runtime_client() -> None:
     assert calls == ["runtime"]
     assert result["step_id"] == "init"
     assert "ping_interval" not in str(result["data_schema"])
+
+
+def test_optional_client_fetch_soft_fails_for_payload_errors() -> None:
+    """Setup/options fallback should keep working for payload-shape failures."""
+
+    class Client:
+        async def async_get_clients(self):
+            raise ValueError("bad payload")
+
+    clients = asyncio.run(_async_optional_clients(Client(), log_context="setup"))
+
+    assert clients == []
+
+
+def test_optional_client_fetch_surfaces_auth_errors() -> None:
+    """Auth problems must not be flattened into an empty optional client list."""
+
+    class Client:
+        async def async_get_clients(self):
+            raise KeeneticAuthError("bad auth")
+
+    with pytest.raises(KeeneticAuthError):
+        asyncio.run(_async_optional_clients(Client(), log_context="setup"))
+
+
+def test_connection_step_uses_discovered_host_and_creates_entry_when_payload_fetch_fails() -> None:
+    """Expected payload failures should still fall back to creating the entry."""
+
+    class Client:
+        async def async_get_clients(self):
+            raise ValueError("bad payload")
+
+    flow = KeeneticRouterProConfigFlow()
+    flow.hass = SimpleNamespace()
+    flow.context = {}
+    flow._discovered_host = TEST_HOST
+    flow._selected_connection_mode = CONNECTION_MODE_DIRECT
+
+    async def connect(data):
+        return (
+            Client(),
+            {"vendor": "Keenetic", "device": "Hero", "hostname": "hero"},
+            {"Bridge0": {"type": "Bridge", "mac": "11:22:33:44:55:66"}},
+        )
+
+    flow._async_connect = connect
+    result = asyncio.run(
+        KeeneticRouterProConfigFlow.async_step_connection(
+            flow,
+            {
+                CONF_HOST: TEST_HOST,
+                CONF_PORT: 80,
+                CONF_SSL: False,
+                CONF_USERNAME: TEST_USERNAME,
+                CONF_PASSWORD: TEST_PASSWORD,
+            },
+        )
+    )
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_HOST] == TEST_HOST
+    assert result["data"][CONF_TRACKED_CLIENTS] == []
+
+
+def test_connection_step_surfaces_auth_errors_from_optional_client_fetch() -> None:
+    """Auth failures in the optional client fetch should return invalid_auth."""
+
+    class Client:
+        _authenticated = False
+
+        async def async_get_clients(self):
+            raise KeeneticAuthError("bad auth")
+
+    flow = KeeneticRouterProConfigFlow()
+    flow.hass = SimpleNamespace()
+    flow.context = {}
+    flow._discovered_host = TEST_HOST
+    flow._selected_connection_mode = CONNECTION_MODE_DIRECT
+
+    async def connect(data):
+        return (
+            Client(),
+            {"vendor": "Keenetic", "device": "Hero", "hostname": "hero"},
+            {"Bridge0": {"type": "Bridge", "mac": "11:22:33:44:55:66"}},
+        )
+
+    flow._async_connect = connect
+    result = asyncio.run(
+        KeeneticRouterProConfigFlow.async_step_connection(
+            flow,
+            {
+                CONF_HOST: TEST_HOST,
+                CONF_PORT: 80,
+                CONF_SSL: False,
+                CONF_USERNAME: TEST_USERNAME,
+                CONF_PASSWORD: TEST_PASSWORD,
+            },
+        )
+    )
+
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "invalid_auth"}
