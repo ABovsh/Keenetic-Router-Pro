@@ -70,8 +70,10 @@ A maintained, hardened fork of the original Keenetic Router Pro integration. It 
 - Wi-Fi, VPN, and client policy controls where supported by the router firmware.
 - Firmware update entities for the controller and mesh nodes.
 - WireGuard and IPsec diagnostic sensors.
-- IPsec VICI diagnostics for recent `IpSec::Vici::Stats: out of memory`
-  router log entries.
+- IPsec VICI OOM Total: a monotonic counter of
+  `IpSec::Vici::Stats: out of memory` events from the router log,
+  persisted across HA restarts and HA-Statistics-friendly for
+  `events/hour` graphs.
 - WAN and IPsec throughput shown in Mbit/s with automatic unit conversion (kbit/s ↔ Mbit/s ↔ Gbit/s) in the HA entity UI.
 - WAN interface devices group status, public IP, role, traffic counters,
   throughput and enable/disable control for each uplink.
