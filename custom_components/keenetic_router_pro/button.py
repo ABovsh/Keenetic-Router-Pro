@@ -3,12 +3,13 @@ from __future__ import annotations
 from typing import Any
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .api import KeeneticClient
 from .const import DOMAIN
 from .coordinator import KeeneticCoordinator
 from .entity import ControllerEntity, MeshEntity
+from .entity_setup import DynamicEntityTracker, register_dynamic_entities
 from .utils import iter_new_items
 
 
@@ -23,23 +24,28 @@ async def async_setup_entry(
     client: KeeneticClient = runtime.client
     entities: list[ButtonEntity] = [KeeneticRebootButton(coordinator, entry, client)]
 
-    # Mesh node reboot butonları
-    known_mesh_ids: set[str] = set()
-    _add_mesh_reboot_buttons(entities, coordinator, entry, client, known_mesh_ids)
+    tracker = DynamicEntityTracker()
 
+    def _build_dynamic_buttons() -> list[ButtonEntity]:
+        dynamic_entities: list[ButtonEntity] = []
+        _add_mesh_reboot_buttons(
+            dynamic_entities,
+            coordinator,
+            entry,
+            client,
+            tracker.mesh_nodes,
+        )
+        return dynamic_entities
+
+    entities.extend(_build_dynamic_buttons())
     async_add_entities(entities)
 
-    @callback
-    def _async_add_new_mesh_buttons() -> None:
-        new_entities: list[ButtonEntity] = []
-        _add_mesh_reboot_buttons(
-            new_entities, coordinator, entry, client, known_mesh_ids
-        )
-        if new_entities:
-            async_add_entities(new_entities)
-
-    entry.async_on_unload(
-        coordinator.async_add_listener(_async_add_new_mesh_buttons)
+    register_dynamic_entities(
+        entry,
+        coordinator,
+        async_add_entities,
+        _build_dynamic_buttons,
+        add_initial=False,
     )
 
 

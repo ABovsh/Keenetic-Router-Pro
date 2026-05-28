@@ -11,7 +11,7 @@ from homeassistant.components.update import (
     UpdateEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -19,6 +19,7 @@ from .api import KeeneticClient
 from .const import DOMAIN
 from .coordinator import KeeneticCoordinator
 from .entity import ControllerEntity, MeshEntity
+from .entity_setup import DynamicEntityTracker, register_dynamic_entities
 from .utils import iter_new_items
 
 _LOGGER = logging.getLogger(__name__)
@@ -60,23 +61,28 @@ async def async_setup_entry(
         KeeneticFirmwareUpdate(coordinator, entry, client),
     ]
 
-    # Mesh node firmware update entities
-    known_mesh_ids: set[str] = set()
-    _add_mesh_update_entities(entities, coordinator, entry, client, known_mesh_ids)
+    tracker = DynamicEntityTracker()
 
+    def _build_dynamic_updates() -> list[UpdateEntity]:
+        dynamic_entities: list[UpdateEntity] = []
+        _add_mesh_update_entities(
+            dynamic_entities,
+            coordinator,
+            entry,
+            client,
+            tracker.mesh_nodes,
+        )
+        return dynamic_entities
+
+    entities.extend(_build_dynamic_updates())
     async_add_entities(entities)
 
-    @callback
-    def _async_add_new_mesh_update_entities() -> None:
-        new_entities: list[UpdateEntity] = []
-        _add_mesh_update_entities(
-            new_entities, coordinator, entry, client, known_mesh_ids
-        )
-        if new_entities:
-            async_add_entities(new_entities)
-
-    entry.async_on_unload(
-        coordinator.async_add_listener(_async_add_new_mesh_update_entities)
+    register_dynamic_entities(
+        entry,
+        coordinator,
+        async_add_entities,
+        _build_dynamic_updates,
+        add_initial=False,
     )
 
 

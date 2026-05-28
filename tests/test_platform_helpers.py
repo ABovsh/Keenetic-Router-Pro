@@ -18,6 +18,7 @@ from custom_components.keenetic_router_pro.button import (
     KeeneticMeshRebootButton,
     _add_mesh_reboot_buttons,
 )
+from custom_components.keenetic_router_pro.entity_setup import DynamicEntityTracker
 from custom_components.keenetic_router_pro.update import (
     KeeneticFirmwareUpdate,
     KeeneticMeshFirmwareUpdate,
@@ -76,6 +77,24 @@ def test_dynamic_mesh_helpers_add_each_entity_once() -> None:
     assert len(binary_entities) == 4
     assert len(button_entities) == 2
     assert len(update_entities) == 2
+
+
+def test_dynamic_entity_tracker_reports_new_ids_once() -> None:
+    """Shared dynamic setup tracker should mark every id only once."""
+    tracker = DynamicEntityTracker()
+
+    assert tracker.mark_mesh_node("node-1") is True
+    assert tracker.mark_mesh_node("node-1") is False
+    assert tracker.mark_mesh_local_ip("node-1") is True
+    assert tracker.mark_mesh_local_ip("node-1") is False
+    assert tracker.mark_mesh_port("node-1", "0") is True
+    assert tracker.mark_mesh_port("node-1", "0") is False
+    assert tracker.mark_wan("PPPoE0") is True
+    assert tracker.mark_wan("PPPoE0") is False
+    assert tracker.mark_vpn("Wireguard0") is True
+    assert tracker.mark_vpn("Wireguard0") is False
+    assert tracker.mark_crypto_map("SITE") is True
+    assert tracker.mark_crypto_map("SITE") is False
 
 
 def test_wan_connected_sensor_exposes_pending_as_unavailable() -> None:

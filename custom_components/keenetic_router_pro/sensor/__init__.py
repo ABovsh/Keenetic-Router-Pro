@@ -6,12 +6,13 @@ from typing import Optional
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ..const import DOMAIN
 from ..coordinator import KeeneticCoordinator
 from .. import KeeneticClient
+from ..entity_setup import DynamicEntityTracker, register_dynamic_entities
 from ..utils import iter_new_items, iter_tracked_clients
 
 from .system import (
@@ -152,18 +153,29 @@ async def async_setup_entry(
 
     entities.append(KeeneticMeshSystemStateSensor(coordinator, entry))
 
-    # Mesh node sensors
-    known_mesh_ids: set[str] = set()
-    known_mesh_local_ip_ids: set[str] = set()
-    known_mesh_port_keys: set[tuple[str, str]] = set()
-    _add_mesh_sensors(
-        entities,
-        coordinator,
-        entry,
-        known_mesh_ids,
-        known_mesh_local_ip_ids,
-        known_mesh_port_keys,
-    )
+    tracker = DynamicEntityTracker()
+
+    def _build_dynamic_sensors() -> list[SensorEntity]:
+        dynamic_entities: list[SensorEntity] = []
+        _add_mesh_sensors(
+            dynamic_entities,
+            coordinator,
+            entry,
+            tracker.mesh_nodes,
+            tracker.mesh_local_ips,
+            tracker.mesh_ports,
+        )
+        for wan in iter_new_items(coordinator, "wan_interfaces", tracker.wan_ids):
+            wan_id = wan["id"]
+            dynamic_entities.extend(_wan_sensor_set(wan_id))
+        crypto_maps = coordinator.data.get("crypto_maps") or {}
+        if not isinstance(crypto_maps, dict):
+            crypto_maps = {}
+        for cmap_name in crypto_maps.keys():
+            if not tracker.mark_crypto_map(cmap_name):
+                continue
+            dynamic_entities.extend(_crypto_map_sensor_set(cmap_name))
+        return dynamic_entities
 
     # Per-tracked-client sensors
     for mac, label, initial_ip in iter_tracked_clients(entry):
@@ -181,8 +193,6 @@ async def async_setup_entry(
     # Per-WAN sensor set: one sub-device per uplink (Default + backups).
     # Covers provider name, priority role, underlying interface, public
     # IP, uptime, byte counters and live throughput.
-    known_wan_ids: set[str] = set()
-
     def _wan_sensor_set(wan_id: str) -> list[SensorEntity]:
         return [
             KeeneticWanProviderSensor(coordinator, entry, wan_id),
@@ -196,16 +206,10 @@ async def async_setup_entry(
             KeeneticWanTxThroughputSensor(coordinator, entry, wan_id),
         ]
 
-    for wan in iter_new_items(coordinator, "wan_interfaces", known_wan_ids):
-        wan_id = wan["id"]
-        entities.extend(_wan_sensor_set(wan_id))
-
     # Per-crypto-map sensor set: one sub-device per site-to-site
     # IPsec tunnel. Covers the two state strings (tunnel, IKE), byte
     # counters and live throughput. Connected binary_sensor and the
     # Enabled switch live on their respective platforms.
-    known_cmap_names: set[str] = set()
-
     def _crypto_map_sensor_set(cmap_name: str) -> list[SensorEntity]:
         return [
             KeeneticCryptoMapStateSensor(coordinator, entry, cmap_name),
@@ -216,50 +220,16 @@ async def async_setup_entry(
             KeeneticCryptoMapTxThroughputSensor(coordinator, entry, cmap_name),
         ]
 
-    crypto_maps = coordinator.data.get("crypto_maps") or {}
-    if not isinstance(crypto_maps, dict):
-        crypto_maps = {}
-    for cmap_name in crypto_maps.keys():
-        if cmap_name in known_cmap_names:
-            continue
-        known_cmap_names.add(cmap_name)
-        entities.extend(_crypto_map_sensor_set(cmap_name))
+    entities.extend(_build_dynamic_sensors())
 
     async_add_entities(entities)
 
-    # New WAN interfaces may appear at runtime (LTE stick plugged in,
-    # new WireGuard tunnel configured as uplink, PPPoE redialed on a
-    # different interface). Mirror the binary_sensor platform and add
-    # the per-WAN sensor set on the fly so the user doesn't need to
-    # restart HA. Crypto maps added from the web UI fan out through
-    # the same listener.
-    @callback
-    def _async_add_new_dynamic_entities() -> None:
-        new_entities: list[SensorEntity] = []
-        _add_mesh_sensors(
-            new_entities,
-            coordinator,
-            entry,
-            known_mesh_ids,
-            known_mesh_local_ip_ids,
-            known_mesh_port_keys,
-        )
-        for wan in iter_new_items(coordinator, "wan_interfaces", known_wan_ids):
-            wan_id = wan["id"]
-            new_entities.extend(_wan_sensor_set(wan_id))
-        crypto_maps = coordinator.data.get("crypto_maps") or {}
-        if not isinstance(crypto_maps, dict):
-            crypto_maps = {}
-        for cmap_name in crypto_maps.keys():
-            if cmap_name in known_cmap_names:
-                continue
-            known_cmap_names.add(cmap_name)
-            new_entities.extend(_crypto_map_sensor_set(cmap_name))
-        if new_entities:
-            async_add_entities(new_entities)
-
-    entry.async_on_unload(
-        coordinator.async_add_listener(_async_add_new_dynamic_entities)
+    register_dynamic_entities(
+        entry,
+        coordinator,
+        async_add_entities,
+        _build_dynamic_sensors,
+        add_initial=False,
     )
 
 

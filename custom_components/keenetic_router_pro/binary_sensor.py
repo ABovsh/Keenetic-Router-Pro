@@ -7,11 +7,12 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN, FIELD_CONNECTED, LINK_STATE_UP
 from .coordinator import KeeneticCoordinator
 from .entity import MeshEntity, ControllerEntity, WanEntity, CryptoMapEntity
+from .entity_setup import DynamicEntityTracker, register_dynamic_entities
 from .utils import iter_new_items
 
 
@@ -27,70 +28,47 @@ async def async_setup_entry(
 
     entities.append(KeeneticControllerUpdateSensor(coordinator, entry))
 
-    # Mesh node'lar için binary sensor
-    known_mesh_ids: set[str] = set()
-    _add_mesh_binary_sensors(entities, coordinator, entry, known_mesh_ids)
+    tracker = DynamicEntityTracker()
 
-    # Per-WAN binary sensors: one "Connected" (internet reachability) and
-    # one "Enabled" (UI toggle) per uplink.
-    known_wan_ids: set[str] = set()
-    for wan in iter_new_items(coordinator, "wan_interfaces", known_wan_ids):
-        wan_id = wan["id"]
-        entities.append(KeeneticWanConnectedSensor(coordinator, entry, wan_id))
-        entities.append(KeeneticWanEnabledSensor(coordinator, entry, wan_id))
-
-    # Per-crypto-map binary sensor: "Connected" (phase2 established).
-    # Tunnels can be added/removed at runtime via the web UI, so we
-    # also register a listener below to catch new ones.
-    known_cmap_names: set[str] = set()
-    crypto_maps = coordinator.data.get("crypto_maps") or {}
-    if not isinstance(crypto_maps, dict):
-        crypto_maps = {}
-    for cmap_name in crypto_maps.keys():
-        if cmap_name in known_cmap_names:
-            continue
-        known_cmap_names.add(cmap_name)
-        entities.append(
-            KeeneticCryptoMapConnectedSensor(coordinator, entry, cmap_name)
+    def _build_dynamic_binary_sensors() -> list[BinarySensorEntity]:
+        dynamic_entities: list[BinarySensorEntity] = []
+        _add_mesh_binary_sensors(
+            dynamic_entities,
+            coordinator,
+            entry,
+            tracker.mesh_nodes,
         )
-
-    if entities:
-        async_add_entities(entities)
-
-    # New WAN interfaces may appear later (LTE stick plugged in, a new
-    # PPPoE dialed, an extra WireGuard tunnel configured as uplink).
-    # Site-to-site IPsec tunnels can also be added/removed at runtime
-    # via the web UI — both kinds of sub-device fan out through this
-    # single listener so we use one listener slot for both.
-    @callback
-    def _async_add_new_sub_devices() -> None:
-        new_entities: list[BinarySensorEntity] = []
-        _add_mesh_binary_sensors(new_entities, coordinator, entry, known_mesh_ids)
-        for wan in iter_new_items(coordinator, "wan_interfaces", known_wan_ids):
+        for wan in iter_new_items(coordinator, "wan_interfaces", tracker.wan_ids):
             wan_id = wan["id"]
-            new_entities.append(
+            dynamic_entities.append(
                 KeeneticWanConnectedSensor(coordinator, entry, wan_id)
             )
-            new_entities.append(
+            dynamic_entities.append(
                 KeeneticWanEnabledSensor(coordinator, entry, wan_id)
             )
         crypto_maps = coordinator.data.get("crypto_maps") or {}
         if not isinstance(crypto_maps, dict):
             crypto_maps = {}
         for cmap_name in crypto_maps.keys():
-            if cmap_name in known_cmap_names:
+            if not tracker.mark_crypto_map(cmap_name):
                 continue
-            known_cmap_names.add(cmap_name)
-            new_entities.append(
+            dynamic_entities.append(
                 KeeneticCryptoMapConnectedSensor(
                     coordinator, entry, cmap_name
                 )
             )
-        if new_entities:
-            async_add_entities(new_entities)
+        return dynamic_entities
 
-    entry.async_on_unload(
-        coordinator.async_add_listener(_async_add_new_sub_devices)
+    entities.extend(_build_dynamic_binary_sensors())
+    if entities:
+        async_add_entities(entities)
+
+    register_dynamic_entities(
+        entry,
+        coordinator,
+        async_add_entities,
+        _build_dynamic_binary_sensors,
+        add_initial=False,
     )
 
 

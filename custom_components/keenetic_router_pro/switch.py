@@ -3,12 +3,13 @@ from __future__ import annotations
 from typing import Any
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .api import KeeneticClient
 from .const import DOMAIN, LINK_STATE_UP
 from .coordinator import KeeneticCoordinator
 from .entity import ControllerEntity, CryptoMapEntity, InterfaceEntity, WanEntity
+from .entity_setup import DynamicEntityTracker, register_dynamic_entities
 from .utils import iter_new_items
 
 
@@ -113,66 +114,45 @@ async def async_setup_entry(
             )
         )
 
-    known_wan_ids: set[str] = set()
-    _add_wan_enabled_switches(entities, coordinator, entry, client, known_wan_ids)
+    tracker = DynamicEntityTracker()
 
-    known_vpn_ids: set[str] = set()
-    _add_vpn_enabled_switches(
-        entities,
-        coordinator,
-        entry,
-        client,
-        known_wan_ids,
-        known_vpn_ids,
-    )
+    def _build_dynamic_switches() -> list[SwitchEntity]:
+        dynamic_entities: list[SwitchEntity] = []
+        _add_wan_enabled_switches(
+            dynamic_entities,
+            coordinator,
+            entry,
+            client,
+            tracker.wan_ids,
+        )
+        _add_vpn_enabled_switches(
+            dynamic_entities,
+            coordinator,
+            entry,
+            client,
+            tracker.wan_ids,
+            tracker.vpn_ids,
+        )
+        _add_crypto_map_enabled_switches(
+            dynamic_entities,
+            coordinator,
+            entry,
+            client,
+            tracker.crypto_maps,
+        )
+        return dynamic_entities
 
-    # Per-crypto-map "Enabled" switch. Site-to-site IPsec tunnels
-    # have their own enable/disable knob that is distinct from any
-    # interface up/down, so they need a dedicated switch class.
-    known_cmap_names: set[str] = set()
-    _add_crypto_map_enabled_switches(
-        entities,
-        coordinator,
-        entry,
-        client,
-        known_cmap_names,
-    )
+    entities.extend(_build_dynamic_switches())
 
     if entities:
         async_add_entities(entities)
 
-    # Interfaces and tunnels added later via the web UI should show up
-    # without a HA restart.
-    @callback
-    def _async_add_new_interface_switches() -> None:
-        new_entities: list[SwitchEntity] = []
-        _add_wan_enabled_switches(
-            new_entities,
-            coordinator,
-            entry,
-            client,
-            known_wan_ids,
-        )
-        _add_vpn_enabled_switches(
-            new_entities,
-            coordinator,
-            entry,
-            client,
-            known_wan_ids,
-            known_vpn_ids,
-        )
-        _add_crypto_map_enabled_switches(
-            new_entities,
-            coordinator,
-            entry,
-            client,
-            known_cmap_names,
-        )
-        if new_entities:
-            async_add_entities(new_entities)
-
-    entry.async_on_unload(
-        coordinator.async_add_listener(_async_add_new_interface_switches)
+    register_dynamic_entities(
+        entry,
+        coordinator,
+        async_add_entities,
+        _build_dynamic_switches,
+        add_initial=False,
     )
 
 
