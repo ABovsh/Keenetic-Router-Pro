@@ -17,7 +17,9 @@ _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.api.network")
 
 
 class NetworkMixin:
-    async def async_ping_ip(self, ip_address: str, timeout: float = 2.0) -> bool:
+    async def async_ping_ip(
+        self, ip_address: str, timeout_seconds: float = 2.0
+    ) -> bool:
         """Ping an IP address using the router's ping functionality.
         
         Returns True if the host is reachable, False otherwise.
@@ -25,7 +27,7 @@ class NetworkMixin:
         try:
             ip_address = _validate_cli_arg(ip_address, "IP address")
 
-            async with asyncio.timeout(timeout):
+            async with asyncio.timeout(timeout_seconds):
                 result = await self._rci_parse(f"ip ping {ip_address} count 1")
 
             if result is None:
@@ -54,7 +56,7 @@ class NetworkMixin:
     async def async_ping_multiple(
         self, 
         ip_addresses: List[str], 
-        timeout: float = 2.0
+        timeout_seconds: float = 2.0
     ) -> Dict[str, bool]:
         """Ping multiple IP addresses concurrently.
         
@@ -63,7 +65,7 @@ class NetworkMixin:
         if not ip_addresses:
             return {}
 
-        tasks = [self.async_ping_ip(ip, timeout) for ip in ip_addresses]
+        tasks = [self.async_ping_ip(ip, timeout_seconds) for ip in ip_addresses]
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 

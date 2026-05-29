@@ -16,48 +16,92 @@ from ..helpers import _clean_addr, _to_int
 # per record and is stable across strongSwan 5.x/6.x. The verbose
 # multi-line section below it is intentionally ignored.
 _IPSEC_PHASE1_HEADER_RE = re.compile(
-    r"^\s*(?P<name>\S+?)\[(?P<sa_id>\d+)\]:\s+"
+    r"^\s*(?P<name>\S+)\[(?P<sa_id>\d+)\]:\s+"
     r"(?P<state>ESTABLISHED|CONNECTING|REKEYING|DELETING)\s+"
-    r".*?,\s+"
+    r"[^,\n]*,\s+"
     r"(?P<local>\S+)\[(?P<local_id>[^\]]+)\]\.\.\."
     r"(?P<remote>\S+)\[(?P<remote_id>[^\]]+)\]\s*$"
 )
 _IPSEC_PHASE1_SPI_RE = re.compile(
-    r"^\s*(?P<name>\S+?)\[(?P<sa_id>\d+)\]:\s+"
+    r"^\s*(?P<name>\S+)\[(?P<sa_id>\d+)\]:\s+"
     r"(?P<ver>IKEv?\d?)\s+SPIs:\s+"
     r"(?P<local_spi>\S+?)_i\s+(?P<remote_spi>\S+?)_r\*?,\s+"
-    r"(?:rekeying in (?P<rekey>.+?)|reauthentication disabled)\s*$"
+    r"(?:rekeying in (?P<rekey>[^,\n]+)|reauthentication disabled)\s*$"
 )
 _IPSEC_PHASE1_PROPOSAL_RE = re.compile(
-    r"^\s*(?P<name>\S+?)\[(?P<sa_id>\d+)\]:\s+IKE proposal:\s+(?P<proposal>\S+)\s*$"
+    r"^\s*(?P<name>\S+)\[(?P<sa_id>\d+)\]:\s+IKE proposal:\s+(?P<proposal>\S+)\s*$"
 )
 _IPSEC_PHASE2_HEADER_RE = re.compile(
-    r"^\s*(?P<name>\S+?)\{(?P<sa_id>\d+)\}:\s+"
+    r"^\s*(?P<name>\S+)\{(?P<sa_id>\d+)\}:\s+"
     r"(?P<state>INSTALLED|REKEYING|DELETING|REKEYED)"
-    r"(?:,\s+(?P<mode>TUNNEL|TRANSPORT))?"
-    r"(?:,\s+reqid\s+(?P<reqid>\d+))?"
-    r"(?:,\s+(?P<proto>ESP|AH))?"
-    r"(?P<encap>\s+in\s+UDP)?"
-    r".*?SPIs:\s+(?P<local_spi>\S+?)_i\s+(?P<remote_spi>\S+?)_o\s*$"
+    r"(?P<rest>[^\n]*)$"
+)
+_IPSEC_PHASE2_SPI_RE = re.compile(
+    r"^(?P<local_spi>\S+?)_i\s+(?P<remote_spi>\S+?)_o\s*$"
 )
 _IPSEC_PHASE2_COUNTERS_RE = re.compile(
-    r"^\s*(?P<name>\S+?)\{(?P<sa_id>\d+)\}:\s+"
+    r"^\s*(?P<name>\S+)\{(?P<sa_id>\d+)\}:\s+"
     r"(?P<proposal>\S+?),\s+"
     r"(?P<bytes_i>\d+)\s+bytes_i"
     r"(?:\s+\((?P<pkts_i>\d+)\s+pkts(?:,\s+(?P<last_i>\d+)s ago)?\))?,\s+"
     r"(?P<bytes_o>\d+)\s+bytes_o"
     r"(?:\s+\((?P<pkts_o>\d+)\s+pkts(?:,\s+(?P<last_o>\d+)s ago)?\))?"
-    r"(?:,\s+rekeying in (?P<rekey>.+?))?\s*$"
+    r"(?:,\s+rekeying in (?P<rekey>[^,\n]+))?\s*$"
 )
 _IPSEC_CONNECTION_LINE_RE = re.compile(
     r"^\s*(?P<name>\S+?):\s+\S+\.\.\.\S+\s+IKEv?\d?"
 )
 _IPSEC_CONNECTION_CHILD_RE = re.compile(
-    r"^\s*(?P<name>\S+?):\s+child:\s+.+?\s+(?P<mode>TUNNEL|TRANSPORT),"
+    r"^\s*(?P<name>\S+):\s+child:\s+(?P<rest>[^\n]*)$"
 )
 _IPSEC_SA_HEADER_RE = re.compile(
     r"^Security Associations\s+\((?P<up>\d+)\s+up,\s+(?P<connecting>\d+)\s+connecting\)"
 )
+
+
+def _phase2_header_fields(match: re.Match[str]) -> dict[str, Any] | None:
+    """Return normalized Phase 2 header fields without backtracking-heavy regex."""
+    rest = match.group("rest") or ""
+    if "SPIs:" not in rest:
+        return None
+    before_spi, spi_text = rest.rsplit("SPIs:", 1)
+    spi_match = _IPSEC_PHASE2_SPI_RE.match(spi_text.strip())
+    if not spi_match:
+        return None
+
+    fields: dict[str, Any] = {
+        "sa_state": match.group("state"),
+        "encapsulation": False,
+        "local_spi": spi_match.group("local_spi"),
+        "remote_spi": spi_match.group("remote_spi"),
+    }
+    for segment in (part.strip() for part in before_spi.split(",")):
+        if not segment:
+            continue
+        if segment in {"TUNNEL", "TRANSPORT"}:
+            fields["mode"] = segment
+            continue
+        if segment.startswith("reqid "):
+            fields["request_id"] = _to_int(segment.removeprefix("reqid ").strip())
+            continue
+        if segment.startswith(("ESP", "AH")):
+            fields["protocol"] = segment.split()[0]
+            fields["encapsulation"] = "in UDP" in segment
+            continue
+        if "in UDP" in segment:
+            fields["encapsulation"] = True
+    return fields
+
+
+def _connection_child_mode(text: str) -> str | None:
+    """Extract child SA mode from a connection line tail."""
+    child_selector = text.split(",", 1)[0].strip()
+    if not child_selector:
+        return None
+    mode = child_selector.rsplit(maxsplit=1)[-1]
+    if mode in {"TUNNEL", "TRANSPORT"}:
+        return mode
+    return None
 
 
 def parse_ipsec_vici_diagnostics(
@@ -98,11 +142,9 @@ def parse_ipsec_vici_diagnostics(
                 }
             )
 
-    last_match = (
-        matches[0]
-        if entries is not None and matches
-        else (matches[-1] if matches else None)
-    )
+    last_match = None
+    if matches:
+        last_match = matches[0] if entries is not None else matches[-1]
     scanned = len(entries) if entries is not None else len(lines)
     return {
         "status": "warning" if matches else "ok",
@@ -164,7 +206,7 @@ def parse_ipsec_statusall(text: str) -> dict[str, dict[str, Any]]:
             in_sa_section = True
             in_connections_section = False
             continue
-        if line.startswith("Listening IP addresses") or line.startswith("Status of IKE"):
+        if line.startswith(("Listening IP addresses", "Status of IKE")):
             in_connections_section = False
             in_sa_section = False
             continue
@@ -176,8 +218,10 @@ def parse_ipsec_statusall(text: str) -> dict[str, dict[str, Any]]:
                 continue
             match = _IPSEC_CONNECTION_CHILD_RE.match(line)
             if match:
-                tunnel = _t(match.group("name"))
-                tunnel["mode"] = (match.group("mode") or "").lower() or tunnel["mode"]
+                mode = _connection_child_mode(match.group("rest"))
+                if mode:
+                    tunnel = _t(match.group("name"))
+                    tunnel["mode"] = mode.lower()
                 continue
             continue
 
@@ -209,9 +253,12 @@ def parse_ipsec_statusall(text: str) -> dict[str, dict[str, Any]]:
             tunnel = _t(match.group("name"))
             phase1 = tunnel["phase1"] or {"name": match.group("name")}
             ver = match.group("ver") or ""
-            phase1["ike_version"] = (
-                "2" if "2" in ver else ("1" if "1" in ver else None)
-            )
+            ike_version = None
+            if "2" in ver:
+                ike_version = "2"
+            elif "1" in ver:
+                ike_version = "1"
+            phase1["ike_version"] = ike_version
             phase1["local_spi"] = match.group("local_spi")
             phase1["remote_spi"] = match.group("remote_spi")
             if match.group("rekey"):
@@ -229,30 +276,23 @@ def parse_ipsec_statusall(text: str) -> dict[str, dict[str, Any]]:
 
         match = _IPSEC_PHASE2_HEADER_RE.match(line)
         if match:
-            tunnel = _t(match.group("name"))
-            sa_id = _to_int(match.group("sa_id"))
-            sa = next(
-                (
-                    item
-                    for item in tunnel["phase2_sa_list"]
-                    if item.get("unique_id") == sa_id
-                ),
-                None,
-            )
-            if sa is None:
-                sa = {"unique_id": sa_id}
-                tunnel["phase2_sa_list"].append(sa)
-            sa["sa_state"] = match.group("state")
-            if match.group("mode"):
-                sa["mode"] = match.group("mode")
-            if match.group("reqid"):
-                sa["request_id"] = _to_int(match.group("reqid"))
-            if match.group("proto"):
-                sa["protocol"] = match.group("proto")
-            sa["encapsulation"] = bool(match.group("encap"))
-            sa["local_spi"] = match.group("local_spi")
-            sa["remote_spi"] = match.group("remote_spi")
-            continue
+            fields = _phase2_header_fields(match)
+            if fields is not None:
+                tunnel = _t(match.group("name"))
+                sa_id = _to_int(match.group("sa_id"))
+                sa = next(
+                    (
+                        item
+                        for item in tunnel["phase2_sa_list"]
+                        if item.get("unique_id") == sa_id
+                    ),
+                    None,
+                )
+                if sa is None:
+                    sa = {"unique_id": sa_id}
+                    tunnel["phase2_sa_list"].append(sa)
+                sa.update(fields)
+                continue
 
         match = _IPSEC_PHASE2_COUNTERS_RE.match(line)
         if match:
@@ -315,4 +355,3 @@ def parse_ipsec_statusall(text: str) -> dict[str, dict[str, Any]]:
             tunnel["state"] = "UNDEFINED"
 
     return tunnels
-

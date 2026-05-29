@@ -422,7 +422,8 @@ class SystemMixin:
 
                 # Step 2: Compute hash
                 ha1 = hashlib.md5(
-                    f"{self._username}:{realm}:{self._password}".encode()
+                    f"{self._username}:{realm}:{self._password}".encode(),
+                    usedforsecurity=False,
                 ).hexdigest()
                 response_hash = hashlib.sha256(
                     (challenge + ha1).encode()

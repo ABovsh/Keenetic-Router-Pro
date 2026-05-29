@@ -114,7 +114,8 @@ class _AuthMixin:
         # ha1      = md5(username:realm:password)   [hex digest]
         # response = sha256(challenge + ha1)         [hex digest]
         ha1 = hashlib.md5(
-            f"{self._username}:{realm}:{self._password}".encode()
+            f"{self._username}:{realm}:{self._password}".encode(),
+            usedforsecurity=False,
         ).hexdigest()
         response_hash = hashlib.sha256((challenge + ha1).encode()).hexdigest()
 

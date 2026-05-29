@@ -5,11 +5,20 @@ import math
 import re
 from collections.abc import Iterator
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
+
 from .const import CONF_TRACKED_CLIENTS, DOMAIN, LINK_STATE_UP, TRUTHY_STRINGS
 
 UNKNOWN_SECONDS_VALUES = (None, "", "unknown", "Unknown")
 _MESH_ID_SAFE_RE = re.compile(r"\W+")
 PLACEHOLDER_IPS = frozenset({"", "0.0.0.0", "::"})
+
+
+def _url_host(value: str) -> str:
+    """Return host part from a user-supplied host or URL."""
+    stripped = value.strip()
+    parsed = urlsplit(stripped if "://" in stripped else f"//{stripped}")
+    return (parsed.netloc or parsed.path).split("/", 1)[0]
 
 
 def coerce_seconds(value: Any, default: int | None = 0) -> int | None:
@@ -225,11 +234,10 @@ def get_main_device_info(
     scheme = "https" if ssl else "http"
 
     if ndns_domain and ndns_domain.strip():
-        # Strip protocol prefix if present.
-        clean_domain = ndns_domain.replace("https://", "").replace("http://", "").split("/")[0]
-        configuration_url = f"{scheme}://{clean_domain}"
+        clean_domain = _url_host(ndns_domain)
+        configuration_url = urlunsplit((scheme, clean_domain, "", "", ""))
     elif host:
-        configuration_url = f"{scheme}://{host}"
+        configuration_url = urlunsplit((scheme, host, "", "", ""))
     else:
         configuration_url = None
 
@@ -397,5 +405,7 @@ def get_client_device_info(
         "manufacturer": manufacturer,
         "model": model,
         "via_device": (DOMAIN, entry_id),
-        "configuration_url": f"http://{ip_address}" if ip_address else None,
+        "configuration_url": (
+            urlunsplit(("http", ip_address, "", "", "")) if ip_address else None
+        ),
     }

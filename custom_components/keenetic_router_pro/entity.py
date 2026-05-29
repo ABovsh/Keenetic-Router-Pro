@@ -417,10 +417,10 @@ class ClientEntity(_FingerprintedCoordinatorEntity):
         self._initial_ip = initial_ip
 
     def _client_fingerprint(self, client: dict[str, Any] | None) -> dict[str, Any] | None:
-        return _entity_fingerprint(client, self._client_fingerprint_ignore)
+        return _entity_fingerprint(client, self._client_ignored_fingerprint_fields)
 
     @property
-    def _client_fingerprint_ignore(self) -> frozenset[str]:
+    def _client_ignored_fingerprint_fields(self) -> frozenset[str]:
         """Return client fields ignored for this entity's state writes."""
         return self._CLIENT_FINGERPRINT_IGNORE
 
