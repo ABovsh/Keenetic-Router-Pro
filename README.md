@@ -1,7 +1,14 @@
 # Keenetic Router Pro
 
-[![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![Version](https://img.shields.io/badge/version-1.7.49-blue.svg)](https://github.com/abovsh/Keenetic-Router-Pro)
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge)](https://github.com/custom-components/hacs)
+![Version](https://img.shields.io/badge/version-1.7.49-blue?style=for-the-badge)
+![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.5%2B-41BDF5?style=for-the-badge&logo=home-assistant)
+
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ABovsh_Keenetic-Router-Pro)
+[![Reliability](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=reliability_rating)](https://sonarcloud.io/component_measures?id=ABovsh_Keenetic-Router-Pro&metric=reliability_rating)
+[![Security](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=security_rating)](https://sonarcloud.io/component_measures?id=ABovsh_Keenetic-Router-Pro&metric=security_rating)
+[![Maintainability](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=sqale_rating)](https://sonarcloud.io/component_measures?id=ABovsh_Keenetic-Router-Pro&metric=sqale_rating)
+[![Coverage](https://img.shields.io/sonar/coverage/ABovsh_Keenetic-Router-Pro?server=https%3A%2F%2Fsonarcloud.io&style=for-the-badge&logo=sonarcloud&label=coverage)](https://sonarcloud.io/component_measures?id=ABovsh_Keenetic-Router-Pro&metric=coverage)
 
 Home Assistant custom integration for Keenetic routers. It focuses on local polling, router diagnostics, mesh monitoring, presence tracking, WAN status, traffic counters, firmware updates, and selected client controls.
 

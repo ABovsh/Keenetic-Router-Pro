@@ -40,8 +40,24 @@ def test_public_version_surfaces_match() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
 
-    assert f"badge/version-{version}-blue.svg" in readme
+    assert f"badge/version-{version}-blue" in readme
     assert re.search(rf"^## {re.escape(version)}(?:\\s|$)", changelog, re.MULTILINE)
+
+
+def test_readme_uses_real_sonarcloud_badges() -> None:
+    """README badges should point at the configured SonarCloud project."""
+    sonar = (ROOT / "sonar-project.properties").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    project_key = re.search(r"^sonar\.projectKey=(.+)$", sonar, re.MULTILINE)
+
+    assert project_key is not None
+    project = project_key.group(1)
+    assert f"project={project}&metric=alert_status" in readme
+    assert f"project={project}&metric=reliability_rating" in readme
+    assert f"project={project}&metric=security_rating" in readme
+    assert f"project={project}&metric=sqale_rating" in readme
+    assert f"shields.io/sonar/coverage/{project}" in readme
+    assert f"component_measures?id={project}&metric=coverage" in readme
 
 
 def test_required_public_docs_exist_and_describe_release_mode() -> None:
