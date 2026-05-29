@@ -205,7 +205,9 @@ async def test_options_flow_creates_temporary_client_without_runtime_client(
 async def test_options_flow_falls_back_to_tracked_clients_when_fetch_fails() -> None:
     class RuntimeClient:
         async def async_get_clients(self):
-            raise RuntimeError("router unavailable")
+            from custom_components.keenetic_router_pro.api import KeeneticApiError
+
+            raise KeeneticApiError("router unavailable")
 
     flow = KeeneticOptionsFlow(_entry(RuntimeClient()))
     flow.hass = SimpleNamespace(config_entries=ConfigEntries())

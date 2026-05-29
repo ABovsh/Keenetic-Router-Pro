@@ -201,7 +201,7 @@ async def test_connection_step_uses_discovered_host_and_creates_entry_when_clien
     """SSDP default-host sentinel should be replaced before entry creation."""
     class Client:
         async def async_get_clients(self):
-            raise RuntimeError("optional client list unavailable")
+            raise KeeneticApiError("optional client list unavailable")
 
     flow = KeeneticRouterProConfigFlow()
     flow.hass = SimpleNamespace()
