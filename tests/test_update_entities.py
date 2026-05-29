@@ -13,6 +13,7 @@ import pytest
 from homeassistant.exceptions import HomeAssistantError
 
 import custom_components.keenetic_router_pro.update as update_module
+from custom_components.keenetic_router_pro.api import KeeneticApiError
 from custom_components.keenetic_router_pro.update import (
     KeeneticFirmwareUpdate,
     KeeneticMeshFirmwareUpdate,
@@ -63,7 +64,7 @@ def test_router_firmware_install_handles_reboot_without_progress_endpoint(
 
         async def async_get_system_info(self) -> dict[str, Any]:
             self.system_checks += 1
-            raise RuntimeError("router rebooting")
+            raise KeeneticApiError("router rebooting")
 
     monkeypatch.setattr(update_module.asyncio, "sleep", _no_sleep)
 
@@ -156,3 +157,131 @@ def test_mesh_firmware_install_refreshes_until_target_version(
         }
     ]
     assert coordinator.refreshes == 2
+
+
+def test_router_firmware_install_polls_progress_until_complete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Routers with progress support should publish progress and refresh once."""
+    writes: list[bool | int] = []
+
+    class Client:
+        def __init__(self) -> None:
+            self.progress = [
+                {"in_progress": True, "progress_percent": 0},
+                {"in_progress": True, "progress_percent": 10},
+                {"in_progress": True, "progress_percent": 40},
+                {"in_progress": False, "progress_percent": 100},
+            ]
+
+        async def async_start_firmware_update(self) -> bool:
+            return True
+
+        async def async_get_update_progress(self) -> dict[str, Any]:
+            return self.progress.pop(0)
+
+    monkeypatch.setattr(update_module.asyncio, "sleep", _no_sleep)
+
+    coordinator = _Coordinator({"system": {"title": "4.2.0", "fw-available": "4.3.0"}})
+    entity = KeeneticFirmwareUpdate(coordinator, _entry(), Client())
+    entity.async_write_ha_state = lambda: writes.append(entity.in_progress)
+
+    asyncio.run(entity.async_install(version=None, backup=False))
+
+    assert writes == [0, 10, 40, False]
+    assert coordinator.refreshes == 1
+
+
+def test_router_firmware_install_preserves_cancellation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Firmware update sleeps and polls must not swallow cancellation."""
+
+    class Client:
+        async def async_start_firmware_update(self) -> bool:
+            return True
+
+        async def async_get_update_progress(self) -> dict[str, Any]:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(update_module.asyncio, "sleep", _no_sleep)
+
+    coordinator = _Coordinator({"system": {"title": "4.2.0", "fw-available": "4.3.0"}})
+    entity = KeeneticFirmwareUpdate(coordinator, _entry(), Client())
+    entity.async_write_ha_state = lambda: None
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(entity.async_install(version=None, backup=False))
+
+    assert coordinator.refreshes == 0
+
+
+def test_mesh_firmware_install_rejects_unaccepted_update(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mesh node command rejection should surface as a user action error."""
+
+    class Client:
+        async def async_start_node_firmware_update(self, **kwargs: Any) -> bool:
+            return False
+
+    coordinator = _Coordinator(
+        {
+            "mesh_nodes": [
+                {
+                    "cid": "node-1",
+                    "name": "Extender",
+                    "ip": "192.0.2.20",
+                    "firmware": "4.2.0",
+                    "firmware_available": "4.3.0",
+                }
+            ]
+        }
+    )
+    entity = KeeneticMeshFirmwareUpdate(coordinator, _entry(), "node-1", Client())
+    monkeypatch.setattr(update_module.asyncio, "sleep", _no_sleep)
+
+    with pytest.raises(HomeAssistantError, match="did not accept"):
+        asyncio.run(entity.async_install(version=None, backup=False))
+
+    assert coordinator.refreshes == 0
+
+
+def test_mesh_firmware_install_retries_transient_refresh_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rebooting mesh node may make refresh fail before the final successful check."""
+
+    class Client:
+        async def async_start_node_firmware_update(self, **kwargs: Any) -> bool:
+            return True
+
+    coordinator = _Coordinator(
+        {
+            "mesh_nodes": [
+                {
+                    "cid": "node-1",
+                    "name": "Extender",
+                    "ip": "192.0.2.20",
+                    "firmware": "4.2.0",
+                    "firmware_available": "4.3.0",
+                }
+            ]
+        }
+    )
+    attempts = {"count": 0}
+
+    async def flaky_refresh() -> None:
+        coordinator.refreshes += 1
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise KeeneticApiError("node rebooting")
+        coordinator.data["mesh_nodes"][0]["firmware"] = "4.3.0"
+
+    coordinator.async_request_refresh = flaky_refresh
+    entity = KeeneticMeshFirmwareUpdate(coordinator, _entry(), "node-1", Client())
+    monkeypatch.setattr(update_module.asyncio, "sleep", _no_sleep)
+
+    asyncio.run(entity.async_install(version=None, backup=False))
+
+    assert coordinator.refreshes == 3

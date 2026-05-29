@@ -11,6 +11,7 @@ import pytest
 from homeassistant.exceptions import HomeAssistantError
 
 import custom_components.keenetic_router_pro.update as update_module
+from custom_components.keenetic_router_pro.api import KeeneticApiError
 from custom_components.keenetic_router_pro.update import (
     KeeneticFirmwareUpdate,
     KeeneticMeshFirmwareUpdate,
@@ -198,7 +199,7 @@ def test_controller_update_progress_failure_marks_rebooting(
             self.calls += 1
             if self.calls == 1:
                 return {"in_progress": True}
-            raise RuntimeError("rebooting")
+            raise KeeneticApiError("rebooting")
 
     async def refresh() -> None:
         return None
@@ -363,7 +364,7 @@ def test_mesh_update_refresh_failure_is_ignored_during_direct_fallback(
         async def async_request_refresh(self) -> None:
             self.calls += 1
             if self.calls == 1:
-                raise RuntimeError("temporary")
+                raise KeeneticApiError("temporary")
             self.data["mesh_nodes"][0]["firmware"] = "4.3.0"
 
     class Client:

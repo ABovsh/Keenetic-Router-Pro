@@ -5,6 +5,8 @@ import asyncio
 import logging
 from typing import Any
 
+import aiohttp
+
 from homeassistant.components.update import (
     UpdateDeviceClass,
     UpdateEntity,
@@ -15,7 +17,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .api import KeeneticClient
+from .api import KeeneticApiError, KeeneticAuthError, KeeneticClient
 from .const import DOMAIN
 from .coordinator import KeeneticCoordinator
 from .entity import ControllerEntity, MeshEntity
@@ -25,6 +27,23 @@ from .utils import iter_new_items
 _LOGGER = logging.getLogger(__name__)
 
 KEENETIC_RELEASE_NOTES_URL = "https://help.keenetic.com/hc/en-us/categories/360000400920-KeeneticOS-Release-Notes"
+
+_UPDATE_PROGRESS_FALLBACK_ERRORS = (
+    KeeneticApiError,
+    aiohttp.ClientError,
+    asyncio.TimeoutError,
+    TypeError,
+    ValueError,
+    KeyError,
+)
+_REBOOT_WAIT_ERRORS = (
+    KeeneticApiError,
+    aiohttp.ClientError,
+    asyncio.TimeoutError,
+    TypeError,
+    ValueError,
+    KeyError,
+)
 
 
 def _reported_latest_version(available: str | None, current: str | None) -> str | None:
@@ -207,7 +226,9 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
                 progress_supported = bool(initial and initial.get("in_progress"))
             except asyncio.CancelledError:
                 raise
-            except Exception as err:  # noqa: BLE001  # firmware-update endpoint shape varies across firmware; treat any failure as "no progress endpoint"
+            except KeeneticAuthError:
+                raise
+            except _UPDATE_PROGRESS_FALLBACK_ERRORS as err:
                 _LOGGER.debug("Update progress endpoint not available: %s", err)
 
             if progress_supported:
@@ -218,7 +239,9 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
                         progress = await self._client.async_get_update_progress()
                     except asyncio.CancelledError:
                         raise
-                    except Exception:  # noqa: BLE001  # any error during reboot poll means router is offline; advance progress and exit loop
+                    except KeeneticAuthError:
+                        raise
+                    except _REBOOT_WAIT_ERRORS:
                         self._update_progress = 95
                         self.async_write_ha_state()
                         break
@@ -246,7 +269,9 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
                         await self._client.async_get_system_info()
                     except asyncio.CancelledError:
                         raise
-                    except Exception:  # noqa: BLE001  # any error during reboot wait means router is offline; advance progress and exit loop
+                    except KeeneticAuthError:
+                        raise
+                    except _REBOOT_WAIT_ERRORS:
                         self._update_progress = 90
                         self.async_write_ha_state()
                         break
@@ -389,7 +414,9 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
                             break
                 except asyncio.CancelledError:
                     raise
-                except Exception as err:  # noqa: BLE001  # mesh-node firmware re-check failures are transient (node rebooting); log and retry next loop
+                except KeeneticAuthError:
+                    raise
+                except _REBOOT_WAIT_ERRORS as err:
                     _LOGGER.debug("Mesh node %s firmware re-check failed: %s", node_name, err)
 
         except HomeAssistantError:
