@@ -129,47 +129,7 @@ Maintenance release focused on public HACS release quality and safer failure bou
   5 min; for faster site-to-site state detection, use a ground-truth health
   check (e.g. an HA `ping` binary_sensor through the tunnel).
 
-## 1.7.44
-
-- Maintenance cleanup only. No user-visible behavior changed.
-
-## 1.7.43
-
-- Maintenance cleanup only. No user-visible behavior changed.
-
-## 1.7.42
-
-- Maintenance cleanup only. No user-visible behavior changed.
-
-## 1.7.41
-
-- Maintenance cleanup only. No user-visible behavior changed.
-
-## 1.7.40
-
-- Maintenance cleanup only. No user-visible behavior changed.
-
-## 1.7.39
-
-- Maintenance cleanup only. No user-visible behavior changed.
-
-## 1.7.38
-
-- Maintenance cleanup only. No user-visible behavior changed.
-
-## 1.7.37
-
-- Maintenance cleanup only. No user-visible behavior changed.
-
-## 1.7.36
-
-- Maintenance cleanup only. No user-visible behavior changed.
-
-## 1.7.35
-
-- Maintenance cleanup only. No user-visible behavior changed.
-
-## 1.7.34
+## 1.7.44 – 1.7.34
 
 - Maintenance cleanup only. No user-visible behavior changed.
 
@@ -236,19 +196,7 @@ Maintenance release focused on public HACS release quality and safer failure bou
 
 - DNS-over-HTTPS upstream URIs are redacted in Home Assistant state and diagnostics so embedded IDs or credentials are not exposed.
 
-## 1.7.26
-
-- Maintenance cleanup only. No user-visible behavior changed.
-
-## 1.7.25
-
-- Maintenance cleanup only. No user-visible behavior changed.
-
-## 1.7.24
-
-- Maintenance cleanup only. No user-visible behavior changed.
-
-## 1.7.23
+## 1.7.26 – 1.7.23
 
 - Maintenance cleanup only. No user-visible behavior changed.
 

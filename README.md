@@ -16,7 +16,7 @@ The integration is local-polling first and has no cloud dependency for direct LA
 
 ## Why this fork
 
-A maintained, hardened fork of the original Keenetic Router Pro integration. It keeps the domain name (`keenetic_router_pro`) so your existing dashboards, automations, and entity history carry over without changes.
+An actively maintained, hardened fork of the original Keenetic Router Pro integration — rebuilt around current Home Assistant patterns, tightened for security and privacy, and gentler on the router. It keeps the domain name (`keenetic_router_pro`), so your existing dashboards, automations, and entity history carry over without changes.
 
 ### Practical reasons to use it
 
@@ -56,10 +56,11 @@ A maintained, hardened fork of the original Keenetic Router Pro integration. It 
   precomputed MAC index, per-client entities skip no-op state writes, selected
   client presence is based on Keenetic's own link/active state, and
   tracked-client uptime/last-seen sensors update on their own cadence.
-- **Actively regression-tested.** The integration is covered by automated
-  checks for API parsing, authentication lifecycle, configuration flows, mesh
-  entities, translations, statistics classes, diagnostics redaction and
-  cancellation safety.
+- **Actively maintained and regression-tested.** The fork ships a steady stream
+  of reliability, security and accuracy fixes, and is covered by automated checks
+  for API parsing, authentication lifecycle, configuration flows, mesh entities,
+  translations, statistics classes, diagnostics redaction and cancellation
+  safety — see the [changelog](CHANGELOG.md) for the full history.
 
 ### Removed surface area
 
