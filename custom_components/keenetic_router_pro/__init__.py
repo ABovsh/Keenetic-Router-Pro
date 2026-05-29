@@ -205,26 +205,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(
             "Keenetic config entry is missing 'host'; please reconfigure the integration"
         )
-    username: str = data["username"]
-    password: str = data["password"]
-    port: int = int(data.get("port", DEFAULT_PORT))
+    username: str | None = data.get("username")
+    password: str | None = data.get("password")
+    if not username or not password:
+        # A stored entry missing credentials is unrecoverable without user
+        # action — fail cleanly rather than passing None into the API client.
+        raise ConfigEntryNotReady(
+            "Keenetic config entry is missing credentials; please reconfigure the integration"
+        )
     use_ssl: bool = bool(data.get("ssl", DEFAULT_SSL))
 
     session = async_get_clientsession(hass)
 
-    client = KeeneticClient(
-        host=host,
-        username=username,
-        password=password,
-        port=port,
-        ssl=use_ssl,
-        use_challenge_auth=bool(data.get(CONF_USE_CHALLENGE_AUTH, False)),
-    )
+    # Construct the client and coerce the port inside the try: a corrupted or
+    # legacy entry with a non-numeric port or malformed host raises here, and
+    # must surface as ConfigEntryNotReady (retry/reconfigure) rather than a
+    # raw ValueError/KeeneticApiError that crashes setup.
     try:
+        port: int = int(data.get("port", DEFAULT_PORT))
+        client = KeeneticClient(
+            host=host,
+            username=username,
+            password=password,
+            port=port,
+            ssl=use_ssl,
+            use_challenge_auth=bool(data.get(CONF_USE_CHALLENGE_AUTH, False)),
+        )
         await client.async_start(session)
     except KeeneticAuthError as err:
         raise ConfigEntryAuthFailed("Keenetic credentials were rejected") from err
-    except KeeneticApiError as err:
+    except (KeeneticApiError, ValueError, TypeError) as err:
         raise ConfigEntryNotReady(f"Could not connect to Keenetic router: {err}") from err
 
     coordinator = KeeneticCoordinator(hass, client)

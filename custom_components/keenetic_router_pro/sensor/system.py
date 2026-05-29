@@ -87,7 +87,9 @@ class KeeneticMemoryUsageSensor(ControllerEntity, SensorEntity):
             if key in sys:
                 value = coerce_float(sys[key])
                 if value is not None:
-                    return value
+                    # Clamp to [0, 100] — a fallback percentage field is still
+                    # a percentage and must not publish an out-of-range value.
+                    return max(0.0, min(100.0, value))
 
         return None
 

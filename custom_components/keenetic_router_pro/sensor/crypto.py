@@ -31,6 +31,7 @@ from homeassistant.const import (
 
 from ..coordinator import KeeneticCoordinator
 from ..entity import CryptoMapEntity
+from ..utils import coerce_byte_count
 
 
 class _CryptoMapSensorBase(CryptoMapEntity, SensorEntity):
@@ -144,13 +145,9 @@ class _CryptoMapBytesBase(_CryptoMapSensorBase):
         cmap = self._cmap
         if cmap is None:
             return None
-        v = cmap.get(self._field)
-        if v is None:
-            return None
-        try:
-            return int(v)
-        except (TypeError, ValueError):
-            return None
+        # Reject negative/non-finite counters so a malformed SA byte field
+        # does not corrupt the TOTAL_INCREASING long-term statistics.
+        return coerce_byte_count(cmap.get(self._field))
 
 
 class KeeneticCryptoMapRxBytesSensor(_CryptoMapBytesBase):

@@ -28,6 +28,7 @@ TO_REDACT: set[str] = {
     "username",
     "login",
     "host",
+    "hostname",
     "ip",
     "ip_address",
     "ipv4",

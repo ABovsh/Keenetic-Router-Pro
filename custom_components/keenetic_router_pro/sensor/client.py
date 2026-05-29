@@ -15,7 +15,7 @@ from homeassistant.const import UnitOfInformation, UnitOfTime, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
 from ..entity import ClientEntity
-from ..utils import coerce_bool, coerce_seconds, is_client_online
+from ..utils import bytes_to_gib, coerce_bool, coerce_seconds, is_client_online
 
 ZERO_COUNTER_VALUES = (None, "", 0, "0")
 _BAND_2_4 = "2.4 GHz"
@@ -40,11 +40,12 @@ def _coerce_optional_int(value: Any) -> int | None:
 
 
 def _bytes_to_gb(value: Any) -> float | None:
-    """Convert a byte counter to GiB for the existing client UI contract."""
-    try:
-        return round(float(value) / (1024 ** 3), 2)
-    except (TypeError, ValueError):
-        return None
+    """Convert a byte counter to GiB for the existing client UI contract.
+
+    Rejects missing, non-finite (NaN/inf), and negative values so malformed
+    firmware counters never reach the TOTAL_INCREASING data-size sensors.
+    """
+    return bytes_to_gib(value)
 
 
 def _client_counter_available(client: dict[str, Any] | None, key: str) -> bool:

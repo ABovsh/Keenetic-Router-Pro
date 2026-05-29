@@ -8,6 +8,47 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.50
+
+Reliability and accuracy improvements for sensors, statistics and setup flows.
+
+### 🐛 Fixed
+
+- A WAN that is up but has no real address yet (e.g. `0.0.0.0` while waiting
+  for a DHCP/PPP lease) is no longer reported as **Connected**, so outage and
+  failover automations are no longer fired by a false "online" state.
+- Wi-Fi and LAN/WAN traffic byte counters now report **unavailable** instead
+  of dropping to `0` during a brief stats gap — this stops false counter
+  "resets" from inflating long-term statistics.
+- Uptime, memory, Wi-Fi temperature and traffic sensors now ignore malformed
+  router values (negative, NaN or infinity) instead of publishing them.
+- Reconfiguring with an invalid host or port now shows a form error instead of
+  failing the dialog.
+- Opening the options dialog while the integration is offline or its
+  credentials were rejected now still lets you manage tracked clients.
+- Setting up an entry with missing or corrupt connection data now retries
+  cleanly instead of failing with an unexpected error.
+- A router or mesh-node firmware update no longer stops early when the router
+  returns an unexpected version payload.
+- Routers reached over an IPv6 address now build valid device links and
+  firmware-update URLs.
+- When two router connection policies share the same name, the client
+  **Connection Policy** selector now lists them distinctly so the right one is
+  applied.
+
+### 🔧 Changed
+
+- Connected / Router / Disconnected client counts, the per-node mesh client
+  count, and WireGuard RX/TX traffic now use the correct statistics type.
+  **Long-term statistics for these specific sensors restart once after this
+  update**; their current values and history graphs are unaffected.
+- A mesh-node firmware update now polls the router more gently while the node
+  reboots.
+
+### 🔒 Privacy
+
+- Client hostnames are now redacted from the downloadable diagnostics file.
+
 ## 1.7.49
 
 Maintenance release focused on public HACS release quality and safer failure boundaries.

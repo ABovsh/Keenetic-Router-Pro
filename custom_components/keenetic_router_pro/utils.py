@@ -21,6 +21,22 @@ def _url_host(value: str) -> str:
     return (parsed.netloc or parsed.path).split("/", 1)[0]
 
 
+def bracket_host(host: Any) -> str:
+    """Return a URL-authority-safe host, wrapping bare IPv6 literals in brackets.
+
+    ``http://::1:100`` is not a valid authority; ``http://[::1]:100`` is. A
+    bare IPv6 literal is recognised by containing a colon while not already
+    being bracketed. Hostnames and IPv4 literals never contain a colon, so
+    they pass through unchanged.
+    """
+    text = str(host or "").strip()
+    if not text:
+        return text
+    if ":" in text and not text.startswith("["):
+        return f"[{text}]"
+    return text
+
+
 def coerce_seconds(value: Any, default: int | None = 0) -> int | None:
     """Convert a Keenetic duration value to whole seconds."""
     if value in UNKNOWN_SECONDS_VALUES:
@@ -33,6 +49,10 @@ def coerce_seconds(value: Any, default: int | None = 0) -> int | None:
     # ``int(float("inf"))`` raises OverflowError, and NaN/inf is never a
     # meaningful uptime. Treat both as missing so HA sees a clean default.
     if not math.isfinite(as_float):
+        return default
+    # Negative durations are physically impossible; a firmware glitch must
+    # not publish a negative uptime to a DURATION / TOTAL_INCREASING sensor.
+    if as_float < 0:
         return default
     try:
         return int(as_float)
@@ -62,6 +82,38 @@ def coerce_float(value: Any, default: float | None = None) -> float | None:
     if not math.isfinite(result):
         return default
     return result
+
+
+def coerce_byte_count(value: Any) -> int | None:
+    """Return a non-negative integer byte counter, or None when unusable.
+
+    Byte counters feed ``TOTAL_INCREASING`` / ``DATA_SIZE`` sensors, so a
+    missing, non-numeric, non-finite (NaN/inf), or negative firmware value
+    must become ``None`` (sensor unavailable) rather than ``0`` — returning
+    ``0`` for a transiently-absent counter would look like a counter reset
+    and double-count the value back up in HA long-term statistics.
+    """
+    if value in (None, ""):
+        return None
+    try:
+        as_float = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(as_float) or as_float < 0:
+        return None
+    return int(as_float)
+
+
+def bytes_to_gib(value: Any) -> float | None:
+    """Convert a byte counter to GiB (÷1024³), or None when unusable."""
+    count = coerce_byte_count(value)
+    return None if count is None else round(count / (1024 ** 3), 2)
+
+
+def bytes_to_mib(value: Any) -> float | None:
+    """Convert a byte counter to MiB (÷1024²), or None when unusable."""
+    count = coerce_byte_count(value)
+    return None if count is None else round(count / (1024 ** 2), 2)
 
 
 def coerce_bool(value: Any) -> bool:
@@ -200,6 +252,10 @@ def parse_memory_fraction(value: Any) -> float | None:
         total = float(part_total)
     except (ValueError, TypeError):
         return None
+    # Reject NaN/inf before dividing — otherwise a malformed "nan/100" would
+    # clamp to a healthy-looking 0/100% instead of reporting unavailable.
+    if not (math.isfinite(used) and math.isfinite(total)):
+        return None
     if total <= 0:
         return None
     pct = used * 100.0 / total
@@ -237,7 +293,7 @@ def get_main_device_info(
         clean_domain = _url_host(ndns_domain)
         configuration_url = urlunsplit((scheme, clean_domain, "", "", ""))
     elif host:
-        configuration_url = urlunsplit((scheme, host, "", "", ""))
+        configuration_url = urlunsplit((scheme, bracket_host(host), "", "", ""))
     else:
         configuration_url = None
 
@@ -270,7 +326,9 @@ def get_mesh_device_info(
             configuration_url = f"{scheme}://{fqdn}"
         else:
             scheme = "https" if ssl else "http"
-            configuration_url = f"{scheme}://{node_ip}" if node_ip else None
+            configuration_url = (
+                f"{scheme}://{bracket_host(node_ip)}" if node_ip else None
+            )
 
         return {
             "identifiers": {(DOMAIN, f"{entry_id}_mesh_{sanitize_mesh_id(node_cid)}")},
@@ -406,6 +464,8 @@ def get_client_device_info(
         "model": model,
         "via_device": (DOMAIN, entry_id),
         "configuration_url": (
-            urlunsplit(("http", ip_address, "", "", "")) if ip_address else None
+            urlunsplit(("http", bracket_host(ip_address), "", "", ""))
+            if ip_address
+            else None
         ),
     }

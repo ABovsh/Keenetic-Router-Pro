@@ -4,13 +4,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfInformation, UnitOfTime, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
 from ..entity import ControllerEntity
-from ..utils import coerce_seconds
+from ..utils import bytes_to_mib, coerce_seconds
 
 
 class _BaseWgSensor(ControllerEntity, SensorEntity):
@@ -75,6 +79,12 @@ class KeeneticWgUptimeSensor(_BaseWgSensor):
 class KeeneticWgRxSensor(_BaseWgSensor):
     """WireGuard RX (received traffic) sensor."""
     _attr_has_entity_name = True
+    # RX bytes is a cumulative counter that resets when the tunnel restarts —
+    # TOTAL_INCREASING (not the base MEASUREMENT) is the correct contract so
+    # HA long-term statistics chart reset-aware deltas rather than the raw
+    # absolute counter.
+    _attr_device_class = SensorDeviceClass.DATA_SIZE
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     @property
     def unique_id(self) -> str:
@@ -91,20 +101,18 @@ class KeeneticWgRxSensor(_BaseWgSensor):
     @property
     def native_value(self) -> float | None:
         for key in ("rxbytes", "rx", "received"):
-            value = self._wg.get(key)
-            if value in (None, ""):
-                continue
-            try:
-                bytes_val = float(value)
-                return round(bytes_val / (1024 * 1024), 2)
-            except (TypeError, ValueError):
-                continue
+            mib = bytes_to_mib(self._wg.get(key))
+            if mib is not None:
+                return mib
         return None
 
 
 class KeeneticWgTxSensor(_BaseWgSensor):
     """WireGuard TX (sent traffic) sensor."""
     _attr_has_entity_name = True
+    # See KeeneticWgRxSensor: cumulative counter → TOTAL_INCREASING.
+    _attr_device_class = SensorDeviceClass.DATA_SIZE
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     @property
     def unique_id(self) -> str:
@@ -121,12 +129,7 @@ class KeeneticWgTxSensor(_BaseWgSensor):
     @property
     def native_value(self) -> float | None:
         for key in ("txbytes", "tx", "sent"):
-            value = self._wg.get(key)
-            if value in (None, ""):
-                continue
-            try:
-                bytes_val = float(value)
-                return round(bytes_val / (1024 * 1024), 2)
-            except (TypeError, ValueError):
-                continue
+            mib = bytes_to_mib(self._wg.get(key))
+            if mib is not None:
+                return mib
         return None

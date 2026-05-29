@@ -365,17 +365,17 @@ class KeeneticControllerUpdateSensor(ControllerEntity, BinarySensorEntity):
         
         current = system.get("title") or system.get("release")
         available = system.get("fw-available") or system.get("release-available")
-        
+
         if not available or not current:
             return False
-        
+
         if available == current:
             return False
-        
+
         channel = system.get("fw-update-sandbox") or system.get("sandbox", "stable")
         if channel != "stable":
             return False
-        
+
         return True
 
     @property

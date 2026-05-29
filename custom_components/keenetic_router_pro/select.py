@@ -81,9 +81,17 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
         self._id_to_display["__deny__"] = DENY_POLICY_OPTION
         self._display_to_id[DENY_POLICY_OPTION] = "__deny__"
 
+        used_labels: set[str] = {DEFAULT_POLICY_OPTION, DENY_POLICY_OPTION}
         for policy_id, description in policies.items():
-            self._id_to_display[policy_id] = description
-            self._display_to_id[description] = policy_id
+            label = str(description or policy_id)
+            # Disambiguate policies that share a description so each dropdown
+            # label maps to exactly one policy id (no duplicate entries, and
+            # selecting a label can't silently apply the wrong policy).
+            if label in used_labels:
+                label = f"{label} ({policy_id})"
+            used_labels.add(label)
+            self._id_to_display[policy_id] = label
+            self._display_to_id[label] = policy_id
 
     @property
     def unique_id(self) -> str:
@@ -98,7 +106,9 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
     @property
     def options(self) -> list[str]:
         """Return list of available options."""
-        policy_names = sorted(self._policies.values())
+        policy_names = sorted(
+            self._id_to_display[policy_id] for policy_id in self._policies
+        )
         return [DEFAULT_POLICY_OPTION] + policy_names + [DENY_POLICY_OPTION]
 
     @property

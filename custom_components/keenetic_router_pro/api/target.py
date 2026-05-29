@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
+from ..utils import bracket_host
 from .errors import KeeneticApiError
 
 _PORT_RANGE_ERR = "Port must be between 1 and 65535"
@@ -22,7 +23,7 @@ class KeeneticConnectionTarget:
     def base_url(self) -> str:
         """Return the normalized base URL for API requests."""
         scheme = "https" if self.ssl else "http"
-        return f"{scheme}://{self.host}:{self.port}"
+        return f"{scheme}://{bracket_host(self.host)}:{self.port}"
 
 
 def normalize_connection_target(host: str, port: int, ssl: bool) -> KeeneticConnectionTarget:

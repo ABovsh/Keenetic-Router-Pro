@@ -641,22 +641,28 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         entry_data = dict(entry.data)
 
         if user_input is not None:
-            new_data = _normalize_connection_data(
-                {
-                    **entry_data,
-                    CONF_CONNECTION_MODE: self._selected_connection_mode,
-                    **user_input,
-                }
-            )
-            errors = await self._async_validate_and_update(
-                entry, new_data, "reconfigure"
-            ) or {}
-            if not errors:
-                return self.async_update_reload_and_abort(
-                    entry,
-                    data=new_data,
-                    reason="reconfigure_successful",
+            try:
+                new_data = _normalize_connection_data(
+                    {
+                        **entry_data,
+                        CONF_CONNECTION_MODE: self._selected_connection_mode,
+                        **user_input,
+                    }
                 )
+            except KeeneticApiError:
+                # Invalid host/scheme/port/KeenDNS combination — surface as a
+                # form error instead of raising out of the flow.
+                errors["base"] = "cannot_connect"
+            else:
+                errors = await self._async_validate_and_update(
+                    entry, new_data, "reconfigure"
+                ) or {}
+                if not errors:
+                    return self.async_update_reload_and_abort(
+                        entry,
+                        data=new_data,
+                        reason="reconfigure_successful",
+                    )
 
         defaults = _connection_defaults(
             {
@@ -712,14 +718,19 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
                 _tracked_client_lookup(self._available_clients, current_tracked),
             )
             
-            # Update configuration
+            # Update configuration only when the selection actually changed —
+            # an unchanged save should not trigger a reload of the integration.
             new_data = dict(self._config_entry.data)
-            new_data[CONF_TRACKED_CLIENTS] = tracked_clients
-            self.hass.config_entries.async_update_entry(
-                self._config_entry,
-                data=new_data,
-            )
-            _LOGGER.debug("Updated configuration with %d tracked clients", len(tracked_clients))
+            if new_data.get(CONF_TRACKED_CLIENTS) != tracked_clients:
+                new_data[CONF_TRACKED_CLIENTS] = tracked_clients
+                self.hass.config_entries.async_update_entry(
+                    self._config_entry,
+                    data=new_data,
+                )
+                _LOGGER.debug(
+                    "Updated configuration with %d tracked clients",
+                    len(tracked_clients),
+                )
             return self.async_create_entry(
                 title="",
                 data={},
@@ -736,22 +747,32 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
         
         # Try to get current clients from router
         client = self._runtime_client()
+        available_clients: list[dict[str, Any]] = []
         if client is None:
             data = self._config_entry.data
             session = async_get_clientsession(self.hass)
-            client = KeeneticClient(
-                host=data[CONF_HOST],
-                username=data[CONF_USERNAME],
-                password=data[CONF_PASSWORD],
-                port=data.get(CONF_PORT, DEFAULT_PORT),
-                ssl=data.get(CONF_SSL, DEFAULT_SSL),
-                use_challenge_auth=data.get(CONF_USE_CHALLENGE_AUTH, False),
+            try:
+                client = KeeneticClient(
+                    host=data[CONF_HOST],
+                    username=data[CONF_USERNAME],
+                    password=data[CONF_PASSWORD],
+                    port=data.get(CONF_PORT, DEFAULT_PORT),
+                    ssl=data.get(CONF_SSL, DEFAULT_SSL),
+                    use_challenge_auth=data.get(CONF_USE_CHALLENGE_AUTH, False),
+                )
+                await client.async_start(session)
+            except (KeeneticAuthError, KeeneticApiError) as err:
+                # Integration not loaded and the router is offline or rejecting
+                # credentials — keep the options form working from the preserved
+                # tracked-client list instead of raising out of the flow.
+                _LOGGER.debug("Options flow could not reach router: %s", err)
+                client = None
+
+        if client is not None:
+            available_clients = await _async_optional_clients(
+                client,
+                log_context="options",
             )
-            await client.async_start(session)
-        available_clients = await _async_optional_clients(
-            client,
-            log_context="options",
-        )
         _LOGGER.debug(
             "Found %d clients from router",
             len(available_clients) if available_clients else 0,

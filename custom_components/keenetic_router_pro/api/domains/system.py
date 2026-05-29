@@ -12,7 +12,7 @@ import aiohttp
 from homeassistant.exceptions import HomeAssistantError
 
 from ...const import DOMAIN, RCI_SHOW_VERSION
-from ...utils import coerce_bool
+from ...utils import bracket_host, coerce_bool
 from ..constants import RCI_ROOT
 from ..errors import KeeneticApiError
 from ..helpers import (
@@ -102,7 +102,9 @@ class SystemMixin:
             version_data = await self._rci_get(RCI_SHOW_VERSION)
             ndw_components = ""
             if isinstance(version_data, dict):
-                ndw_components = version_data.get("ndw", {}).get("components", "")
+                ndw = version_data.get("ndw")
+                if isinstance(ndw, dict):
+                    ndw_components = ndw.get("components", "")
 
             if ndw_components:
                 current_components = [
@@ -217,7 +219,7 @@ class SystemMixin:
             ports_to_try.append(80)
 
         for port in ports_to_try:
-            base = f"{scheme}://{node_ip}:{port}"
+            base = f"{scheme}://{bracket_host(node_ip)}:{port}"
 
             # Always do challenge auth with mesh nodes
             node_headers = await self._authenticate_to_node(node_ip, port)
@@ -236,7 +238,11 @@ class SystemMixin:
                 async with resp:
                     if resp.status == 200:
                         version_data = await resp.json()
-                        ndw_components = version_data.get("ndw", {}).get("components", "")
+                        ndw_components = ""
+                        if isinstance(version_data, dict):
+                            ndw = version_data.get("ndw")
+                            if isinstance(ndw, dict):
+                                ndw_components = ndw.get("components", "")
                     elif resp.status == 401:
                         _LOGGER.debug("Auth rejected on node %s port %s", label, port)
                         self._node_auth_headers.pop((node_ip, port), None)
@@ -396,7 +402,7 @@ class SystemMixin:
             return dict(cached)
 
         scheme = "https" if self._ssl else "http"
-        auth_url = f"{scheme}://{node_ip}:{port}/auth"
+        auth_url = f"{scheme}://{bracket_host(node_ip)}:{port}/auth"
 
         try:
             # Step 1: GET /auth to get challenge

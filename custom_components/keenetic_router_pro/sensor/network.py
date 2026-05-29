@@ -16,7 +16,7 @@ from homeassistant.const import UnitOfTime, UnitOfInformation, UnitOfDataRate, E
 from ..const import LINK_STATE_DOWN, LINK_STATE_UP, WAN_STATUS_CONNECTED, WAN_STATUS_LINK_UP
 from ..coordinator import KeeneticCoordinator
 from ..entity import ControllerEntity, WanEntity
-from ..utils import coerce_seconds
+from ..utils import coerce_byte_count, coerce_seconds
 
 _ICON_ETHERNET = "mdi:ethernet"
 _ICON_IP_NETWORK = "mdi:ip-network"
@@ -452,13 +452,9 @@ class _WanBytesBase(_WanSensorBase):
         wan = self._wan
         if not wan:
             return None
-        v = wan.get(self._field)
-        if v is None:
-            return None
-        try:
-            return int(v)
-        except (TypeError, ValueError):
-            return None
+        # Reject negative/non-finite counters so a malformed router stat does
+        # not poison the TOTAL_INCREASING long-term statistics.
+        return coerce_byte_count(wan.get(self._field))
 
 
 class KeeneticWanRxBytesSensor(_WanBytesBase):

@@ -47,6 +47,7 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
     # _attr_should_poll is already False on CoordinatorEntity (parent of
     # ClientEntity), so re-declaring it here adds nothing.
     _attr_entity_category = None  # Show as standalone tracker, not under Diagnostic
+    _last_presence: tuple[bool, bool, str | None, str | None] | None = None
 
     def __init__(
         self,
@@ -69,9 +70,18 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        # Trackers intentionally bypass ClientEntity's fingerprint dedup so
-        # Away transitions always reach HA. CoordinatorEntity registers a
-        # single listener for us in async_added_to_hass; do NOT add a second.
+        # Trackers bypass ClientEntity's full fingerprint dedup so Away/Home
+        # transitions always reach HA, but we still suppress writes when only
+        # volatile diagnostics (rssi / last-seen / uptime) tick and the
+        # presence-relevant facts are unchanged — those values are surfaced by
+        # their own dedicated sensors. Availability and connected-state are in
+        # the key, so every Away/Home or unavailable transition still writes.
+        # CoordinatorEntity registers a single listener for us in
+        # async_added_to_hass; do NOT add a second.
+        presence = (self.available, self.is_connected, self.ip_address, self.hostname)
+        if presence == self._last_presence:
+            return
+        self._last_presence = presence
         self.async_write_ha_state()
 
     @property

@@ -14,6 +14,7 @@ from homeassistant.const import EntityCategory, UnitOfInformation
 
 from ..coordinator import KeeneticCoordinator
 from ..entity import ControllerEntity
+from ..utils import bytes_to_gib
 
 _ICON_DOWNLOAD = "mdi:download-network"
 _ICON_UPLOAD = "mdi:upload-network"
@@ -60,13 +61,10 @@ class _TrafficSensorBase(ControllerEntity, SensorEntity):
 
     @property
     def native_value(self) -> float | None:
-        value = self._stats.get(self._field, 0)
-        if value:
-            try:
-                return round(float(value) / (1024 ** 3), 2)
-            except (TypeError, ValueError):
-                return None
-        return 0.0
+        # Return None (not 0.0) when the stat row is absent so a transient
+        # interface-stat gap does not look like a TOTAL_INCREASING reset and
+        # double-count the counter back up in long-term statistics.
+        return bytes_to_gib(self._stats.get(self._field))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:

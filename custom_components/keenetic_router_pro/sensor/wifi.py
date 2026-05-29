@@ -8,6 +8,7 @@ from homeassistant.const import UnitOfInformation, UnitOfTemperature, EntityCate
 
 from ..coordinator import KeeneticCoordinator
 from ..entity import ControllerEntity
+from ..utils import bytes_to_gib, coerce_float
 
 
 class KeeneticWifi24TemperatureSensor(ControllerEntity, SensorEntity):
@@ -33,12 +34,9 @@ class KeeneticWifi24TemperatureSensor(ControllerEntity, SensorEntity):
         interfaces = self.coordinator.data.get("interfaces", {}) or {}
         for iface_id, iface_data in interfaces.items():
             if iface_id.startswith(self._interface_prefix) and isinstance(iface_data, dict):
-                temp = iface_data.get("temperature")
+                temp = coerce_float(iface_data.get("temperature"))
                 if temp is not None:
-                    try:
-                        return float(temp)
-                    except (TypeError, ValueError):
-                        continue
+                    return temp
         return None
 
     @property
@@ -69,12 +67,9 @@ class KeeneticWifi5TemperatureSensor(ControllerEntity, SensorEntity):
         interfaces = self.coordinator.data.get("interfaces", {}) or {}
         for iface_id, iface_data in interfaces.items():
             if iface_id.startswith(self._interface_prefix) and isinstance(iface_data, dict):
-                temp = iface_data.get("temperature")
+                temp = coerce_float(iface_data.get("temperature"))
                 if temp is not None:
-                    try:
-                        return float(temp)
-                    except (TypeError, ValueError):
-                        continue
+                    return temp
         return None
 
     @property
@@ -108,10 +103,7 @@ class KeeneticWifi24RxSensor(ControllerEntity, SensorEntity):
     def native_value(self) -> float | None:
         stats = self.coordinator.data.get("interface_stats", {})
         iface_stats = stats.get(self._iface_name, {})
-        rxbytes = iface_stats.get("rxbytes", 0)
-        if rxbytes:
-            return round(float(rxbytes) / (1024 ** 3), 2)
-        return 0.0
+        return bytes_to_gib(iface_stats.get("rxbytes"))
 
 
 class KeeneticWifi24TxSensor(ControllerEntity, SensorEntity):
@@ -140,10 +132,7 @@ class KeeneticWifi24TxSensor(ControllerEntity, SensorEntity):
     def native_value(self) -> float | None:
         stats = self.coordinator.data.get("interface_stats", {})
         iface_stats = stats.get(self._iface_name, {})
-        txbytes = iface_stats.get("txbytes", 0)
-        if txbytes:
-            return round(float(txbytes) / (1024 ** 3), 2)
-        return 0.0
+        return bytes_to_gib(iface_stats.get("txbytes"))
 
 
 class KeeneticWifi5RxSensor(ControllerEntity, SensorEntity):
@@ -172,10 +161,7 @@ class KeeneticWifi5RxSensor(ControllerEntity, SensorEntity):
     def native_value(self) -> float | None:
         stats = self.coordinator.data.get("interface_stats", {})
         iface_stats = stats.get(self._iface_name, {})
-        rxbytes = iface_stats.get("rxbytes", 0)
-        if rxbytes:
-            return round(float(rxbytes) / (1024 ** 3), 2)
-        return 0.0
+        return bytes_to_gib(iface_stats.get("rxbytes"))
 
 
 class KeeneticWifi5TxSensor(ControllerEntity, SensorEntity):
@@ -204,7 +190,4 @@ class KeeneticWifi5TxSensor(ControllerEntity, SensorEntity):
     def native_value(self) -> float | None:
         stats = self.coordinator.data.get("interface_stats", {})
         iface_stats = stats.get(self._iface_name, {})
-        txbytes = iface_stats.get("txbytes", 0)
-        if txbytes:
-            return round(float(txbytes) / (1024 ** 3), 2)
-        return 0.0
+        return bytes_to_gib(iface_stats.get("txbytes"))

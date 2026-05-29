@@ -398,9 +398,11 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
             )
             await asyncio.sleep(10)
 
-            # Wait until node reports updated firmware or timeout
-            for _ in range(90):  # ~3 min
-                await asyncio.sleep(2)
+            # Wait until node reports updated firmware or timeout. Poll every
+            # ~10s (not 2s) so a node update doesn't hammer the controller
+            # with refreshes for the whole reboot window.
+            for _ in range(18):  # ~3 min
+                await asyncio.sleep(10)
                 try:
                     await self.coordinator.async_request_refresh()
                     updated_node = self._node

@@ -17,7 +17,7 @@ class KeeneticConnectedClientsSensor(ControllerEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "connected_clients"
     _attr_icon = "mdi:devices"
-    _attr_state_class = SensorStateClass.TOTAL
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
@@ -46,7 +46,7 @@ class KeeneticRouterClientsSensor(ControllerEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "router_clients"
     _attr_icon = "mdi:devices"
-    _attr_state_class = SensorStateClass.TOTAL
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
@@ -82,7 +82,7 @@ class KeeneticDisconnectedClientsSensor(ControllerEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "disconnected_clients"
     _attr_icon = "mdi:lan-disconnect"
-    _attr_state_class = SensorStateClass.TOTAL
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
@@ -103,7 +103,7 @@ class KeeneticExtenderCountSensor(ControllerEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "extender_count"
     _attr_icon = "mdi:access-point-network"
-    _attr_state_class = SensorStateClass.TOTAL
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
