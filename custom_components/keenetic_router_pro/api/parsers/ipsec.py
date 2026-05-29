@@ -48,12 +48,6 @@ _IPSEC_PHASE2_COUNTERS_RE = re.compile(
     r"(?:\s+\((?P<pkts_o>\d+)\s+pkts(?:,\s+(?P<last_o>\d+)s ago)?\))?"
     r"(?:,\s+rekeying in (?P<rekey>[^,\n]+))?\s*$"
 )
-_IPSEC_CONNECTION_LINE_RE = re.compile(
-    r"^\s*(?P<name>\S+?):\s+\S+\.\.\.\S+\s+IKEv?\d?"
-)
-_IPSEC_CONNECTION_CHILD_RE = re.compile(
-    r"^\s*(?P<name>\S+):\s+child:\s+(?P<rest>[^\n]*)$"
-)
 _IPSEC_SA_HEADER_RE = re.compile(
     r"^Security Associations\s+\((?P<up>\d+)\s+up,\s+(?P<connecting>\d+)\s+connecting\)"
 )
@@ -102,6 +96,27 @@ def _connection_child_mode(text: str) -> str | None:
     if mode in {"TUNNEL", "TRANSPORT"}:
         return mode
     return None
+
+
+def _connection_name_from_line(line: str) -> str | None:
+    """Extract a connection name from a strongSwan connection summary line."""
+    stripped = line.strip()
+    name, separator, tail = stripped.partition(":")
+    if not separator or not name or "..." not in tail or "IKE" not in tail:
+        return None
+    return name
+
+
+def _connection_child_fields(line: str) -> tuple[str, str] | None:
+    """Extract connection name and child tail without regex backtracking."""
+    stripped = line.strip()
+    name, separator, tail = stripped.partition(":")
+    if not separator or not name:
+        return None
+    child_tail = tail.lstrip()
+    if not child_tail.startswith("child:"):
+        return None
+    return name, child_tail.removeprefix("child:").strip()
 
 
 def parse_ipsec_vici_diagnostics(
@@ -212,16 +227,18 @@ def parse_ipsec_statusall(text: str) -> dict[str, dict[str, Any]]:
             continue
 
         if in_connections_section:
-            match = _IPSEC_CONNECTION_LINE_RE.match(line)
-            if match:
-                _t(match.group("name"))
-                continue
-            match = _IPSEC_CONNECTION_CHILD_RE.match(line)
-            if match:
-                mode = _connection_child_mode(match.group("rest"))
+            child_fields = _connection_child_fields(line)
+            if child_fields is not None:
+                name, rest = child_fields
+                mode = _connection_child_mode(rest)
                 if mode:
-                    tunnel = _t(match.group("name"))
+                    tunnel = _t(name)
                     tunnel["mode"] = mode.lower()
+                continue
+
+            name = _connection_name_from_line(line)
+            if name is not None:
+                _t(name)
                 continue
             continue
 
@@ -322,7 +339,6 @@ def parse_ipsec_statusall(text: str) -> dict[str, dict[str, Any]]:
                 sa["out_time"] = _to_int(match.group("last_o"))
             if match.group("rekey"):
                 sa["rekey_in"] = match.group("rekey").strip()
-            continue
 
     for tunnel in tunnels.values():
         rx_bytes = tx_bytes = rx_packets = tx_packets = 0
