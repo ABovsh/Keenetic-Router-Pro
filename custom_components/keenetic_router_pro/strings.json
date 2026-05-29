@@ -17,7 +17,7 @@
           "username": "Username",
           "password": "Password",
           "ssl": "Use SSL",
-          "use_challenge_auth": "Use Challenge Auth (NDW2, required for newer models like Hero)"
+          "use_challenge_auth": "Use challenge authentication (NDW2, required for newer models like Hero)"
         }
       },
       "select_clients": {
@@ -33,7 +33,7 @@
         "data": {
           "username": "Username",
           "password": "Password",
-          "use_challenge_auth": "Use Challenge Auth (NDW2)"
+          "use_challenge_auth": "Use challenge authentication (NDW2)"
         }
       },
       "reconfigure": {
@@ -52,7 +52,7 @@
           "username": "Username",
           "password": "Password",
           "ssl": "Use SSL",
-          "use_challenge_auth": "Use Challenge Auth (NDW2)"
+          "use_challenge_auth": "Use challenge authentication (NDW2)"
         }
       }
     },

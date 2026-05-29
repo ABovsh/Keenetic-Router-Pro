@@ -5,6 +5,8 @@
 
 Home Assistant custom integration for Keenetic routers. It focuses on local polling, router diagnostics, mesh monitoring, presence tracking, WAN status, traffic counters, firmware updates, and selected client controls.
 
+The integration is local-polling first and has no cloud dependency for direct LAN use. KeenDNS protected mode is optional and only used when you explicitly choose that connection mode.
+
 ## Why this fork
 
 A maintained, hardened fork of the original Keenetic Router Pro integration. It keeps the domain name (`keenetic_router_pro`) so your existing dashboards, automations, and entity history carry over without changes.
@@ -106,9 +108,9 @@ Required fields:
 | Username | Router admin username | `admin` |
 | Password | Router admin password | `********` |
 | SSL | Use HTTPS for router API calls, direct mode only | `off` |
-| Use Challenge Auth | Enable NDW2 challenge auth for newer models, direct mode only | `off` |
+| Use challenge authentication | Enable NDW2 challenge authentication for newer models, direct mode only | `off` |
 
-Use **Challenge Auth** for models/firmware that reject Basic Auth, such as newer Keenetic Hero devices. Older devices usually keep it disabled.
+Use **challenge authentication** for models/firmware that reject Basic Auth, such as newer Keenetic Hero devices. Older devices usually keep it disabled.
 
 ### KeenDNS protected web app
 
@@ -183,7 +185,10 @@ top of that:
 - The HA *Download diagnostics* button on the config entry produces a
   JSON dump that runs through `async_redact_data`, stripping
   credentials, MACs, SSIDs, BSSIDs, PSKs, session cookies and
-  authorization headers. Safe to attach to bug reports.
+  authorization headers. Diagnostics are redacted before export, but avoid
+  sharing router diagnostics publicly unless you have reviewed them.
+  Redaction reduces accidental exposure; it cannot make every router-specific
+  payload safe to publish.
 - Nothing is written into `custom_components/keenetic_router_pro/` at
   runtime — no credential cache, no state file.
 
@@ -210,7 +215,7 @@ Common entity groups:
 - Update entities: controller and mesh firmware updates.
 - Device trackers: selected client presence via Keenetic link/active state.
 
-Exact entity availability depends on router model, firmware version, enabled Keenetic components, and selected tracked clients.
+Exact entity availability depends on router model, firmware version, enabled Keenetic components, and selected tracked clients. Optional firmware features may appear unavailable or use cached data on routers or KeeneticOS builds that do not expose the corresponding endpoint.
 
 ## Troubleshooting
 
@@ -218,7 +223,7 @@ If setup fails:
 
 1. Verify host, port, username, and password.
 2. Confirm the router web management API is enabled.
-3. Try enabling **Use Challenge Auth** for newer Keenetic models.
+3. Try enabling **challenge authentication** for newer Keenetic models.
 4. Check that Home Assistant can reach the router over the configured port.
 
 If HACS download fails:
