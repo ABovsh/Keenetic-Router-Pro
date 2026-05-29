@@ -8,17 +8,25 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
-## 1.7.47
+## 1.7.49
 
-### 🔧 Maintenance
+Maintenance release focused on public HACS release quality and safer failure boundaries.
 
-- Refactored internal coordinator, platform setup, and parser structure to make the integration easier to maintain and safer to extend. No entity IDs, configuration data, or user-facing behavior changed.
+- Tightened config-flow and update fallback handling so credential failures, required setup failures, and firmware command rejections stay visible while optional firmware endpoints still degrade safely.
+- Added release contract checks for HACS metadata, version consistency, required public docs, and Home Assistant translation wording.
+- Polished setup/reconfigure wording and README guidance for local polling, optional KeenDNS protected mode, diagnostics redaction, plaintext HTTP warnings, and unsupported firmware-feature fallbacks.
 
 ## 1.7.48
 
 ### 🔧 Maintenance
 
 - Reduced runtime router load by making coordinator refresh tiers explicit. Fast ticks now keep critical live data fresh while reusing slower diagnostic and interface-detail snapshots between their scheduled refreshes.
+
+## 1.7.47
+
+### 🔧 Maintenance
+
+- Refactored internal coordinator, platform setup, and parser structure to make the integration easier to maintain and safer to extend. No entity IDs, configuration data, or user-facing behavior changed.
 
 ## 1.7.46
 
