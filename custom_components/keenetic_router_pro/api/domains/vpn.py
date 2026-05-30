@@ -29,7 +29,11 @@ from ..helpers import (
     _to_int,
     _validate_cli_arg,
 )
-from ..parsers.ipsec import parse_ipsec_statusall, parse_ipsec_vici_diagnostics
+from ..parsers.ipsec import (
+    merge_crypto_map_config,
+    parse_ipsec_statusall,
+    parse_ipsec_vici_diagnostics,
+)
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.api.vpn")
 
@@ -264,6 +268,30 @@ class VpnMixin:
         """
         return parse_ipsec_statusall(text)
 
+    async def async_get_crypto_map_config(self) -> Dict[str, Dict[str, Any]]:
+        """Return site-to-site crypto-map *configuration* (the ``enable`` flag).
+
+        Endpoint: ``GET /rci/crypto/map`` — the configuration tree, not the
+        ``show/crypto/map`` status view. It carries each map's administrative
+        ``enable`` boolean and peer without dispatching the Vici ``Stats``
+        query that leaks memory on KeeneticOS 5.x, so it is safe to poll.
+
+        Returns ``{<name>: <config dict>}``; ``{}`` if the IPsec component is
+        absent or the endpoint is unavailable.
+        """
+        try:
+            data = await self._rci_get("crypto/map")
+        except asyncio.CancelledError:
+            raise
+        except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError) as err:
+            _LOGGER.debug("crypto/map config unavailable: %s", err)
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        return {
+            name: cfg for name, cfg in data.items() if isinstance(cfg, dict)
+        }
+
     async def async_get_ipsec_status(self) -> Dict[str, Dict[str, Any]]:
         """Return site-to-site IPsec tunnels via the safe stroke path.
 
@@ -275,23 +303,40 @@ class VpnMixin:
         upstream OOM. Empirically verified: 90+ rapid calls produce
         zero ``IpSec::Vici::Stats: out of memory`` events.
 
+        The runtime status is merged with the ``crypto/map`` config tree so
+        that a tunnel toggled **off** stays visible as a known, available,
+        ``off`` entry instead of disappearing from the status dump (which
+        would make its switch/sensors go *unavailable* and strand recovery
+        automations that guard on the switch reading ``"on"``). Both reads
+        run in parallel.
+
         Output shape matches ``async_get_crypto_maps`` so downstream
         sensors/binary_sensors keep working unchanged.
         """
-        try:
-            data = await self._rci_get("show/ipsec")
-        except asyncio.CancelledError:
-            raise
-        except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError) as err:
-            _LOGGER.debug("show/ipsec unavailable: %s", err)
-            return {}
+        status_data, config = await asyncio.gather(
+            self._rci_get("show/ipsec"),
+            self.async_get_crypto_map_config(),
+            return_exceptions=True,
+        )
 
-        if not isinstance(data, dict):
-            return {}
-        text = data.get("ipsec_statusall")
-        if not isinstance(text, str) or not text:
-            return {}
-        return self._parse_ipsec_statusall(text)
+        if isinstance(status_data, asyncio.CancelledError):
+            raise status_data
+        if isinstance(config, asyncio.CancelledError):
+            raise config
+
+        status: Dict[str, Dict[str, Any]] = {}
+        if isinstance(status_data, dict):
+            text = status_data.get("ipsec_statusall")
+            if isinstance(text, str) and text:
+                status = self._parse_ipsec_statusall(text)
+        elif isinstance(status_data, BaseException):
+            _LOGGER.debug("show/ipsec unavailable: %s", status_data)
+
+        if isinstance(config, BaseException):
+            _LOGGER.debug("crypto/map config unavailable: %s", config)
+            config = {}
+
+        return merge_crypto_map_config(status, config)
 
     async def async_get_crypto_maps(self) -> Dict[str, Dict[str, Any]]:
         """Return site-to-site IPsec tunnels (`crypto map` entries).

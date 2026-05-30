@@ -8,6 +8,22 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.51
+
+Keeps a turned-off site-to-site IPsec tunnel visible and controllable.
+
+### 🐛 Fixed
+
+- A site-to-site IPsec tunnel that is switched **off** (or that has dropped and
+  isn't currently negotiating) is now shown as **off** with its **Enabled**
+  switch and status sensors still **available** — instead of disappearing into
+  an **unavailable** state. Previously a disabled tunnel vanished from the
+  router's live status view, so its switch went unavailable and could not be
+  toggled back on from Home Assistant, and any automation that re-enables the
+  tunnel by checking the switch state was stranded. You can now reliably turn a
+  site-to-site tunnel back on from its switch, and recovery automations can tell
+  "intentionally off" apart from "down".
+
 ## 1.7.50
 
 Reliability and accuracy improvements for sensors, statistics and setup flows.

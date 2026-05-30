@@ -6,8 +6,9 @@ import re
 from typing import Any
 
 from ...const import FIELD_CONNECTED, IPSEC_STATE_ESTABLISHED
+from ...utils import coerce_bool
 from ..constants import _IPSEC_VICI_OOM_RE
-from ..helpers import _clean_addr, _to_int
+from ..helpers import _clean_addr, _clean_str, _to_int
 
 
 # Regexes for the deterministic strongSwan ``ipsec statusall`` text dump
@@ -172,6 +173,36 @@ def parse_ipsec_vici_diagnostics(
     }
 
 
+def _default_tunnel(name: str) -> dict[str, Any]:
+    """Return a normalized crypto-map dict in the fully-down default shape.
+
+    Shared by the ``ipsec statusall`` parser (for connections it sees) and
+    by :func:`merge_crypto_map_config` (for configured-but-disabled tunnels
+    that never appear in the strongSwan status dump).
+    """
+    return {
+        "name": name,
+        "enabled": True,
+        "remote_peer": None,
+        "mode": None,
+        "ipsec_profile_name": name,
+        "state": "UNDEFINED",
+        "ike_state": "UNDEFINED",
+        FIELD_CONNECTED: False,
+        "via": None,
+        "local_endpoint": None,
+        "remote_endpoint": None,
+        "rx_bytes": 0,
+        "tx_bytes": 0,
+        "rx_packets": 0,
+        "tx_packets": 0,
+        "phase1": None,
+        "phase2_sa_list": [],
+        "raw_config": {},
+        "raw_status": {},
+    }
+
+
 def parse_ipsec_statusall(text: str) -> dict[str, dict[str, Any]]:
     """Parse strongSwan ``ipsec statusall`` text into normalized dicts."""
     if not isinstance(text, str) or not text:
@@ -182,27 +213,7 @@ def parse_ipsec_statusall(text: str) -> dict[str, dict[str, Any]]:
     def _t(name: str) -> dict[str, Any]:
         tunnel = tunnels.get(name)
         if tunnel is None:
-            tunnel = {
-                "name": name,
-                "enabled": True,
-                "remote_peer": None,
-                "mode": None,
-                "ipsec_profile_name": name,
-                "state": "UNDEFINED",
-                "ike_state": "UNDEFINED",
-                FIELD_CONNECTED: False,
-                "via": None,
-                "local_endpoint": None,
-                "remote_endpoint": None,
-                "rx_bytes": 0,
-                "tx_bytes": 0,
-                "rx_packets": 0,
-                "tx_packets": 0,
-                "phase1": None,
-                "phase2_sa_list": [],
-                "raw_config": {},
-                "raw_status": {},
-            }
+            tunnel = _default_tunnel(name)
             tunnels[name] = tunnel
         return tunnel
 
@@ -371,3 +382,61 @@ def parse_ipsec_statusall(text: str) -> dict[str, dict[str, Any]]:
             tunnel["state"] = "UNDEFINED"
 
     return tunnels
+
+
+def _crypto_map_config_peer(cfg: dict[str, Any]) -> str | None:
+    """Extract the configured remote peer from a ``crypto/map`` config dict."""
+    set_peer = cfg.get("set-peer")
+    if isinstance(set_peer, dict):
+        peer = _clean_str(set_peer.get("remote-ip") or set_peer.get("peer"))
+    else:
+        peer = _clean_str(set_peer)
+    if not peer or peer.lower() == "any":
+        return None
+    return peer
+
+
+def merge_crypto_map_config(
+    status: dict[str, dict[str, Any]],
+    config: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    """Merge ``crypto/map`` configuration into runtime IPsec status.
+
+    The strongSwan ``ipsec statusall`` dump only lists tunnels that are
+    *administratively enabled*; a tunnel toggled off (``crypto map <name>``
+    ``no enable``) vanishes from it entirely. Keying entity availability off
+    that dump alone makes a disabled tunnel look **unavailable** rather than
+    **off**, which (a) hides the real on/off state from the user and (b)
+    breaks recovery automations that guard on the switch reading ``"on"``.
+
+    The config tree from ``GET /rci/crypto/map`` carries the authoritative
+    ``enable`` flag without touching the OOM-prone Vici stats path. Merging it
+    in guarantees every *configured* crypto map is present in the result —
+    enabled ones carry their live status, disabled ones surface as a clean
+    down/off entry — so switches and sensors stay available and report the
+    truth.
+    """
+    merged: dict[str, dict[str, Any]] = {
+        name: dict(tunnel) for name, tunnel in status.items()
+    }
+    if not isinstance(config, dict):
+        return merged
+
+    for name, cfg in config.items():
+        if not isinstance(name, str) or not isinstance(cfg, dict):
+            continue
+        enabled = coerce_bool(cfg.get("enable"))
+        peer = _crypto_map_config_peer(cfg)
+        if name in merged:
+            merged[name]["enabled"] = enabled
+            if peer and not merged[name].get("remote_peer"):
+                merged[name]["remote_peer"] = peer
+            continue
+        # Configured but absent from the status dump → administratively
+        # disabled (or not yet loaded). Surface it as a known, off tunnel.
+        tunnel = _default_tunnel(name)
+        tunnel["enabled"] = enabled
+        tunnel["remote_peer"] = peer
+        merged[name] = tunnel
+
+    return merged
