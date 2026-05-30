@@ -38,11 +38,6 @@ LINK_STATE_DOWN = "down"
 # string field for substrings.
 UPLINK_ROLE_TOKENS = ("inet", "internet", "wan")
 
-# Substrings checked against interface ``description``/``id`` when the
-# explicit role label is missing — wider than ``UPLINK_ROLE_TOKENS`` on
-# purpose so user-renamed interfaces still classify correctly.
-WAN_NAME_KEYWORDS = ("wan", "internet", "isp", "broadband", "pppoe", "provider")
-
 # RCI endpoint paths used in more than one place.
 RCI_SHOW_VERSION = "show/version"
 RCI_HOTSPOT_HOST_PATHS = ("show/ip/hotspot/host", "ip/hotspot/host")

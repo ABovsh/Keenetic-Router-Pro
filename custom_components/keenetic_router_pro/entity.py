@@ -50,6 +50,19 @@ class _FingerprintedCoordinatorEntity(CoordinatorEntity):
     def _fingerprint_source(self) -> dict[str, Any] | None:
         raise NotImplementedError
 
+    @property
+    def available(self) -> bool:
+        """Become unavailable (not stale) once our source object disappears.
+
+        Every per-instance entity (mesh node, WAN, crypto map, client) goes
+        unavailable when its dict is removed from coordinator data — e.g. the
+        user deletes the tunnel or the client ages out.
+        """
+        return (
+            bool(getattr(super(), "available", True))
+            and self._fingerprint_source is not None
+        )
+
     @callback
     def _handle_coordinator_update(self) -> None:
         fingerprint = _entity_fingerprint(
@@ -189,11 +202,6 @@ class MeshEntity(_FingerprintedCoordinatorEntity):
         return find_mesh_node(self.coordinator.data or {}, self._node_cid)
 
     @property
-    def available(self) -> bool:
-        """Return whether this mesh node still exists in coordinator data."""
-        return bool(getattr(super(), "available", True)) and self._node is not None
-    
-    @property
     def device_info(self) -> DeviceInfo:
         node = self._node
         node_ip = node.get("ip") if node else None
@@ -253,11 +261,6 @@ class WanEntity(_FingerprintedCoordinatorEntity):
         return _lookup_by_id(
             self.coordinator.data or {}, "wan_by_id", "wan_interfaces", self._wan_id
         )
-
-    @property
-    def available(self) -> bool:
-        """Return whether this WAN still exists in coordinator data."""
-        return bool(getattr(super(), "available", True)) and self._wan is not None
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -368,14 +371,6 @@ class CryptoMapEntity(_FingerprintedCoordinatorEntity):
         return entry if isinstance(entry, dict) else None
 
     @property
-    def available(self) -> bool:
-        # Mirror CoordinatorEntity.available but additionally require
-        # that our tunnel is still present in the router config. If
-        # the user deletes the crypto map, our entities become
-        # unavailable rather than stale.
-        return bool(getattr(super(), "available", True)) and self._cmap is not None
-
-    @property
     def device_info(self) -> DeviceInfo:
         cmap = self._cmap or {}
         return get_crypto_map_device_info(
@@ -437,10 +432,6 @@ class ClientEntity(_FingerprintedCoordinatorEntity):
             if isinstance(client, dict):
                 return client
         return find_client_by_mac(data.get("clients"), self._mac)
-
-    @property
-    def available(self) -> bool:
-        return bool(getattr(super(), "available", True)) and self._client is not None
 
     @property
     def device_info(self) -> DeviceInfo:

@@ -159,18 +159,9 @@ class KeeneticFirmwareVersionSensor(ControllerEntity, SensorEntity):
 
     @property
     def native_value(self) -> str | None:
-        system = self.coordinator.data.get("system", {}) or {}
-        # Keenetic API returns firmware info under "title" and "release" keys
-        # from /rci/show/version endpoint (consistent with entity._firmware_version)
-        if system.get("title"):
-            return str(system["title"])
-        if system.get("release"):
-            return str(system["release"])
-        # Fallback: check ndw4 nested version
-        ndw4 = system.get("ndw4", {})
-        if isinstance(ndw4, dict) and ndw4.get("version"):
-            return str(ndw4["version"])
-        return None
+        # Single source of truth for firmware precedence (title → release →
+        # ndw4.version) lives on ControllerEntity, which this sensor extends.
+        return self._firmware_version
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:

@@ -321,11 +321,10 @@ def get_mesh_device_info(
         node_name = node.get("name") or node.get("mac") or node_cid
         node_ip = node.get("ip") or host
 
+        scheme = "https" if ssl else "http"
         if fqdn and fqdn.strip():
-            scheme = "https" if ssl else "http"
             configuration_url = f"{scheme}://{fqdn}"
         else:
-            scheme = "https" if ssl else "http"
             configuration_url = (
                 f"{scheme}://{bracket_host(node_ip)}" if node_ip else None
             )

@@ -24,7 +24,7 @@ from .coordinator_parts.fetching import (
     critical_failures_to_exception,
     ok_or_default,
 )
-from .coordinator_parts.oom import advance_oom_state, parse_keenetic_log_ts
+from .coordinator_parts.oom import advance_oom_state
 from .coordinator_parts.payloads import (
     dict_or_empty,
     list_or_empty,
@@ -35,7 +35,6 @@ from .utils import coerce_int, first_present, normalize_mac
 
 
 _OOM_STORE_VERSION = 1
-_parse_keenetic_log_ts = parse_keenetic_log_ts
 _advance_oom_state = advance_oom_state
 _dict_or_empty = dict_or_empty
 _list_or_empty = list_or_empty

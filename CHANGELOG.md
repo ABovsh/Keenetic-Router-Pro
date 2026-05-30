@@ -8,6 +8,15 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.52
+
+Internal code cleanup. No user-visible behavior changed.
+
+### 🧹 Maintenance
+
+- Consolidated shared entity logic and removed dead code to keep the
+  integration easier to maintain. No change to entities, states, or behavior.
+
 ## 1.7.51
 
 Keeps a turned-off site-to-site IPsec tunnel visible and controllable.
