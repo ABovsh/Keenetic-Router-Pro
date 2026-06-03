@@ -5,5 +5,17 @@ __pycache__/
 .venv/
 venv/
 .coverage
+coverage.xml
 .DS_Store
 graphify-out/
+
+# Internal/private docs & dev artifacts — never publish to GitHub
+# superpowers skill plans & specs
+docs/superpowers/
+# /simplify, audit & review assessments
+*-assessment-*.md
+AUDIT_FINDINGS*.md
+# hardening / refactor / release plans
+*_PLAN.md
+*.local.md
+.codex
