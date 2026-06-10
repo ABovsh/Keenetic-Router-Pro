@@ -8,6 +8,13 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.53
+
+No user-visible behavior changed.
+
+### 🧹 Maintenance
+- Validation workflows now run only when code is pushed (or on demand), instead of also on a weekly schedule.
+
 ## 1.7.52
 
 Internal code cleanup. No user-visible behavior changed.
