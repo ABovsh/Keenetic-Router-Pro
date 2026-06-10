@@ -12,7 +12,11 @@ import aiohttp
 import pytest
 from homeassistant.exceptions import HomeAssistantError
 
-from custom_components.keenetic_router_pro.api import KeeneticAuthError, KeeneticClient
+from custom_components.keenetic_router_pro.api import (
+    KeeneticApiError,
+    KeeneticAuthError,
+    KeeneticClient,
+)
 
 
 class FakeResponse:
@@ -135,15 +139,37 @@ def test_basic_auth_missing_session_raises_auth_error() -> None:
         (aiohttp.ClientError("offline"), "connection failed"),
     ],
 )
-def test_basic_auth_transport_error_raises_auth_error(
+def test_basic_auth_transport_error_is_not_auth_error(
     side_effect: Exception, message: str
 ) -> None:
+    """An unreachable router must not look like rejected credentials."""
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
     client._session = FakeSession([])
     client._session.get = AsyncMock(side_effect=side_effect)
 
-    with pytest.raises(KeeneticAuthError, match=message):
+    with pytest.raises(KeeneticApiError, match=message) as excinfo:
         asyncio.run(client._async_authenticate())
+    assert not isinstance(excinfo.value, KeeneticAuthError)
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_basic_auth_credential_rejection_raises_auth_error(status: int) -> None:
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    client._session = FakeSession([FakeResponse(status, text="denied")])
+
+    with pytest.raises(KeeneticAuthError):
+        asyncio.run(client._async_authenticate())
+
+
+@pytest.mark.parametrize("status", [500, 502, 503])
+def test_basic_auth_server_error_is_not_auth_error(status: int) -> None:
+    """A rebooting router serving 5xx must not trigger a reauth flow."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    client._session = FakeSession([FakeResponse(status, text="boot")])
+
+    with pytest.raises(KeeneticApiError) as excinfo:
+        asyncio.run(client._async_authenticate())
+    assert not isinstance(excinfo.value, KeeneticAuthError)
 
 
 def test_challenge_auth_missing_session_raises_auth_error() -> None:
@@ -160,42 +186,60 @@ def test_challenge_auth_missing_session_raises_auth_error() -> None:
         (aiohttp.ClientError("offline"), "GET failed"),
     ],
 )
-def test_challenge_auth_get_transport_error_raises_auth_error(
+def test_challenge_auth_get_transport_error_is_not_auth_error(
     side_effect: Exception, message: str
 ) -> None:
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD, use_challenge_auth=True)
     client._session = FakeSession([])
     client._session.get = AsyncMock(side_effect=side_effect)
 
-    with pytest.raises(KeeneticAuthError, match=message):
+    with pytest.raises(KeeneticApiError, match=message) as excinfo:
         asyncio.run(client._async_authenticate_challenge())
+    assert not isinstance(excinfo.value, KeeneticAuthError)
 
 
-@pytest.mark.parametrize(
-    ("get_response", "message"),
-    [
-        (FakeResponse(500, text="server error body"), "Unexpected status"),
-        (FakeResponse(401), "X-NDM-Challenge"),
-    ],
-)
-def test_challenge_auth_get_response_shape_raises_auth_error(
-    get_response: FakeResponse, message: str
-) -> None:
+def test_challenge_auth_get_server_error_is_not_auth_error() -> None:
+    """A 5xx during the challenge GET means the router is sick, not bad creds."""
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD, use_challenge_auth=True)
-    client._session = FakeSession([get_response])
+    client._session = FakeSession([FakeResponse(500, text="server error body")])
 
-    with pytest.raises(KeeneticAuthError, match=message):
+    with pytest.raises(KeeneticApiError, match="Unexpected status") as excinfo:
         asyncio.run(client._async_authenticate_challenge())
+    assert not isinstance(excinfo.value, KeeneticAuthError)
+
+
+def test_challenge_auth_missing_challenge_header_raises_auth_error() -> None:
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD, use_challenge_auth=True)
+    client._session = FakeSession([FakeResponse(401)])
+
+    with pytest.raises(KeeneticAuthError, match="X-NDM-Challenge"):
+        asyncio.run(client._async_authenticate_challenge())
+
+
+def test_challenge_auth_post_server_error_is_not_auth_error() -> None:
+    get_resp = FakeResponse(
+        401,
+        headers={
+            "X-NDM-Challenge": "challenge",
+            "X-NDM-Realm": "Keenetic",
+            "Set-Cookie": "session=initial; Path=/",
+        },
+    )
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD, use_challenge_auth=True)
+    client._session = FakeSession([get_resp, FakeResponse(500, text="server error body")])
+
+    with pytest.raises(KeeneticApiError, match="status=500") as excinfo:
+        asyncio.run(client._async_authenticate_challenge())
+    assert not isinstance(excinfo.value, KeeneticAuthError)
 
 
 @pytest.mark.parametrize(
     ("post_response", "message"),
     [
         (FakeResponse(401, text="bad credentials"), "rejected"),
-        (FakeResponse(500, text="server error body"), "status=500"),
     ],
 )
-def test_challenge_auth_post_response_shape_raises_auth_error(
+def test_challenge_auth_post_rejection_raises_auth_error(
     post_response: FakeResponse, message: str
 ) -> None:
     get_resp = FakeResponse(
@@ -220,7 +264,7 @@ def test_challenge_auth_post_response_shape_raises_auth_error(
         (aiohttp.ClientError("offline"), "POST failed"),
     ],
 )
-def test_challenge_auth_post_transport_error_raises_auth_error(
+def test_challenge_auth_post_transport_error_is_not_auth_error(
     side_effect: Exception, message: str
 ) -> None:
     get_resp = FakeResponse(
@@ -234,8 +278,9 @@ def test_challenge_auth_post_transport_error_raises_auth_error(
     client._session = FakeSession([get_resp])
     client._session.post = AsyncMock(side_effect=side_effect)
 
-    with pytest.raises(KeeneticAuthError, match=message):
+    with pytest.raises(KeeneticApiError, match=message) as excinfo:
         asyncio.run(client._async_authenticate_challenge())
+    assert not isinstance(excinfo.value, KeeneticAuthError)
 
 
 def test_ensure_auth_authenticated_inside_lock_returns_without_handshake() -> None:

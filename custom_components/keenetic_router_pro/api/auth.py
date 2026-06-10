@@ -12,7 +12,7 @@ import logging
 
 from ..const import DOMAIN
 from .constants import RCI_ROOT
-from .errors import KeeneticAuthError
+from .errors import KeeneticApiError, KeeneticAuthError
 from .helpers import _cookie_header_from_response, _response_summary
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.api.auth")
@@ -30,20 +30,31 @@ class _AuthMixin:
 
         _LOGGER.debug("Authenticating to Keenetic via %s", url)
 
+        # Only an explicit credential rejection (401/403) may raise
+        # KeeneticAuthError — that is what HA turns into a reauth flow.
+        # Timeouts, connection errors and 5xx mean the router is
+        # unreachable/rebooting and must stay KeeneticApiError, otherwise
+        # every router outage pops a spurious "re-enter password" repair.
         try:
             async with asyncio.timeout(self._request_timeout):
                 resp = await self._session.get(url, headers=headers)
                 async with resp:
-                    if resp.status != 200:
+                    if resp.status in (401, 403):
                         text = await resp.text()
                         raise KeeneticAuthError(
                             f"Auth failed (status {resp.status}): "
                             f"{_response_summary(text)}"
                         )
+                    if resp.status != 200:
+                        text = await resp.text()
+                        raise KeeneticApiError(
+                            f"Auth endpoint returned status {resp.status}: "
+                            f"{_response_summary(text)}"
+                        )
         except asyncio.TimeoutError as err:
-            raise KeeneticAuthError("Auth connection timed out") from err
+            raise KeeneticApiError("Auth connection timed out") from err
         except aiohttp.ClientError as err:
-            raise KeeneticAuthError(f"Auth connection failed: {err}") from err
+            raise KeeneticApiError(f"Auth connection failed: {err}") from err
 
         self._auth_header = headers
         self._authenticated = True
@@ -75,9 +86,9 @@ class _AuthMixin:
             async with asyncio.timeout(self._request_timeout):
                 get_resp = await self._session.get(auth_url, allow_redirects=False)
         except asyncio.TimeoutError as err:
-            raise KeeneticAuthError("Challenge GET timed out") from err
+            raise KeeneticApiError("Challenge GET timed out") from err
         except aiohttp.ClientError as err:
-            raise KeeneticAuthError(f"Challenge GET failed: {err}") from err
+            raise KeeneticApiError(f"Challenge GET failed: {err}") from err
 
         async with get_resp:
             _LOGGER.debug(
@@ -88,8 +99,10 @@ class _AuthMixin:
             )
 
             if get_resp.status not in (200, 401):
+                # 5xx / odd statuses here mean a sick or rebooting router,
+                # not bad credentials — keep it a connectivity error.
                 text = await get_resp.text()
-                raise KeeneticAuthError(
+                raise KeeneticApiError(
                     f"Unexpected status during challenge GET ({get_resp.status}): "
                     f"{_response_summary(text)}"
                 )
@@ -135,9 +148,9 @@ class _AuthMixin:
                     headers=post_headers,
                 )
         except asyncio.TimeoutError as err:
-            raise KeeneticAuthError("Challenge POST timed out") from err
+            raise KeeneticApiError("Challenge POST timed out") from err
         except aiohttp.ClientError as err:
-            raise KeeneticAuthError(f"Challenge POST failed: {err}") from err
+            raise KeeneticApiError(f"Challenge POST failed: {err}") from err
 
         async with post_resp:
             post_text = await post_resp.text()
@@ -153,7 +166,8 @@ class _AuthMixin:
                     "challenge-auth setting."
                 )
             if post_resp.status not in (200, 204):
-                raise KeeneticAuthError(
+                # Non-401 failure: router-side problem, not rejected creds.
+                raise KeeneticApiError(
                     "Challenge auth failed "
                     f"(status={post_resp.status}, body={_response_summary(post_text)!r})"
                 )
