@@ -276,7 +276,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 
                 _LOGGER.info(
                     "New device connected: %s (%s) - %s",
-                    name,
+                    _mask_identifier(name),
                     _mask_identifier(mac),
                     _mask_identifier(ip),
                 )

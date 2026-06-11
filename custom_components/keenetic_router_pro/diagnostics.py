@@ -56,6 +56,10 @@ TO_REDACT: set[str] = {
     "hw_id",
     "hwid",
     "device_id",
+    # LAN device hostnames (clients, mesh nodes, extenders) are personal data.
+    "name",
+    "known-host",
+    "http_host",
 }
 
 

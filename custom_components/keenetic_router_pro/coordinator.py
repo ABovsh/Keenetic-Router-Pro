@@ -61,9 +61,16 @@ _VERSION_CACHE_KEYS = (
 )
 
 
-def _first_stat_int(stats: dict[str, Any], *keys: str) -> int:
-    """Return the first non-empty integer stat from several firmware key names."""
-    return coerce_int(first_present(stats, *keys, default=0))
+def _first_stat_int(stats: dict[str, Any], *keys: str) -> int | None:
+    """Return the first usable integer stat, or None for absent/garbage values.
+
+    Booleans are rejected (``int(False) == 0`` would look like a counter
+    reset and fabricate a throughput spike on the next real sample).
+    """
+    value = first_present(stats, *keys, default=None)
+    if value is None or isinstance(value, bool):
+        return None
+    return coerce_int(value)
 
 
 class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -381,6 +388,9 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         except (OSError, TypeError) as err:
                             _LOGGER.debug("OOM Store save failed: %s", err)
 
+            # Copy before mutating: on non-very-slow ticks this is the SAME
+            # dict object as the currently-published self.data snapshot.
+            ipsec_diagnostics = dict(ipsec_diagnostics)
             ipsec_diagnostics["oom_total"] = self._oom_state["total"]
             ipsec_diagnostics["oom_last_seen"] = self._oom_state.get("last_seen_iso")
 
@@ -653,13 +663,16 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     cmap["_sample_ts"] = now_ts
                     if prev_cmap and prev_cmap.get("_sample_ts"):
                         dt = now_ts - float(prev_cmap.get("_sample_ts") or 0)
+                        # Pass raw values: counter_rate rejects None/bool
+                        # samples itself; pre-coercing None to 0 would
+                        # fabricate a reset + spike pair.
                         cmap["rx_throughput"] = counter_rate_bytes_per_second(
-                            coerce_int(cmap.get("rx_bytes")),
+                            cmap.get("rx_bytes"),
                             prev_cmap.get("rx_bytes"),
                             dt,
                         )
                         cmap["tx_throughput"] = counter_rate_bytes_per_second(
-                            coerce_int(cmap.get("tx_bytes")),
+                            cmap.get("tx_bytes"),
                             prev_cmap.get("tx_bytes"),
                             dt,
                         )

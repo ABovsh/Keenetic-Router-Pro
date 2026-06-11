@@ -183,8 +183,16 @@ class _AuthMixin:
                 )
             session_cookie = _cookie_header_from_response(post_resp) or session_cookie
 
+        if not session_cookie:
+            # A 200/204 with no session cookie would mark us "authenticated"
+            # with an empty auth header — every RCI call then 401s and loops
+            # back here. Surface it as a connectivity-class failure instead.
+            raise KeeneticApiError(
+                "Challenge auth succeeded but the router returned no session cookie"
+            )
+
         # Store cookie in _auth_header so every subsequent RCI request includes it.
-        self._auth_header = {"Cookie": session_cookie} if session_cookie else {}
+        self._auth_header = {"Cookie": session_cookie}
         self._authenticated = True
 
         _LOGGER.debug(

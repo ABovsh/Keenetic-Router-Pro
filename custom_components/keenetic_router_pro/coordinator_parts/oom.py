@@ -87,6 +87,10 @@ def advance_oom_state(
         event_dt = parse_keenetic_log_ts(event[0], now=now_dt)
         if event_dt is None:
             continue
+        if event_dt > now_dt:
+            # Clock skew / year-rollover artefact: a future-dated event would
+            # be counted now AND persisted, permanently over-counting.
+            continue
         counts_by_ts[event_dt] = counts_by_ts.get(event_dt, 0) + 1
 
     if not counts_by_ts:

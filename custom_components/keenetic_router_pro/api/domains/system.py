@@ -241,7 +241,7 @@ class SystemMixin:
                 url = f"{base}{RCI_ROOT}/show/version"
                 async with asyncio.timeout(self._request_timeout):
                     resp = await self._session.get(url, headers=node_headers)
-                async with resp:
+                async with asyncio.timeout(self._request_timeout), resp:
                     if resp.status == 200:
                         version_data = await resp.json()
                         ndw_components = ""
@@ -288,7 +288,7 @@ class SystemMixin:
                                 json=payload,
                                 headers=node_headers,
                             )
-                        async with resp:
+                        async with asyncio.timeout(self._request_timeout), resp:
                             if resp.status == 401:
                                 _LOGGER.debug(
                                     "Auth rejected while staging update on node "
@@ -320,7 +320,7 @@ class SystemMixin:
                                 json={"reason": "manual"},
                                 headers=node_headers,
                             )
-                        async with resp:
+                        async with asyncio.timeout(self._request_timeout), resp:
                             if resp.status in (200, 204):
                                 _LOGGER.info(
                                     "Node %s firmware update started via "
@@ -379,7 +379,7 @@ class SystemMixin:
                         json={"confirm": True},
                         headers=node_headers,
                     )
-                async with resp:
+                async with asyncio.timeout(self._request_timeout), resp:
                     if resp.status in (200, 204):
                         _LOGGER.info(
                             "Node %s firmware update started via system/update",
@@ -416,7 +416,7 @@ class SystemMixin:
                     type(err).__name__,
                 )
 
-        msg = f"Could not start firmware update on node {label}"
+        msg = f"Could not start firmware update on node {mask_identifier(label)}"
         _LOGGER.error(
             "Could not start firmware update on node %s",
             mask_identifier(label),
@@ -451,7 +451,7 @@ class SystemMixin:
                     auth_url, allow_redirects=False
                 )
 
-            async with get_resp:
+            async with asyncio.timeout(self._request_timeout), get_resp:
                 challenge = get_resp.headers.get("X-NDM-Challenge")
                 realm = get_resp.headers.get("X-NDM-Realm", "")
 
@@ -492,7 +492,7 @@ class SystemMixin:
                     headers=post_headers,
                 )
 
-            async with post_resp:
+            async with asyncio.timeout(self._request_timeout), post_resp:
                 await post_resp.read()
                 if post_resp.status in (200, 204):
                     _LOGGER.debug(
@@ -603,6 +603,16 @@ class SystemMixin:
                                         pass
                             tunnels.append(tunnel)
                     ttp["tunnel"] = tunnels
+                elif isinstance(ttp.get("tunnel"), dict):
+                    # Single-tunnel collapse: same coercion on a copied dict.
+                    tunnel = dict(ttp["tunnel"])
+                    for key in ["uptime", "idle", "timeout", "linger"]:
+                        if key in tunnel and tunnel[key] is not None:
+                            try:
+                                tunnel[key] = int(tunnel[key])
+                            except (ValueError, TypeError):
+                                pass
+                    ttp["tunnel"] = tunnel
             
             _LOGGER.debug(
                 "NDNS info retrieved (keys: %s)",

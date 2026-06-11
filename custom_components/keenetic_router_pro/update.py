@@ -373,8 +373,8 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
 
         if not node_ip:
             raise HomeAssistantError(
-                f"Cannot update {node_name}: node IP address not available. "
-                f"Is the node online?"
+                f"Cannot update {mask_identifier(node_name)}: node IP address "
+                f"not available. Is the node online?"
             )
 
         _LOGGER.info(
@@ -392,7 +392,8 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
 
             if not result:
                 raise HomeAssistantError(
-                    f"Node {node_name} did not accept the update command"
+                    f"Node {mask_identifier(node_name)} did not accept the "
+                    f"update command"
                 )
 
             _LOGGER.info(
@@ -440,8 +441,11 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
                 mask_identifier(node_name),
                 err,
             )
+            # Frontend-visible message: mask the node name and avoid raw
+            # exception text (ClientConnectionError embeds the node IP).
             raise HomeAssistantError(
-                f"Mesh firmware update failed for {node_name}: {err}"
+                f"Mesh firmware update failed for {mask_identifier(node_name)}: "
+                f"{type(err).__name__}"
             ) from err
 
         await self.coordinator.async_request_refresh()

@@ -11,6 +11,10 @@ from ...utils import coerce_bool, first_present, usable_ip
 def _extract_ip_from_value(value: Any) -> str | None:
     if isinstance(value, str) and value:
         return value.split("/")[0]
+    if isinstance(value, dict):
+        # Firmware variant: {"address": {"address": "1.2.3.4", "mask": ...}}
+        ip = first_present(value, "address", "ip")
+        return str(ip).split("/")[0] if ip else None
     if isinstance(value, list) and value:
         first = value[0]
         if isinstance(first, dict):

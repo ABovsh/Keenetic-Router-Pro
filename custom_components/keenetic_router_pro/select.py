@@ -2,6 +2,7 @@
 from __future__ import annotations
 from typing import Any
 from homeassistant.components.select import SelectEntity
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -150,8 +151,14 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
             await self._api_client.async_set_client_policy(self._mac, "deny")
         else:
             policy_id = self._display_to_id.get(option)
-            if policy_id and policy_id not in ("__default__", "__deny__"):
-                await self._api_client.async_set_client_policy(self._mac, policy_id)
+            if not policy_id or policy_id in ("__default__", "__deny__"):
+                # Option list was rebuilt between validation and dispatch
+                # (coordinator refresh mid-service-call). Fail loudly instead
+                # of silently reverting the dropdown.
+                raise HomeAssistantError(
+                    f"Connection policy option is no longer available: {option}"
+                )
+            await self._api_client.async_set_client_policy(self._mac, policy_id)
 
         await self.coordinator.async_request_refresh()
 

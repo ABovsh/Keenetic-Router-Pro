@@ -4,18 +4,22 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..utils import coerce_int, normalize_mac
+from ..utils import coerce_int, is_client_online, normalize_mac
 
 
 def counter_rate_bytes_per_second(
-    current: int,
+    current: Any,
     previous: Any,
     elapsed_seconds: float,
 ) -> float:
     """Calculate a monotonic byte-counter rate, clamping resets to zero."""
     if elapsed_seconds <= 0:
         return 0.0
-    delta = current - coerce_int(previous)
+    # A missing/garbage sample on either side must not fabricate a delta
+    # (a bool/None previous would coerce to 0 and produce a massive spike).
+    if current is None or previous is None or isinstance(current, bool) or isinstance(previous, bool):
+        return 0.0
+    delta = coerce_int(current) - coerce_int(previous)
     if delta < 0:
         return 0.0
     return max(0.0, delta / elapsed_seconds)
@@ -65,6 +69,11 @@ def build_clients_by_mac(clients: list[Any]) -> dict[str, dict[str, Any]]:
             continue
         mac = normalize_mac(client.get("mac"))
         if not mac:
+            continue
+        existing = clients_by_mac.get(mac)
+        if existing is not None and is_client_online(existing) and not is_client_online(client):
+            # A roaming client can appear twice (once per mesh node); keep
+            # the online record instead of last-entry-wins.
             continue
         clients_by_mac[mac] = client
     return clients_by_mac

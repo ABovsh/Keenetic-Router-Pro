@@ -331,7 +331,7 @@ class KeeneticMeshPortSensor(MeshEntity, SensorEntity):
         return self._mesh_unique_id(f"port_{self._port_label}_v2")
 
     @property
-    def native_value(self) -> str:
+    def native_value(self) -> str | None:
         """Return port state."""
         node = self._node
         if not node:
@@ -344,7 +344,14 @@ class KeeneticMeshPortSensor(MeshEntity, SensorEntity):
             if port.get("label") == self._port_label:
                 return port.get("link", "unknown")
 
-        return "not_found"
+        # Port no longer reported: go unavailable (see ``available``) instead
+        # of publishing a phantom "not_found" state into history.
+        return None
+
+    @property
+    def available(self) -> bool:
+        """Become unavailable when the node no longer reports this port."""
+        return bool(getattr(super(), "available", True)) and self.native_value is not None
 
     @property
     def icon(self) -> str:

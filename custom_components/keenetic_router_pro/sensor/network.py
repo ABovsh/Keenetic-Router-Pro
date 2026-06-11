@@ -415,6 +415,8 @@ class KeeneticWanUptimeSensor(_WanSensorBase):
     _attr_icon = "mdi:timer-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.DURATION
+    # Same statistics contract as the PPPoE/mesh uptime sensors.
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_suggested_display_precision = 0
     # native_value derives from wan["uptime"]; the WanEntity base ignores it
     # for write-suppression, so opt out of dedup here.

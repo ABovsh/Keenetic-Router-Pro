@@ -135,10 +135,12 @@ def test_mesh_port_sensor_reports_down_and_missing_port_states() -> None:
         "label": "1",
         "appearance": "ethernet",
     }
+    # A vanished port goes unavailable instead of publishing "not_found".
     assert (missing_port.native_value, missing_port.extra_state_attributes) == (
-        "not_found",
+        None,
         None,
     )
+    assert missing_port.available is False
 
 
 def test_client_counter_sensors_distinguish_offline_zero_from_online_bad_values() -> None:

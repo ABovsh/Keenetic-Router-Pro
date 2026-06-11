@@ -28,7 +28,7 @@ def test_first_stat_int_uses_first_non_empty_firmware_alias() -> None:
     }
 
     assert _first_stat_int(stats, "rxbytes", "rx-bytes", "rx_bytes") == 125
-    assert _first_stat_int(stats, "missing") == 0
+    assert _first_stat_int(stats, "missing") is None  # absent stat must not look like a counter reset
 
 
 def test_counter_rate_clamps_reset_and_invalid_time() -> None:

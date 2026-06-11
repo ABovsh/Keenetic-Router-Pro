@@ -8,6 +8,52 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.56
+
+Second deep-audit round: steadier counters, sign-in resilience, less personal
+data in logs and diagnostics.
+
+### 🐛 Fixed
+
+- **Sign-in now works on routers that send several cookies** (e.g. a CSRF
+  cookie before the session cookie) — previously only the first cookie was
+  kept and authentication could loop endlessly. A sign-in that returns no
+  session cookie at all is now treated as a connection problem instead of
+  silently looping.
+- **A garbled traffic counter can no longer fabricate a huge throughput
+  spike** after the next good reading — malformed samples are skipped instead
+  of being read as zero.
+- **Ping-check based internet status now works with a single ping-check
+  profile** (the most common setup) — it was silently dropped on firmwares
+  that report one profile instead of a list.
+- **WAN addresses nested as objects are recognised**, so a connected WAN is no
+  longer shown as disconnected on that firmware shape; unassigned IPv6
+  placeholder addresses no longer count as "online".
+- **Rejected router commands are detected more reliably** ("No such command",
+  "Bad parameter", "Already exists" now count as errors instead of silent
+  success).
+- A mesh node or update server that accepts a connection but then stalls can
+  no longer hang a firmware update indefinitely.
+- The OOM-events counter ignores future-dated log lines after a clock
+  correction, and its "recent events" diagnostic now shows the newest lines
+  instead of the oldest.
+- A device connected through a mesh node is no longer occasionally shown
+  offline while roaming (duplicate records now prefer the online one).
+- A mesh port that disappears from the node now shows **unavailable** instead
+  of a phantom "not_found" state; per-WAN session uptime now records
+  long-term statistics like the other uptime sensors.
+- Boolean garbage from the firmware can no longer appear as tiny CPU /
+  memory / temperature readings, and an absurdly large "last seen" value can
+  no longer crash the client sensors.
+- Selecting a connection policy that has just disappeared from the router now
+  shows an error instead of silently reverting the dropdown.
+
+### 🔒 Privacy
+
+- Device and mesh-node hostnames are now redacted from the downloadable
+  diagnostics file, the new-device log line, and firmware-update error
+  messages shown in the interface.
+
 ## 1.7.55
 
 Deep reliability and privacy audit.

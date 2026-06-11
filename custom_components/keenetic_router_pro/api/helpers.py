@@ -97,14 +97,24 @@ def _as_list(value: Any) -> List[Any]:
 
 
 def _cookie_header_from_response(resp: aiohttp.ClientResponse) -> str | None:
-    """Extract a Cookie header value from a Set-Cookie response header."""
-    raw_cookie = resp.headers.get("Set-Cookie", "")
-    if not raw_cookie:
-        return None
-    cookie_kv = raw_cookie.split(";", 1)[0].strip()
-    if "=" not in cookie_kv:
-        return None
-    return cookie_kv
+    """Extract a Cookie header value from Set-Cookie response header(s).
+
+    Firmware can send several Set-Cookie headers (e.g. a CSRF/locale cookie
+    before the session cookie); ``headers.get`` would return only the first
+    and silently drop the session token, so collect them all.
+    """
+    getall = getattr(resp.headers, "getall", None)
+    if callable(getall):
+        raw_cookies = getall("Set-Cookie", [])
+    else:
+        raw = resp.headers.get("Set-Cookie", "")
+        raw_cookies = [raw] if raw else []
+    pairs = []
+    for raw_cookie in raw_cookies:
+        cookie_kv = raw_cookie.split(";", 1)[0].strip()
+        if "=" in cookie_kv:
+            pairs.append(cookie_kv)
+    return "; ".join(pairs) if pairs else None
 
 
 def _is_endpoint_missing(err: BaseException) -> bool:

@@ -167,7 +167,11 @@ def parse_ipsec_vici_diagnostics(
         "vici_out_of_memory_count": len(matches),
         "last_vici_out_of_memory": last_match.get("line") if last_match else None,
         "last_error_code": last_match.get("code") if last_match else None,
-        "recent_matches": [m["line"] for m in matches[-5:]],
+        # ``entries`` is newest-first, plain lines are oldest-first — pick
+        # the newest five from the correct end in each case.
+        "recent_matches": [
+            m["line"] for m in (matches[:5] if entries is not None else matches[-5:])
+        ],
         "events": [(m["time"], m["line"]) for m in matches],
         "scanned_log_lines": scanned,
     }

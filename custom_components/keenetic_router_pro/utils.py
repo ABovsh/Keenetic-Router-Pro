@@ -11,7 +11,7 @@ from .const import CONF_TRACKED_CLIENTS, DOMAIN, LINK_STATE_UP, TRUTHY_STRINGS
 
 UNKNOWN_SECONDS_VALUES = (None, "", "unknown", "Unknown")
 _MESH_ID_SAFE_RE = re.compile(r"\W+")
-PLACEHOLDER_IPS = frozenset({"", "0.0.0.0", "::"})
+PLACEHOLDER_IPS = frozenset({"", "0.0.0.0", "::", "::0", "0:0:0:0:0:0:0:0"})
 
 
 def _url_host(value: str) -> str:
@@ -54,6 +54,10 @@ def coerce_seconds(value: Any, default: int | None = 0) -> int | None:
     # not publish a negative uptime to a DURATION / TOTAL_INCREASING sensor.
     if as_float < 0:
         return default
+    # A finite-but-absurd duration (>~3000 years) survives the isfinite
+    # check yet overflows ``timedelta(seconds=...)`` downstream.
+    if as_float > 1e11:
+        return default
     try:
         return int(as_float)
     except (OverflowError, ValueError):
@@ -75,6 +79,9 @@ def coerce_float(value: Any, default: float | None = None) -> float | None:
     cleanly, so a malformed firmware value like ``"nan"`` would otherwise
     poison long-term stats for that sensor.
     """
+    if isinstance(value, bool):
+        # bool is an int subclass; float(True) == 1.0 is garbage, not a value.
+        return default
     try:
         result = float(value)
     except (TypeError, ValueError):

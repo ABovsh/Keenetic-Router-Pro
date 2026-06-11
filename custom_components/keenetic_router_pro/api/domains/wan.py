@@ -301,9 +301,16 @@ class WanMixin:
             _LOGGER.debug("show/ping-check unavailable: %s", err)
             return {}
         self._ping_check_supported = True
-        # Firmware may collapse a single ping-check profile to a dict;
-        # accept both list and dict shapes instead of dropping the data.
-        raw_profiles = _dict_items(data.get("pingcheck") or [])
+        # Firmware may collapse a single ping-check profile to a dict.
+        # _dict_items would descend into that profile's dict values (its
+        # "interface" map) and lose the profile itself, so wrap it explicitly.
+        raw = data.get("pingcheck") or []
+        if isinstance(raw, dict) and (
+            "interface" in raw or "profile" in raw or "host" in raw
+        ):
+            raw_profiles: list[dict[str, Any]] = [raw]
+        else:
+            raw_profiles = _dict_items(raw)
 
         # Collect per-interface observations from every profile that
         # actually has results (profile without `interface` block is
