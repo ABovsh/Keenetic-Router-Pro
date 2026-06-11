@@ -4,10 +4,16 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
-from custom_components.keenetic_router_pro.api import KeeneticApiError, _validate_cli_arg
+from custom_components.keenetic_router_pro.api import (
+    KeeneticApiError,
+    KeeneticClient,
+    _validate_cli_arg,
+)
+from conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
 
 
 @pytest.mark.parametrize(
@@ -106,3 +112,38 @@ def test_domain_f_string_parse_parameters_are_validated_before_use() -> None:
                         failures.append(f"{path}:{func.name} uses {sorted(unsafe)}")
 
     assert failures == []
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        [{"message": "error: interface not found"}],
+        {"message": "Command failed"},
+        {"message": "permission denied"},
+        {"message": "operation not allowed"},
+        "invalid command",
+    ],
+)
+async def test_rci_parse_raises_when_router_rejects_command(payload: object) -> None:
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    client._rci_post = AsyncMock(return_value=payload)
+
+    with pytest.raises(KeeneticApiError):
+        await client._rci_parse("interface PPPoE0 up")
+
+
+async def test_rci_parse_does_not_reject_success_message_mentioning_no_errors() -> None:
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    client._rci_post = AsyncMock(return_value={"message": "completed without errors"})
+
+    assert await client._rci_parse("system configuration save") == {
+        "message": "completed without errors"
+    }
+
+
+async def test_rci_parse_trusts_explicit_success_over_descriptive_text() -> None:
+    payload = {"status": "ok", "description": "Unknown client policy"}
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    client._rci_post = AsyncMock(return_value=payload)
+
+    assert await client._rci_parse("system configuration save") == payload

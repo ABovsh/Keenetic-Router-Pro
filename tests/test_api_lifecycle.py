@@ -233,14 +233,9 @@ def test_challenge_auth_post_server_error_is_not_auth_error() -> None:
     assert not isinstance(excinfo.value, KeeneticAuthError)
 
 
-@pytest.mark.parametrize(
-    ("post_response", "message"),
-    [
-        (FakeResponse(401, text="bad credentials"), "rejected"),
-    ],
-)
+@pytest.mark.parametrize("post_response", [FakeResponse(401), FakeResponse(403)])
 def test_challenge_auth_post_rejection_raises_auth_error(
-    post_response: FakeResponse, message: str
+    post_response: FakeResponse,
 ) -> None:
     get_resp = FakeResponse(
         401,
@@ -253,7 +248,7 @@ def test_challenge_auth_post_rejection_raises_auth_error(
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD, use_challenge_auth=True)
     client._session = FakeSession([get_resp, post_response])
 
-    with pytest.raises(KeeneticAuthError, match=message):
+    with pytest.raises(KeeneticAuthError, match="rejected"):
         asyncio.run(client._async_authenticate_challenge())
 
 

@@ -108,6 +108,7 @@ def test_sensor_setup_deduplicates_inputs_and_adds_dynamic_entities_once() -> No
     assert "entry_123_mesh_aa_bb_cc_dd_ee_ff_port_0_v2" in initial_unique_ids
     assert "entry_123_wan_PPPoE0_provider" in initial_unique_ids
     assert "entry_123_cmap_SITE_state" in initial_unique_ids
+    assert "entry_123_wg_Wireguard0_uptime" not in initial_unique_ids
     assert len([uid for uid in initial_unique_ids if "_client_aa:bb:cc:00:00:01_" in uid]) == 10
     assert len(coordinator.listeners) == 1
     assert len(entry.unloads) == 1
@@ -121,6 +122,10 @@ def test_sensor_setup_deduplicates_inputs_and_adds_dynamic_entities_once() -> No
     )
     coordinator.data["wan_interfaces"].append({"id": "Wireguard0"})
     coordinator.data["crypto_maps"]["BRANCH"] = {"connected": False}
+    coordinator.data["wireguard"] = {
+        "profiles": {"Wireguard0": {"label": "Office", "enabled": True}}
+    }
+    coordinator.data["port_info"].append({"label": "2", "link": "down"})
 
     coordinator.listeners[0]()
     coordinator.listeners[0]()
@@ -132,7 +137,38 @@ def test_sensor_setup_deduplicates_inputs_and_adds_dynamic_entities_once() -> No
     assert "entry_123_mesh_11_22_33_44_55_66_port_1_v2" in dynamic_unique_ids
     assert "entry_123_wan_Wireguard0_provider" in dynamic_unique_ids
     assert "entry_123_cmap_BRANCH_state" in dynamic_unique_ids
+    assert "entry_123_wg_Wireguard0_uptime" in dynamic_unique_ids
+    assert "entry_123_wg_Wireguard0_rx" in dynamic_unique_ids
+    assert "entry_123_wg_Wireguard0_tx" in dynamic_unique_ids
+    assert "entry_123_port_2" in dynamic_unique_ids
     assert len(dynamic_unique_ids) == len(batches[1])
+
+
+def test_main_port_sensor_becomes_unavailable_when_port_disappears() -> None:
+    from custom_components.keenetic_router_pro.sensor.network import KeeneticMainPortSensor
+
+    coordinator = _Coordinator(_base_data())
+    entry = _Entry(coordinator)
+    sensor = KeeneticMainPortSensor(coordinator, entry, "1")
+
+    assert sensor.available is True
+
+    coordinator.data["port_info"] = []
+
+    assert sensor.available is False
+    assert sensor.native_value is None
+
+
+def test_main_port_sensor_matches_numeric_port_labels() -> None:
+    coordinator = _Coordinator(_base_data())
+    coordinator.data["port_info"] = [{"label": 7, "link": "up"}]
+    entry = _Entry(coordinator)
+
+    batches = _capture_setup(async_setup_entry, coordinator, entry)
+    port = next(entity for entity in batches[0] if entity.unique_id == "entry_123_port_7")
+
+    assert port.native_value == "up"
+    assert port.available is True
 
 
 def test_binary_sensor_setup_skips_bad_payloads_and_adds_dynamic_entities_once() -> None:

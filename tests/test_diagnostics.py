@@ -8,7 +8,7 @@ assert that no credential, MAC, SSID or session cookie survives.
 
 from __future__ import annotations
 
-from conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
+from conftest import TEST_HOST, TEST_USERNAME
 
 import sys
 import types

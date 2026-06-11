@@ -13,7 +13,6 @@ from conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
 import asyncio
 from typing import Any
 
-import pytest
 
 from custom_components.keenetic_router_pro.api import (
     KeeneticApiError,

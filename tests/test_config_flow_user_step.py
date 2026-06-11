@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from conftest import TEST_HOST, TEST_HOST_ALT, TEST_PASSWORD, TEST_USERNAME
+from conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
 
 from types import SimpleNamespace
 

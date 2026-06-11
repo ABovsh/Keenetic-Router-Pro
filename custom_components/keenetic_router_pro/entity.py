@@ -5,7 +5,6 @@ from typing import Any
 from homeassistant.core import callback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
-from .const import DOMAIN
 from .coordinator import KeeneticCoordinator
 from .utils import (
     find_client_by_mac,
@@ -429,6 +428,13 @@ class ClientEntity(_FingerprintedCoordinatorEntity):
             if isinstance(client, dict):
                 return client
         return find_client_by_mac(data.get("clients"), self._mac)
+
+    @property
+    def available(self) -> bool:
+        """Do not publish preserved client snapshots as current data."""
+        return super().available and not bool(
+            (self.coordinator.data or {}).get("clients_stale")
+        )
 
     @property
     def device_info(self) -> DeviceInfo:

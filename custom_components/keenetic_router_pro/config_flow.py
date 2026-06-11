@@ -43,7 +43,7 @@ from .const import (
     CONF_TRACKED_CLIENTS,
     CONF_USE_CHALLENGE_AUTH,
 )
-from .utils import iter_tracked_clients, normalize_mac
+from .utils import iter_tracked_clients, mask_identifier, normalize_mac
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.config_flow")
 _DEFAULT_DEVICE_NAME = "Keenetic Router"
@@ -412,7 +412,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_ssdp(self, discovery_info: SsdpServiceInfo) -> FlowResult:
         """Handle a discovered Keenetic router via SSDP."""
-        _LOGGER.debug("SSDP discovery received: %s", discovery_info)
+        _LOGGER.debug("SSDP discovery received")
         
         hostname = urlparse(discovery_info.ssdp_location).hostname
         if not hostname:
@@ -420,14 +420,25 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="no_host")
 
         current_entries = self._async_current_entries()
-        _LOGGER.debug("Checking %d existing entries for host %s", len(current_entries), hostname)
+        _LOGGER.debug(
+            "Checking %d existing entries for host %s",
+            len(current_entries),
+            mask_identifier(hostname),
+        )
         
         for entry in current_entries:
             entry_host = entry.data.get(CONF_HOST)
-            _LOGGER.debug("Entry %s has host: %s", entry.title, entry_host)
+            _LOGGER.debug(
+                "Entry %s has host %s",
+                mask_identifier(entry.title),
+                mask_identifier(entry_host),
+            )
             if entry_host == hostname:
-                _LOGGER.debug("Router at %s is already configured as '%s', skipping SSDP", 
-                            hostname, entry.title)
+                _LOGGER.debug(
+                    "Router at %s is already configured as %s, skipping SSDP",
+                    mask_identifier(hostname),
+                    mask_identifier(entry.title),
+                )
                 return self.async_abort(reason="already_configured")
         
         self._discovered_host = hostname
@@ -438,7 +449,11 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "host": hostname
         }
 
-        _LOGGER.debug("Discovered new Keenetic router via SSDP: %s at %s", self._discovered_name, hostname)
+        _LOGGER.debug(
+            "Discovered Keenetic router via SSDP: %s at %s",
+            mask_identifier(self._discovered_name),
+            mask_identifier(hostname),
+        )
         
         return await self.async_step_user()
 
@@ -472,11 +487,17 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 }
                 if self._discovered_host and data.get(CONF_HOST) == "192.168.1.1":  # NOSONAR python:S1313 — Keenetic factory-default discovery sentinel.
                     data[CONF_HOST] = self._discovered_host
-                    _LOGGER.debug("Using discovered host: %s", data[CONF_HOST])
+                    _LOGGER.debug(
+                        "Using discovered host %s",
+                        mask_identifier(data[CONF_HOST]),
+                    )
                 data = _normalize_connection_data(data)
                 
-                _LOGGER.debug("Attempting to connect to router at %s:%s", 
-                             data[CONF_HOST], data[CONF_PORT])
+                _LOGGER.debug(
+                    "Attempting to connect to router at %s:%s",
+                    mask_identifier(data[CONF_HOST]),
+                    data[CONF_PORT],
+                )
                 
                 client, system_info, interfaces = await self._async_connect(data)
                 unique_id, title = self._unique_id_from_router(
@@ -555,7 +576,10 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if client["mac"] in selected_macs
             ]
             
-            _LOGGER.debug("Creating entry with title: %s", self._title)
+            _LOGGER.debug(
+                "Creating entry with title %s",
+                mask_identifier(self._title),
+            )
             return self.async_create_entry(
                 title=self._title,
                 data={**self._user_input, CONF_TRACKED_CLIENTS: tracked_clients},

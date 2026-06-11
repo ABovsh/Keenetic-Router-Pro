@@ -66,7 +66,13 @@ async def test_rci_batch_swallows_transport_errors(exc: Exception) -> None:
     client._request = AsyncMock(side_effect=exc)
 
     assert await client._rci_batch({"show": {"system": {}}}) is None
-    assert client._rci_batch_supported is False
+    assert client._rci_batch_supported is not False
+
+    client._request = AsyncMock(return_value={"show": {"system": {}}})
+    assert await client._rci_batch({"show": {"system": {}}}) == {
+        "show": {"system": {}}
+    }
+    client._request.assert_awaited_once()
 
 
 async def test_rci_batch_propagates_cancellation() -> None:

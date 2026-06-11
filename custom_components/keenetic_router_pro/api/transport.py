@@ -10,10 +10,11 @@ import base64
 import logging
 
 from ..const import DOMAIN
-from .constants import RCI_ROOT, _SENSITIVE_NAMES
+from ..utils import mask_identifier
+from .constants import RCI_ROOT, _RCI_PARSE_ERROR_RE
 from .errors import KeeneticApiError, KeeneticAuthError
 from .helpers import (
-    _cookie_header_from_response,
+    _extract_command_messages,
     _is_endpoint_missing,
     _payload_summary,
     _response_summary,
@@ -97,7 +98,7 @@ class _Transport:
     def __repr__(self) -> str:
         """Redacted repr — never expose username/password in logs or tracebacks."""
         return (
-            f"KeeneticClient(host={self._host!r}, port={self._port}, "
+            f"KeeneticClient(host='<redacted>', port={self._port}, "
             f"ssl={self._ssl}, username='<redacted>', password='<redacted>', "
             f"challenge_auth={self._use_challenge_auth})"
         )
@@ -138,9 +139,10 @@ class _Transport:
         headers: Dict[str, str] = dict(self._auth_header or {})
 
         _LOGGER.debug(
-            "Keenetic request: %s %s params=%s json=%s",
+            "Keenetic request: %s %s on %s params=%s json=%s",
             method,
-            url,
+            path,
+            mask_identifier(self._host),
             params,
             _payload_summary(json),
         )
@@ -272,7 +274,25 @@ class _Transport:
     async def _rci_parse(self, command: str) -> Any:
         """Execute a CLI-like command via /rci/parse."""
         # JSON body sadece string: "interface Wireguard0 up"
-        return await self._rci_post("parse", command, allow_text=True)
+        result = await self._rci_post("parse", command, allow_text=True)
+        normalized_command = str(command).strip().lower()
+        if not normalized_command.startswith(("show ", "ip ping ")):
+            if isinstance(result, dict) and (
+                result.get("status") in ("ok", "started", "accepted", "success", True)
+                or result.get("result") in ("ok", "started", "accepted", "success", True)
+            ):
+                return result
+            error_marker = next(
+                (
+                    message
+                    for message in _extract_command_messages(result)
+                    if _RCI_PARSE_ERROR_RE.search(message)
+                ),
+                None,
+            )
+            if error_marker:
+                raise KeeneticApiError(error_marker)
+        return result
 
     async def _rci_batch(self, tree: Dict[str, Any]) -> Dict[str, Any] | None:
         """Send a composite RCI tree request in a single HTTP round-trip.
@@ -304,11 +324,15 @@ class _Transport:
             result = await self._request("POST", path, json=tree)
         except asyncio.CancelledError:
             raise
-        except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError) as err:
+        except KeeneticApiError as err:
             _LOGGER.debug(
-                "RCI batch POST failed; latching off for this session: %s", err
+                "RCI batch POST failed: %s", err
             )
-            self._rci_batch_supported = False
+            if _is_endpoint_missing(err):
+                self._rci_batch_supported = False
+            return None
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            _LOGGER.debug("RCI batch transport failed; will retry next tick: %s", err)
             return None
         if not isinstance(result, dict):
             self._rci_batch_supported = False

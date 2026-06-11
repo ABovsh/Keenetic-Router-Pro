@@ -22,7 +22,9 @@ class DynamicEntityTracker:
     mesh_nodes: set[str] = field(default_factory=set)
     mesh_local_ips: set[str] = field(default_factory=set)
     mesh_ports: set[tuple[str, str]] = field(default_factory=set)
+    main_ports: set[str] = field(default_factory=set)
     wan_ids: set[str] = field(default_factory=set)
+    wireguard_ids: set[str] = field(default_factory=set)
     vpn_ids: set[str] = field(default_factory=set)
     crypto_maps: set[str] = field(default_factory=set)
 
@@ -41,6 +43,14 @@ class DynamicEntityTracker:
     def mark_wan(self, wan_id: str) -> bool:
         """Return true the first time a WAN id is seen."""
         return self._mark(self.wan_ids, wan_id)
+
+    def mark_main_port(self, port_label: str) -> bool:
+        """Return true the first time a main-router port is seen."""
+        return self._mark(self.main_ports, port_label)
+
+    def mark_wireguard(self, profile_id: str) -> bool:
+        """Return true the first time a WireGuard profile is seen."""
+        return self._mark(self.wireguard_ids, profile_id)
 
     def mark_vpn(self, iface_id: str) -> bool:
         """Return true the first time a VPN interface id is seen."""

@@ -126,6 +126,8 @@ def test_connection_target_uses_url_port_and_scheme() -> None:
         "",
         "https://rsi.example.keenetic.pro/rci/show/version",
         "https://rsi.example.keenetic.pro?x=1",
+        "http://router.local@attacker.example",
+        "https://user:password@rsi.example.keenetic.pro",
         "ftp://rsi.example.keenetic.pro",
         "bad host",
         "https://rsi.example.keenetic.pro:99999",

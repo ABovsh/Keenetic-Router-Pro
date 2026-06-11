@@ -40,6 +40,8 @@ def normalize_connection_target(host: str, port: int, ssl: bool) -> KeeneticConn
     parsed = urlparse(raw_host if "://" in raw_host else f"//{raw_host}")
     if parsed.scheme and parsed.scheme not in ("http", "https"):
         raise KeeneticApiError(f"Unsupported URL scheme: {parsed.scheme}")
+    if parsed.username is not None or parsed.password is not None:
+        raise KeeneticApiError("Host must not include URL credentials")
     if parsed.path not in ("", "/") or parsed.params or parsed.query or parsed.fragment:
         raise KeeneticApiError("Host must not include a path, query string or fragment")
 

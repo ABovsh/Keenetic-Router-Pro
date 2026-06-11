@@ -229,7 +229,8 @@ def test_local_ip_and_main_port_sensors_expose_current_port_state() -> None:
     assert down_port.native_value == "down"
     assert down_port.icon == "mdi:ethernet-off"
     assert down_port.extra_state_attributes == {"label": "2", "appearance": "Port"}
-    assert missing_port.native_value == "not_found"
+    assert missing_port.native_value is None
+    assert missing_port.available is False
     assert missing_port.extra_state_attributes is None
 
 

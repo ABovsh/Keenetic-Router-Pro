@@ -8,6 +8,33 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.55
+
+Deep reliability and privacy audit.
+
+### 🐛 Fixed
+
+- Transient client and traffic fetch failures no longer publish false away
+  states, zero WAN counters, or recovery throughput spikes.
+- Router-rejected control commands and firmware update starts now surface as
+  errors instead of false success.
+- WireGuard traffic and uptime sensors and newly appearing main-router ports
+  now appear dynamically; removed profiles and ports become unavailable.
+- Client policy choices refresh from the router and survive transient failures.
+- Temporary composite-RCI failures no longer disable efficient batching for
+  the rest of the session.
+- Connection targets containing embedded URL credentials are rejected.
+
+### 🔒 Privacy
+
+- Diagnostics and router/mesh update logs no longer expose router hosts, node
+  names, IPs, or CIDs/MACs.
+
+### 🧹 Maintenance
+
+- Cleared the integration and test static-analysis errors and expanded
+  regression coverage.
+
 ## 1.7.54
 
 Reliability round: no more false re-authentication prompts, steadier mesh and

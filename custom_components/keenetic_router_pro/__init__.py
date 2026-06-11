@@ -19,12 +19,11 @@ from .const import (
     DOMAIN,
     DEFAULT_PORT,
     DEFAULT_SSL,
-    CONF_TRACKED_CLIENTS,
     CONF_USE_CHALLENGE_AUTH,
     EVENT_NEW_DEVICE,
 )
 from .coordinator import KeeneticCoordinator
-from .utils import mesh_unique_id, normalize_mac
+from .utils import mask_identifier, mesh_unique_id, normalize_mac
 
 
 @dataclass
@@ -50,12 +49,7 @@ ISSUE_INSECURE_HTTP = "insecure_http"
 
 def _mask_identifier(value: Any, *, keep: int = 5) -> str:
     """Return a short non-sensitive suffix for logs."""
-    text = str(value or "")
-    if not text:
-        return "<unknown>"
-    suffix = text[-keep:] if len(text) > keep else text
-    suffix = suffix.lstrip(".:")
-    return f"...{suffix}"
+    return mask_identifier(value, keep=keep)
 
 
 def _is_loopback_host(host: str) -> bool:

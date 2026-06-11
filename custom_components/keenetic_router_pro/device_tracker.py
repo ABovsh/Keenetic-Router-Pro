@@ -6,7 +6,7 @@ from homeassistant.components.device_tracker import SourceType
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from .const import DOMAIN, CONF_TRACKED_CLIENTS, LINK_STATE_UP
+from .const import CONF_TRACKED_CLIENTS, LINK_STATE_UP
 from .coordinator import KeeneticCoordinator
 from .entity import ClientEntity
 from .utils import coerce_bool, find_client_by_mac, iter_tracked_clients, usable_ip
@@ -91,7 +91,10 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
     @property
     def available(self) -> bool:
         """Keep tracked clients available so missing router rows render as Away."""
-        return bool(getattr(self.coordinator, "last_update_success", True))
+        return bool(
+            getattr(self.coordinator, "last_update_success", True)
+            and not (self.coordinator.data or {}).get("clients_stale")
+        )
 
     @property
     def mac_address(self) -> str:

@@ -37,6 +37,8 @@ class ClientsMixin:
             ordered_paths = list(RCI_HOTSPOT_HOST_PATHS)
 
         last_data: Any = None
+        last_transient_error: KeeneticApiError | None = None
+        successful_fetch = False
 
         for subpath in ordered_paths:
             if subpath in self._hotspot_subpath_skip:
@@ -49,14 +51,20 @@ class ClientsMixin:
                     # Latch this subpath off so we stop hitting an endpoint
                     # the firmware does not expose every coordinator tick.
                     self._hotspot_subpath_skip.add(subpath)
+                else:
+                    last_transient_error = err
                 _LOGGER.debug("hotspot subpath %s failed: %s", subpath, err)
                 continue
 
+            successful_fetch = True
             items = _nested_dict_items(data, "hosts", "host", "items")
 
             if items:
                 self._hotspot_subpath_winner = subpath
                 return items
+
+        if not successful_fetch and last_transient_error is not None:
+            raise last_transient_error
 
         _LOGGER.debug(
             "No clients parsed from hotspot host response type=%s",
@@ -167,23 +175,21 @@ class ClientsMixin:
             e.g. {"Policy0": "VPN", "Policy1": "Smart Home", ...}
         """
         try:
-            # Doğru endpoint: GET /rci/ip/policy
             data = await self._rci_get("ip/policy")
-            if not data or not isinstance(data, dict):
+        except KeeneticApiError as err:
+            if _is_endpoint_missing(err):
                 return {}
-
-            policies = {}
-            for policy_id, policy_data in data.items():
-                if isinstance(policy_data, dict):
-                    desc = policy_data.get("description") or policy_id
-                    policies[policy_id] = str(desc)
-
-            return policies
-        except asyncio.CancelledError:
             raise
-        except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError) as err:
-            _LOGGER.debug("Error getting policies: %s", err)
+        if not data or not isinstance(data, dict):
             return {}
+
+        policies = {}
+        for policy_id, policy_data in data.items():
+            if isinstance(policy_data, dict):
+                desc = policy_data.get("description") or policy_id
+                policies[policy_id] = str(desc)
+
+        return policies
 
     async def async_get_host_policies(self) -> Dict[str, Dict[str, Any]]:
         """Get policy assignments for all hosts.

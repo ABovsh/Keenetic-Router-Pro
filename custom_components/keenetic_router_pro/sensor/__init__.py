@@ -7,9 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from ..const import DOMAIN
 from ..coordinator import KeeneticCoordinator
-from .. import KeeneticClient
 from ..entity_setup import DynamicEntityTracker, register_dynamic_entities
 from ..utils import iter_new_items, iter_tracked_clients
 
@@ -91,6 +89,7 @@ from .dns import (
     KeeneticDnsProxyFailedRequestsSensor,
 )
 from .ipsec import KeeneticIpsecViciOomTotalSensor
+from .wireguard import KeeneticWgRxSensor, KeeneticWgTxSensor, KeeneticWgUptimeSensor
 
 
 async def async_setup_entry(
@@ -140,15 +139,6 @@ async def async_setup_entry(
     host = entry.data.get("host") or entry.data.get("ip", "unknown")
     entities.append(KeeneticLocalIpSensor(coordinator, entry, host))
 
-    # Main router port sensors
-    main_ports = coordinator.data.get("port_info", [])
-    for port in main_ports:
-        if not isinstance(port, dict):
-            continue
-        port_label = port.get("label")
-        if port_label is not None:
-            entities.append(KeeneticMainPortSensor(coordinator, entry, port_label))
-
     entities.append(KeeneticMeshSystemStateSensor(coordinator, entry))
 
     tracker = DynamicEntityTracker()
@@ -166,6 +156,27 @@ async def async_setup_entry(
         for wan in iter_new_items(coordinator, "wan_interfaces", tracker.wan_ids):
             wan_id = wan["id"]
             dynamic_entities.extend(_wan_sensor_set(wan_id))
+        for port in coordinator.data.get("port_info", []) or []:
+            if not isinstance(port, dict) or port.get("label") is None:
+                continue
+            port_label = str(port["label"])
+            if tracker.mark_main_port(port_label):
+                dynamic_entities.append(
+                    KeeneticMainPortSensor(coordinator, entry, port_label)
+                )
+        wireguard = coordinator.data.get("wireguard") or {}
+        profiles = wireguard.get("profiles", {}) if isinstance(wireguard, dict) else {}
+        if isinstance(profiles, dict):
+            for profile_id in profiles:
+                if not tracker.mark_wireguard(str(profile_id)):
+                    continue
+                dynamic_entities.extend(
+                    [
+                        KeeneticWgUptimeSensor(coordinator, entry, str(profile_id)),
+                        KeeneticWgRxSensor(coordinator, entry, str(profile_id)),
+                        KeeneticWgTxSensor(coordinator, entry, str(profile_id)),
+                    ]
+                )
         crypto_maps = coordinator.data.get("crypto_maps") or {}
         if not isinstance(crypto_maps, dict):
             crypto_maps = {}

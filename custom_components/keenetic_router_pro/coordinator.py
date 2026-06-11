@@ -235,6 +235,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 clients,
                 ip_neighbours,
                 host_policies,
+                policies,
                 ndns_info,
                 ping_check_status,
                 crypto_maps,
@@ -248,6 +249,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _bounded(self.client.async_get_clients()),
                 _bounded(self.client.async_get_ip_neighbours()),
                 _bounded(self.client.async_get_host_policies()) if slow_refresh else _resolve(_prev.get("host_policies", {})),
+                _bounded(self.client.async_get_policies()) if very_slow_refresh else _resolve(_prev.get("policies", {})),
                 _bounded(self.client.async_get_ndns_info()) if very_slow_refresh else _resolve(_prev.get("ndns", {})),
                 _bounded(self.client.async_get_ping_check_status()) if medium_refresh else _resolve(_prev.get("ping_check_status", {})),
                 _bounded(self.client.async_get_ipsec_status()) if ipsec_status_refresh else _resolve(_prev.get("crypto_maps", {})),
@@ -300,6 +302,9 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # fallback nodes (which used to flip mesh unique_ids).
             mesh_nodes = _ok("mesh_nodes", mesh_nodes, _prev.get("mesh_nodes", []))
             host_policies = dict_or_empty(_ok("host_policies", host_policies, {}))
+            policies = dict_or_empty(
+                _ok("policies", policies, _prev.get("policies", {}))
+            )
             ndns_info = dict_or_empty(_ok("ndns_info", ndns_info, {}))
             ping_check_status = dict_or_empty(
                 _ok("ping_check_status", ping_check_status, {})
@@ -491,6 +496,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 port_info = _prev.get("port_info", [])
                 interface_stats = _prev.get("interface_stats", {})
 
+            interface_stats_failed = isinstance(interface_stats, BaseException)
             wifi = _ok("wifi", wifi, [])
             wireguard = _ok("wireguard", wireguard, [])
             vpn_tunnels = _ok("vpn_tunnels", vpn_tunnels, [])
@@ -499,6 +505,9 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             traffic_stats = dict_or_empty(_ok("traffic_stats", traffic_stats, {}))
             port_info = list_or_empty(_ok("port_info", port_info, []))
             interface_stats = dict_or_empty(_ok("interface_stats", interface_stats, {}))
+            if interface_stats_failed:
+                interface_stats = _prev.get("interface_stats", {})
+                wan_interfaces = _prev.get("wan_interfaces", wan_interfaces)
 
             # Emit a single aggregated warning per tick for any non-critical
             # fetches that fell back to defaults. Keeping this above debug
@@ -513,7 +522,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     ", ".join(failure.name for failure in failed_fetches),
                 )
 
-            wan_stats_fresh = medium_refresh
+            wan_stats_fresh = medium_refresh and not interface_stats_failed
 
             # ---------- WAN enrichment (CPU-only, runs on already-fetched
             # data — logic unchanged from the sequential implementation) ----------
@@ -720,6 +729,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "client_stats": client_stats,
                 "ndns": ndns_info,
                 "host_policies": host_policies,
+                "policies": policies,
                 "port_info": port_info,
                 "ping_check_status": ping_check_status,
                 "_iface_fingerprint": iface_fp,

@@ -231,3 +231,29 @@ def _extract_parse_messages(data: Any) -> List[str]:
 
     _walk(data)
     return lines
+
+
+def _extract_command_messages(data: Any) -> List[str]:
+    """Return explicit command-status messages without descriptive fields."""
+    lines: List[str] = []
+
+    def _walk(value: Any) -> None:
+        if isinstance(value, str):
+            lines.extend(line for line in value.splitlines() if line)
+            return
+        if isinstance(value, list):
+            for item in value:
+                _walk(item)
+            return
+        if not isinstance(value, dict):
+            return
+        for key in ("message", "text", "line", "event"):
+            if key in value:
+                _walk(value[key])
+                return
+        for nested in value.values():
+            if isinstance(nested, (dict, list)):
+                _walk(nested)
+
+    _walk(data)
+    return lines

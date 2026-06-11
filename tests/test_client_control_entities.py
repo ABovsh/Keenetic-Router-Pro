@@ -87,6 +87,30 @@ def test_client_policy_select_maps_options_and_refreshes_after_change() -> None:
     assert entity.current_option == "Deny (Blocked)"
 
 
+def test_client_policy_select_tracks_coordinator_policy_changes() -> None:
+    entry = _entry()
+    coordinator = _coordinator()
+    coordinator.data["policies"] = {"Policy1": "VPN"}
+    entity = KeeneticClientPolicySelect(
+        coordinator=coordinator,
+        entry=entry,
+        api_client=SimpleNamespace(),
+        mac="aa:bb:cc:dd:ee:ff",
+        label="Tablet",
+        initial_ip=None,
+        policies={"Policy1": "Old VPN label"},
+    )
+
+    assert entity.options == ["Default", "VPN", "Deny (Blocked)"]
+    assert entity.current_option == "VPN"
+
+    coordinator.data["policies"] = {"Policy1": "Renamed VPN", "Policy2": "IoT"}
+    coordinator.data["host_policies"]["aa:bb:cc:dd:ee:ff"]["policy"] = "Policy2"
+
+    assert entity.options == ["Default", "IoT", "Renamed VPN", "Deny (Blocked)"]
+    assert entity.current_option == "IoT"
+
+
 def test_client_policy_select_is_unavailable_when_client_row_disappears() -> None:
     """Policy controls need a live client row before sending router commands."""
     entry = _entry()
@@ -106,6 +130,32 @@ def test_client_policy_select_is_unavailable_when_client_row_disappears() -> Non
     coordinator.data["clients_by_mac"] = {}
 
     assert entity.available is False
+
+
+def test_client_entities_are_unavailable_when_client_snapshot_is_stale() -> None:
+    entry = _entry()
+    coordinator = _coordinator()
+    coordinator.data["clients_stale"] = True
+    coordinator.last_update_success = True
+    entity = KeeneticClientPolicySelect(
+        coordinator=coordinator,
+        entry=entry,
+        api_client=SimpleNamespace(),
+        mac="aa:bb:cc:dd:ee:ff",
+        label="Tablet",
+        initial_ip="192.0.2.10",
+        policies={"Policy1": "VPN"},
+    )
+    tracker = KeeneticClientTracker(
+        coordinator=coordinator,
+        entry=entry,
+        mac="aa:bb:cc:dd:ee:ff",
+        label="Tablet",
+        initial_ip="192.0.2.10",
+    )
+
+    assert entity.available is False
+    assert tracker.available is False
 
 
 def test_client_policy_setup_deduplicates_same_mac_variants() -> None:

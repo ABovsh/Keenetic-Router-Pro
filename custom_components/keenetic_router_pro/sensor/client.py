@@ -15,7 +15,7 @@ from homeassistant.const import UnitOfInformation, UnitOfTime, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
 from ..entity import ClientEntity
-from ..utils import bytes_to_gib, coerce_bool, coerce_seconds, is_client_online
+from ..utils import bytes_to_gib, coerce_seconds, is_client_online
 
 ZERO_COUNTER_VALUES = (None, "", 0, "0")
 _BAND_2_4 = "2.4 GHz"

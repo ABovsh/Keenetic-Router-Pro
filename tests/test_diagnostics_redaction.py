@@ -13,6 +13,7 @@ from custom_components.keenetic_router_pro.diagnostics import (
     _MAC_KEYED_INDEXES,
     async_get_config_entry_diagnostics,
 )
+from custom_components.keenetic_router_pro.api import KeeneticClient
 
 
 MAC = "AA:BB:CC:DD:EE:FF"
@@ -89,3 +90,23 @@ def test_known_mac_keyed_indexes_cover_realistic_payload_shape() -> None:
     ]
 
     assert leaked_keys == []
+
+
+async def test_diagnostics_client_repr_does_not_expose_router_host() -> None:
+    private_host = "private-router.example"
+    entry = SimpleNamespace(
+        title="router",
+        version=1,
+        domain="keenetic_router_pro",
+        source="user",
+        data={},
+        options={},
+        runtime_data=SimpleNamespace(
+            coordinator=SimpleNamespace(data={}),
+            client=KeeneticClient(private_host, TEST_USERNAME, TEST_PASSWORD),
+        ),
+    )
+
+    result = await async_get_config_entry_diagnostics(None, entry)
+
+    assert private_host not in result["client"]["repr"]

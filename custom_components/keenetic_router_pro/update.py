@@ -18,9 +18,9 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .api import KeeneticApiError, KeeneticAuthError, KeeneticClient
-from .const import DOMAIN
 from .coordinator import KeeneticCoordinator
 from .entity import ControllerEntity, MeshEntity
+from .utils import mask_identifier
 from .entity_setup import DynamicEntityTracker, register_dynamic_entities
 from .utils import iter_new_items
 
@@ -378,7 +378,9 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
             )
 
         _LOGGER.info(
-            "Starting firmware update for mesh node %s (%s)", node_name, node_ip
+            "Starting firmware update for mesh node %s (%s)",
+            mask_identifier(node_name),
+            mask_identifier(node_ip),
         )
 
         try:
@@ -394,7 +396,8 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
                 )
 
             _LOGGER.info(
-                "Update started on %s, waiting for node to reboot", node_name
+                "Update started on %s, waiting for node to reboot",
+                mask_identifier(node_name),
             )
             await asyncio.sleep(10)
 
@@ -411,7 +414,9 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
                         avail = updated_node.get("firmware_available")
                         if new_fw and avail and new_fw == avail:
                             _LOGGER.info(
-                                "Mesh node %s updated to %s", node_name, new_fw
+                                "Mesh node %s updated to %s",
+                                mask_identifier(node_name),
+                                new_fw,
                             )
                             break
                 except asyncio.CancelledError:
@@ -419,14 +424,22 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
                 except KeeneticAuthError:
                     raise
                 except _REBOOT_WAIT_ERRORS as err:
-                    _LOGGER.debug("Mesh node %s firmware re-check failed: %s", node_name, err)
+                    _LOGGER.debug(
+                        "Mesh node %s firmware re-check failed: %s",
+                        mask_identifier(node_name),
+                        err,
+                    )
 
         except HomeAssistantError:
             raise
         except asyncio.CancelledError:
             raise
         except Exception as err:  # noqa: BLE001  # surface any unexpected failure as HA error to the user
-            _LOGGER.exception("Mesh firmware update failed for %s: %s", node_name, err)
+            _LOGGER.exception(
+                "Mesh firmware update failed for %s: %s",
+                mask_identifier(node_name),
+                err,
+            )
             raise HomeAssistantError(
                 f"Mesh firmware update failed for {node_name}: {err}"
             ) from err

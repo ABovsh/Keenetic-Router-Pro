@@ -9,7 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from .const import DOMAIN, FIELD_CONNECTED, LINK_STATE_UP
+from .const import FIELD_CONNECTED, LINK_STATE_UP
 from .coordinator import KeeneticCoordinator
 from .entity import MeshEntity, ControllerEntity, WanEntity, CryptoMapEntity
 from .entity_setup import DynamicEntityTracker, register_dynamic_entities

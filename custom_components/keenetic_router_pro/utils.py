@@ -469,3 +469,13 @@ def get_client_device_info(
             else None
         ),
     }
+
+
+def mask_identifier(value: Any, *, keep: int = 5) -> str:
+    """Return a short non-sensitive suffix for logs."""
+    text = str(value or "")
+    if not text:
+        return "<unknown>"
+    suffix = text[-keep:] if len(text) > keep else text
+    suffix = suffix.lstrip(".:")
+    return f"...{suffix}"

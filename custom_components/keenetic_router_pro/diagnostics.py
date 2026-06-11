@@ -16,7 +16,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_TRACKED_CLIENTS, DOMAIN
+from .const import CONF_TRACKED_CLIENTS
 
 # Keys whose values should NEVER appear in a diagnostics dump.
 # Matching is case-insensitive (HA's redactor lower-cases keys).

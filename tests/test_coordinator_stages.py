@@ -44,6 +44,7 @@ class StageFixtureClient:
         self.clients = deepcopy(CLIENTS)
         self.ip_neighbours = deepcopy(IP_NEIGHBOURS)
         self.host_policies = deepcopy(HOST_POLICIES)
+        self.policies = {"Policy1": "VPN"}
         self.ndns_info = deepcopy(NDNS_INFO)
         self.ping_check = deepcopy(PING_CHECK)
         self.crypto_maps = deepcopy(CRYPTO_MAPS)
@@ -104,6 +105,10 @@ class StageFixtureClient:
     async def async_get_host_policies(self) -> dict[str, Any]:
         self._record_call("host_policies")
         return deepcopy(self.host_policies)
+
+    async def async_get_policies(self) -> dict[str, Any]:
+        self._record_call("policies")
+        return deepcopy(self.policies)
 
     async def async_get_ndns_info(self) -> dict[str, Any]:
         self._record_call("ndns")
@@ -233,6 +238,7 @@ async def test_coordinator_pipeline_fixtures_publishes_expected_data_keys() -> N
         "client_stats",
         "ndns",
         "host_policies",
+        "policies",
         "port_info",
         "ping_check_status",
         "_iface_fingerprint",
@@ -320,6 +326,7 @@ async def test_coordinator_fast_only_tick_skips_medium_slow_and_very_slow_calls(
         "current_version",
         "available_version",
         "host_policies",
+        "policies",
         "ndns",
         "ping_check",
         "ipsec_status",
@@ -373,6 +380,7 @@ async def test_coordinator_medium_tick_refreshes_interface_derived_calls_only() 
         "current_version",
         "available_version",
         "host_policies",
+        "policies",
         "ndns",
         "ipsec_status",
         "dns_proxy",
@@ -413,6 +421,7 @@ async def test_coordinator_very_slow_tick_refreshes_diagnostics_and_update_data(
 
     assert client.calls.get("current_version", 0) == 1
     assert client.calls.get("available_version", 0) == 1
+    assert client.calls.get("policies", 0) == 1
     assert client.calls.get("ndns", 0) == 1
     assert client.calls.get("dns_proxy", 0) == 1
     assert client.calls.get("ipsec_diagnostics", 0) == 1
@@ -474,6 +483,25 @@ async def test_coordinator_client_fetch_failure_marks_clients_stale() -> None:
     data = await _updated_data(coordinator)
 
     assert data["clients_stale"] is True
+
+
+async def test_coordinator_interface_stats_failure_preserves_prior_wan_samples() -> None:
+    client = StageFixtureClient()
+    coordinator = _coordinator(client)
+    previous = await _updated_data(coordinator)
+    coordinator.data = previous
+    coordinator._refresh_count = 3
+
+    async def fail_interface_stats(**kwargs: Any) -> dict[str, Any]:
+        raise RuntimeError("interface stats unavailable")
+
+    client.async_get_all_interface_stats = fail_interface_stats  # type: ignore[method-assign]
+
+    data = await _updated_data(coordinator)
+
+    assert data["interface_stats"] == previous["interface_stats"]
+    assert data["wan_interfaces"] == previous["wan_interfaces"]
+    assert data["wan_by_id"] == previous["wan_by_id"]
 
 
 @pytest.mark.parametrize(

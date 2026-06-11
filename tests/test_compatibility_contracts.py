@@ -44,6 +44,7 @@ EXPECTED_COORDINATOR_KEYS = {
     "client_stats",
     "ndns",
     "host_policies",
+    "policies",
     "port_info",
     "ping_check_status",
     "_iface_fingerprint",

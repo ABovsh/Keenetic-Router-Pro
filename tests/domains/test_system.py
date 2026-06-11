@@ -72,6 +72,23 @@ async def test_async_start_firmware_update_system_update_text_result_succeeds() 
 
 
 @pytest.mark.parametrize(
+    "result",
+    [
+        {"status": "failed", "message": "insufficient storage"},
+        False,
+        "error: update unavailable",
+    ],
+)
+async def test_async_start_firmware_update_rejects_failure_results(result: object) -> None:
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    client._rci_get = AsyncMock(return_value={})
+    client._rci_post = AsyncMock(return_value=result)
+
+    with pytest.raises(HomeAssistantError):
+        await client.async_start_firmware_update()
+
+
+@pytest.mark.parametrize(
     ("request_error", "post_error"),
     [
         (KeeneticApiError("500 failed"), None),

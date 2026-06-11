@@ -10,6 +10,7 @@ import asyncio
 import inspect
 import sys
 import types
+from typing import Any
 from types import SimpleNamespace
 
 import pytest

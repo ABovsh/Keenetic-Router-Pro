@@ -6,11 +6,11 @@ from typing import Dict
 
 import aiohttp
 import asyncio
-import base64
 import hashlib
 import logging
 
 from ..const import DOMAIN
+from ..utils import mask_identifier
 from .constants import RCI_ROOT
 from .errors import KeeneticApiError, KeeneticAuthError
 from .helpers import _cookie_header_from_response, _response_summary
@@ -28,7 +28,10 @@ class _AuthMixin:
         headers = self._basic_auth_headers()
         url = f"{self._base}{RCI_ROOT}/"
 
-        _LOGGER.debug("Authenticating to Keenetic via %s", url)
+        _LOGGER.debug(
+            "Authenticating to Keenetic router %s",
+            mask_identifier(self._host),
+        )
 
         # Only an explicit credential rejection (401/403) may raise
         # KeeneticAuthError — that is what HA turns into a reauth flow.
@@ -60,7 +63,7 @@ class _AuthMixin:
         self._authenticated = True
         _LOGGER.debug(
             "Authenticated to Keenetic router at %s:%s",
-            self._host,
+            mask_identifier(self._host),
             self._port,
         )
 
@@ -81,7 +84,10 @@ class _AuthMixin:
         auth_url = f"{self._base}/auth"
 
         # --- Step 1: GET /auth to obtain challenge & session cookie ---
-        _LOGGER.debug("NDW2 challenge auth: GET %s", auth_url)
+        _LOGGER.debug(
+            "NDW2 challenge auth: GET /auth on %s",
+            mask_identifier(self._host),
+        )
         try:
             async with asyncio.timeout(self._request_timeout):
                 get_resp = await self._session.get(auth_url, allow_redirects=False)
@@ -138,7 +144,11 @@ class _AuthMixin:
         if session_cookie:
             post_headers["Cookie"] = session_cookie
 
-        _LOGGER.debug("NDW2 challenge: POST %s payload_login_set=%s", auth_url, bool(self._username))
+        _LOGGER.debug(
+            "NDW2 challenge: POST /auth on %s payload_login_set=%s",
+            mask_identifier(self._host),
+            bool(self._username),
+        )
 
         try:
             async with asyncio.timeout(self._request_timeout):
@@ -160,13 +170,13 @@ class _AuthMixin:
                 len(post_text),
             )
 
-            if post_resp.status == 401:
+            if post_resp.status in (401, 403):
                 raise KeeneticAuthError(
                     "Challenge auth rejected. Check the username, password and "
                     "challenge-auth setting."
                 )
             if post_resp.status not in (200, 204):
-                # Non-401 failure: router-side problem, not rejected creds.
+                # Non-auth failure: router-side problem, not rejected creds.
                 raise KeeneticApiError(
                     "Challenge auth failed "
                     f"(status={post_resp.status}, body={_response_summary(post_text)!r})"
@@ -179,7 +189,7 @@ class _AuthMixin:
 
         _LOGGER.debug(
             "Authenticated to Keenetic router at %s:%s (NDW2 challenge OK)",
-            self._host,
+            mask_identifier(self._host),
             self._port,
         )
 

@@ -56,8 +56,15 @@ async def test_clients_error_paths_return_empty_shapes(exc: Exception) -> None:
     client = _client()
     client._rci_get = AsyncMock(side_effect=exc)
 
-    assert await client.async_get_policies() == {}
     assert await client.async_get_host_policies() == {}
+
+
+async def test_async_get_policies_propagates_transient_api_failure() -> None:
+    client = _client()
+    client._rci_get = AsyncMock(side_effect=KeeneticApiError("HTTP 503"))
+
+    with pytest.raises(KeeneticApiError):
+        await client.async_get_policies()
 
 
 
@@ -87,3 +94,11 @@ async def test_async_get_clients_latches_winner_subpath_for_next_call() -> None:
     assert items and items[0]["mac"] == "AA:BB:CC:00:00:01"
     assert call_log[0] == winner_path
     assert len(call_log) == 1
+
+
+async def test_async_get_clients_raises_after_all_transient_subpath_failures() -> None:
+    client = _client()
+    client._rci_get = AsyncMock(side_effect=KeeneticApiError("HTTP 503"))
+
+    with pytest.raises(KeeneticApiError, match="503"):
+        await client.async_get_clients()

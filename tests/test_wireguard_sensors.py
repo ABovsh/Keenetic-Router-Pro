@@ -68,3 +68,17 @@ def test_wireguard_sensors_fall_back_for_missing_or_invalid_values() -> None:
     assert uptime.native_value == 0
     assert rx.native_value is None
     assert tx.native_value is None
+
+
+def test_wireguard_sensors_become_unavailable_when_profile_disappears() -> None:
+    entry = SimpleNamespace(entry_id="entry_123", title="Router")
+    coordinator = SimpleNamespace(
+        data={"wireguard": {"profiles": {"Wireguard0": {"uptime": 10}}}}
+    )
+    sensor = KeeneticWgUptimeSensor(coordinator, entry, "Wireguard0")
+
+    assert sensor.available is True
+
+    coordinator.data["wireguard"]["profiles"] = {}
+
+    assert sensor.available is False

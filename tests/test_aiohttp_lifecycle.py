@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from custom_components.keenetic_router_pro.api import KeeneticClient
+from custom_components.keenetic_router_pro.api import KeeneticAuthError, KeeneticClient
 
 
 class _Response:
@@ -105,6 +105,36 @@ async def test_401_retry_releases_original_and_retry_response() -> None:
 
     assert await client.async_get_system_info() == {"hostname": "router"}
     assert session.open_responses == []
+
+
+async def test_401_retries_then_raises_auth_error() -> None:
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    session = _Session([
+        _Response({}),  # initial auth
+        _Response({}, status=401),
+        _Response({}),  # retry auth
+        _Response({}, status=401),
+    ])
+    await client.async_start(session)
+
+    with pytest.raises(KeeneticAuthError):
+        await client.async_get_system_info()
+
+    assert session.open_responses == []
+
+
+async def test_403_is_authorization_error_without_reauth_retry() -> None:
+    from custom_components.keenetic_router_pro.api import KeeneticApiError
+
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    session = _Session([_Response({}), _Response({}, status=403)])
+    await client.async_start(session)
+
+    with pytest.raises(KeeneticApiError) as excinfo:
+        await client.async_get_system_info()
+
+    assert not isinstance(excinfo.value, KeeneticAuthError)
+    assert not session.responses
 
 
 async def test_start_node_firmware_update_releases_node_responses() -> None:

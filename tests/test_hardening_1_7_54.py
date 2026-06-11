@@ -245,7 +245,6 @@ def test_wan_throughput_rejects_boolean() -> None:
     sensor._get_wan = lambda: {"rx_throughput": True}  # type: ignore[attr-defined]
     # native_value reads self._wan; emulate via property bypass
     wan = {"rx_throughput": True}
-    value = KeeneticWanRxBytesSensor.native_value.fget  # type: ignore[attr-defined]
 
     class _Stub(KeeneticWanRxBytesSensor):
         def __init__(self) -> None:  # noqa: D401 - test stub
@@ -288,7 +287,6 @@ def test_diagnostics_redacts_tracked_client_names() -> None:
 def test_mesh_reboot_button_name_is_static() -> None:
     from custom_components.keenetic_router_pro.button import KeeneticMeshRebootButton
 
-    button = KeeneticMeshRebootButton.__new__(KeeneticMeshRebootButton)
     assert KeeneticMeshRebootButton._attr_has_entity_name is True
 
     class _Stub(KeeneticMeshRebootButton):

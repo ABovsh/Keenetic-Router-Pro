@@ -12,7 +12,7 @@ import aiohttp
 from homeassistant.exceptions import HomeAssistantError
 
 from ...const import DOMAIN, RCI_SHOW_VERSION
-from ...utils import bracket_host, coerce_bool
+from ...utils import bracket_host, coerce_bool, mask_identifier
 from ..constants import RCI_ROOT
 from ..errors import KeeneticApiError
 from ..helpers import (
@@ -84,7 +84,7 @@ class SystemMixin:
         except asyncio.CancelledError:
             raise
         except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError) as err:
-            _LOGGER.debug("Error checking firmware update: %s", err)
+            _LOGGER.debug("Error checking firmware update: %s", type(err).__name__)
             return {}
 
 
@@ -133,7 +133,11 @@ class SystemMixin:
                 if status in ("started", "ok", True, "accepted"):
                     _LOGGER.info("Controller firmware update started via system/update")
                     return True
-            if result is not None:
+            if isinstance(result, str) and result.strip().lower() in {
+                "started",
+                "ok",
+                "accepted",
+            }:
                 _LOGGER.info("Controller firmware update started via system/update")
                 return True
         except KeeneticApiError as err:
@@ -175,8 +179,8 @@ class SystemMixin:
                 _LOGGER.info(
                     "Starting firmware update for mesh node %s via controller "
                     "MWS member %s",
-                    label,
-                    member,
+                    mask_identifier(label),
+                    mask_identifier(member),
                 )
                 parse_result = await self._rci_parse(
                     f"mws member {member} update start"
@@ -196,7 +200,7 @@ class SystemMixin:
                 if error_marker:
                     _LOGGER.warning(
                         "Controller MWS update for node %s reported: %s",
-                        label,
+                        mask_identifier(label),
                         error_marker,
                     )
                     raise KeeneticApiError(error_marker)
@@ -207,8 +211,8 @@ class SystemMixin:
                 _LOGGER.warning(
                     "Controller MWS update command failed for node %s: %s. "
                     "Trying direct node update fallback.",
-                    label,
-                    err,
+                    mask_identifier(label),
+                    type(err).__name__,
                 )
 
         scheme = "https" if self._ssl else "http"
@@ -225,7 +229,9 @@ class SystemMixin:
             node_headers = await self._authenticate_to_node(node_ip, port)
             if not node_headers:
                 _LOGGER.debug(
-                    "Could not authenticate to node %s on port %s", label, port
+                    "Could not authenticate to node %s on port %s",
+                    mask_identifier(label),
+                    port,
                 )
                 continue
 
@@ -244,7 +250,11 @@ class SystemMixin:
                             if isinstance(ndw, dict):
                                 ndw_components = ndw.get("components", "")
                     elif resp.status == 401:
-                        _LOGGER.debug("Auth rejected on node %s port %s", label, port)
+                        _LOGGER.debug(
+                            "Auth rejected on node %s port %s",
+                            mask_identifier(label),
+                            port,
+                        )
                         self._node_auth_headers.pop((node_ip, port), None)
                         continue
                     else:
@@ -256,7 +266,9 @@ class SystemMixin:
                         ]
                         _LOGGER.debug(
                             "Node %s has %d components: %s",
-                            label, len(current_components), current_components,
+                            mask_identifier(label),
+                            len(current_components),
+                            current_components,
                         )
 
                         # Step 2: POST component list to /rci/
@@ -267,7 +279,8 @@ class SystemMixin:
 
                         url = f"{base}{RCI_ROOT}/"
                         _LOGGER.info(
-                            "Staging component update on node %s", label
+                            "Staging component update on node %s",
+                            mask_identifier(label),
                         )
                         async with asyncio.timeout(self._request_timeout):
                             resp = await self._session.post(
@@ -280,7 +293,7 @@ class SystemMixin:
                                 _LOGGER.debug(
                                     "Auth rejected while staging update on node "
                                     "%s port %s",
-                                    label,
+                                    mask_identifier(label),
                                     port,
                                 )
                                 self._node_auth_headers.pop((node_ip, port), None)
@@ -289,14 +302,17 @@ class SystemMixin:
                                 text = await resp.text()
                                 _LOGGER.warning(
                                     "Node %s component staging returned %s: %s",
-                                    label, resp.status, _response_summary(text),
+                                    mask_identifier(label),
+                                    resp.status,
+                                    _response_summary(text),
                                 )
                                 continue
 
                         # Step 3: Commit
                         url = f"{base}{RCI_ROOT}/components/commit"
                         _LOGGER.info(
-                            "Committing update on node %s", label
+                            "Committing update on node %s",
+                            mask_identifier(label),
                         )
                         async with asyncio.timeout(self._request_timeout):
                             resp = await self._session.post(
@@ -309,14 +325,14 @@ class SystemMixin:
                                 _LOGGER.info(
                                     "Node %s firmware update started via "
                                     "components/commit",
-                                    label,
+                                    mask_identifier(label),
                                 )
                                 return True
                             if resp.status == 401:
                                 _LOGGER.debug(
                                     "Auth rejected while committing update on node "
                                     "%s port %s",
-                                    label,
+                                    mask_identifier(label),
                                     port,
                                 )
                                 self._node_auth_headers.pop((node_ip, port), None)
@@ -325,27 +341,38 @@ class SystemMixin:
                             text = await resp.text()
                             _LOGGER.warning(
                                 "Node %s commit returned %s: %s",
-                                label, resp.status, _response_summary(text),
+                                mask_identifier(label),
+                                resp.status,
+                                _response_summary(text),
                             )
                     else:
                         _LOGGER.debug(
                             "Node %s has no ndw.components in version info",
-                            label,
+                            mask_identifier(label),
                         )
             except asyncio.TimeoutError:
-                _LOGGER.debug("Timeout connecting to node %s port %s", label, port)
+                _LOGGER.debug(
+                    "Timeout connecting to node %s port %s",
+                    mask_identifier(label),
+                    port,
+                )
                 continue
             except asyncio.CancelledError:
                 raise
             except (KeeneticApiError, aiohttp.ClientError, ValueError, TypeError, KeyError) as err:  # NOSONAR python:S1045 — aiohttp.ClientError overlaps with TimeoutError only via ServerTimeoutError; we want TimeoutError handled separately above for clarity
                 _LOGGER.debug(
-                    "Components update on node %s failed: %s", label, err
+                    "Components update on node %s failed: %s",
+                    mask_identifier(label),
+                    type(err).__name__,
                 )
 
             # Fallback: POST /rci/system/update (older firmware)
             try:
                 url = f"{base}{RCI_ROOT}/system/update"
-                _LOGGER.info("Attempting update on node %s via %s", label, url)
+                _LOGGER.info(
+                    "Attempting direct update on node %s",
+                    mask_identifier(label),
+                )
                 async with asyncio.timeout(self._request_timeout):
                     resp = await self._session.post(
                         url,
@@ -355,13 +382,14 @@ class SystemMixin:
                 async with resp:
                     if resp.status in (200, 204):
                         _LOGGER.info(
-                            "Node %s firmware update started via system/update", label
+                            "Node %s firmware update started via system/update",
+                            mask_identifier(label),
                         )
                         return True
                     if resp.status == 401:
                         _LOGGER.debug(
                             "Auth rejected on node %s port %s during system/update",
-                            label,
+                            mask_identifier(label),
                             port,
                         )
                         self._node_auth_headers.pop((node_ip, port), None)
@@ -370,17 +398,29 @@ class SystemMixin:
                         text = await resp.text()
                         _LOGGER.debug(
                             "Node %s system/update returned %s: %s",
-                            label, resp.status, _response_summary(text),
+                            mask_identifier(label),
+                            resp.status,
+                            _response_summary(text),
                         )
             except asyncio.TimeoutError:
-                _LOGGER.debug("Timeout on system/update for node %s", label)
+                _LOGGER.debug(
+                    "Timeout on system/update for node %s",
+                    mask_identifier(label),
+                )
             except asyncio.CancelledError:
                 raise
             except (KeeneticApiError, aiohttp.ClientError, ValueError, TypeError, KeyError) as err:
-                _LOGGER.debug("system/update on node %s failed: %s", label, err)
+                _LOGGER.debug(
+                    "system/update on node %s failed: %s",
+                    mask_identifier(label),
+                    type(err).__name__,
+                )
 
         msg = f"Could not start firmware update on node {label}"
-        _LOGGER.error(msg)
+        _LOGGER.error(
+            "Could not start firmware update on node %s",
+            mask_identifier(label),
+        )
         raise HomeAssistantError(msg)
 
 
@@ -419,7 +459,7 @@ class SystemMixin:
                     _LOGGER.debug(
                         "Node %s did not return challenge header, "
                         "using basic auth fallback",
-                        node_ip,
+                        mask_identifier(node_ip),
                     )
                     await get_resp.read()
                     # Do NOT cache the Basic fallback: a transient error
@@ -456,7 +496,9 @@ class SystemMixin:
                 await post_resp.read()
                 if post_resp.status in (200, 204):
                     _LOGGER.debug(
-                        "Challenge auth to node %s:%s succeeded", node_ip, port
+                        "Challenge auth to node %s:%s succeeded",
+                        mask_identifier(node_ip),
+                        port,
                     )
                     session_cookie = (
                         _cookie_header_from_response(post_resp) or session_cookie
@@ -467,18 +509,27 @@ class SystemMixin:
 
                 _LOGGER.debug(
                     "Challenge auth to node %s:%s returned status %s",
-                    node_ip, port, post_resp.status,
+                    mask_identifier(node_ip),
+                    port,
+                    post_resp.status,
                 )
                 return None
 
         except asyncio.TimeoutError:
-            _LOGGER.debug("Timeout during auth to node %s:%s", node_ip, port)
+            _LOGGER.debug(
+                "Timeout during auth to node %s:%s",
+                mask_identifier(node_ip),
+                port,
+            )
             return None
         except asyncio.CancelledError:
             raise
         except (KeeneticApiError, aiohttp.ClientError, ValueError, TypeError, KeyError) as err:
             _LOGGER.debug(
-                "Auth to node %s:%s failed: %s", node_ip, port, err
+                "Auth to node %s:%s failed: %s",
+                mask_identifier(node_ip),
+                port,
+                type(err).__name__,
             )
             return None
 
@@ -503,7 +554,7 @@ class SystemMixin:
         except asyncio.CancelledError:
             raise
         except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError) as err:
-            _LOGGER.debug("firmware progress fetch failed: %s", err)
+            _LOGGER.debug("firmware progress fetch failed: %s", type(err).__name__)
             return {}
         
 
@@ -564,5 +615,5 @@ class SystemMixin:
         except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError) as err:
             if _is_endpoint_missing(err):
                 self._ndns_supported = False
-            _LOGGER.debug("Error getting NDNS info: %s", err)
+            _LOGGER.debug("Error getting NDNS info: %s", type(err).__name__)
             return {}

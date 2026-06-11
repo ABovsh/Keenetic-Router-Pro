@@ -114,6 +114,9 @@ class FakeKeeneticClient:
     async def async_get_host_policies(self) -> dict[str, Any]:
         return {"aa:bb:cc:dd:ee:ff": {"policy": "Policy0"}}
 
+    async def async_get_policies(self) -> dict[str, Any]:
+        return {"Policy0": "Default VPN"}
+
     async def async_get_ndns_info(self) -> dict[str, Any]:
         return {"name": "router", "domain": "keenetic.pro"}
 

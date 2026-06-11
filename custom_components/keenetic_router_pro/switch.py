@@ -6,7 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .api import KeeneticClient
-from .const import DOMAIN, LINK_STATE_UP
+from .const import LINK_STATE_UP
 from .coordinator import KeeneticCoordinator
 from .entity import ControllerEntity, CryptoMapEntity, InterfaceEntity, WanEntity
 from .entity_setup import DynamicEntityTracker, register_dynamic_entities

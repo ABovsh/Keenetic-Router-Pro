@@ -35,6 +35,11 @@ class _BaseWgSensor(ControllerEntity, SensorEntity):
         return self._wg_profiles.get(self._wg_name, {}) or {}
 
     @property
+    def available(self) -> bool:
+        """Become unavailable when this WireGuard profile disappears."""
+        return bool(getattr(super(), "available", True)) and self._wg_name in self._wg_profiles
+
+    @property
     def _wg_label(self) -> str:
         profile = self._wg
         label = profile.get("label")

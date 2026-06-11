@@ -6,7 +6,6 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .api import KeeneticClient
-from .const import DOMAIN
 from .coordinator import KeeneticCoordinator
 from .entity import ClientEntity
 from .utils import iter_tracked_clients
@@ -26,7 +25,9 @@ async def async_setup_entry(
     client: KeeneticClient = runtime.client
     entities: list[SelectEntity] = []
 
-    policies = await client.async_get_policies()
+    policies = coordinator.data.get("policies", {})
+    if not isinstance(policies, dict):
+        policies = {}
 
     for mac, name, initial_ip in iter_tracked_clients(entry):
         entities.append(
@@ -71,18 +72,23 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
             initial_ip=initial_ip,
         )
         self._api_client = api_client
-        self._policies = policies
-
         self._id_to_display: dict[str, str] = {}
         self._display_to_id: dict[str, str] = {}
+        self._policies: dict[str, str] = {}
+        self._set_policies(policies)
 
+    def _set_policies(self, policies: dict[str, str]) -> None:
+        """Rebuild policy display mappings from a coordinator snapshot."""
+        self._policies = dict(policies)
+        self._id_to_display = {}
+        self._display_to_id = {}
         self._id_to_display["__default__"] = DEFAULT_POLICY_OPTION
         self._display_to_id[DEFAULT_POLICY_OPTION] = "__default__"
         self._id_to_display["__deny__"] = DENY_POLICY_OPTION
         self._display_to_id[DENY_POLICY_OPTION] = "__deny__"
 
         used_labels: set[str] = {DEFAULT_POLICY_OPTION, DENY_POLICY_OPTION}
-        for policy_id, description in policies.items():
+        for policy_id, description in self._policies.items():
             label = str(description or policy_id)
             # Disambiguate policies that share a description so each dropdown
             # label maps to exactly one policy id (no duplicate entries, and
@@ -92,6 +98,12 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
             used_labels.add(label)
             self._id_to_display[policy_id] = label
             self._display_to_id[label] = policy_id
+
+    def _sync_policies(self) -> None:
+        """Apply policy changes published by the coordinator."""
+        policies = self.coordinator.data.get("policies")
+        if isinstance(policies, dict) and policies != self._policies:
+            self._set_policies(policies)
 
     @property
     def unique_id(self) -> str:
@@ -106,6 +118,7 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
     @property
     def options(self) -> list[str]:
         """Return list of available options."""
+        self._sync_policies()
         policy_names = sorted(
             self._id_to_display[policy_id] for policy_id in self._policies
         )
@@ -114,6 +127,7 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
     @property
     def current_option(self) -> str | None:
         """Return current selected policy."""
+        self._sync_policies()
         host_policies = self.coordinator.data.get("host_policies", {})
         
         host_info = host_policies.get(self._mac, {})
@@ -144,6 +158,7 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return additional state attributes."""
+        self._sync_policies()
         host_policies = self.coordinator.data.get("host_policies", {})
         host_info = host_policies.get(self._mac, {})
 

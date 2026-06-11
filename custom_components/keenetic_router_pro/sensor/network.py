@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -227,15 +226,20 @@ class KeeneticMainPortSensor(ControllerEntity, SensorEntity):
         return f"{self._entry_id}_port_{self._port_label}"
 
     @property
-    def native_value(self) -> str:
+    def native_value(self) -> str | None:
         """Return port state."""
         ports = self.coordinator.data.get("port_info", [])
         for port in ports:
             if not isinstance(port, dict):
                 continue
-            if port.get("label") == self._port_label:
+            if str(port.get("label")) == self._port_label:
                 return port.get("link", "unknown")
-        return "not_found"
+        return None
+
+    @property
+    def available(self) -> bool:
+        """Become unavailable when the router no longer reports this port."""
+        return bool(getattr(super(), "available", True)) and self.native_value is not None
 
     @property
     def icon(self) -> str:
@@ -254,7 +258,7 @@ class KeeneticMainPortSensor(ControllerEntity, SensorEntity):
         for port in ports:
             if not isinstance(port, dict):
                 continue
-            if port.get("label") == self._port_label:
+            if str(port.get("label")) == self._port_label:
                 attrs = {
                     "label": port.get("label"),
                     "appearance": port.get("appearance"),

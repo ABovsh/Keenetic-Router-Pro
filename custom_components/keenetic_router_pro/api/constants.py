@@ -23,6 +23,11 @@ _SENSITIVE_RESPONSE_RE = re.compile(
     r'("[^"]*"|\'[^\']*\'|[^,\s;}\]]+)'
 )
 _CLI_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.:/@+-]+$")
+_RCI_PARSE_ERROR_RE = re.compile(
+    r"\b(?:error|failed|unknown|invalid|forbidden)\b"
+    r"|\b(?:not found|permission denied|access denied|operation not allowed)\b",
+    re.IGNORECASE,
+)
 _DNS_PROXY_STAT_RE = re.compile(
     r"^\s*(?P<ip>\S+)\s+"
     r"(?P<port>\d+)\s+"
