@@ -93,7 +93,8 @@ def coerce_byte_count(value: Any) -> int | None:
     ``0`` for a transiently-absent counter would look like a counter reset
     and double-count the value back up in HA long-term statistics.
     """
-    if value in (None, ""):
+    if value in (None, "") or isinstance(value, bool):
+        # bool is an int subclass; a boolean-typed counter is garbage, not 0/1.
         return None
     try:
         as_float = float(value)

@@ -149,8 +149,13 @@ class MeshMixin:
                 self._mws_member_supported = False
                 return fallback_nodes
 
+            # Transient failure (timeout/5xx while the controller is busy):
+            # do NOT return the MAC-keyed fallback — that would flip every
+            # mesh node id from CID to MAC for one tick and change entity
+            # unique_ids. Surface the failure; the coordinator keeps the
+            # previous snapshot.
             _LOGGER.debug("Error getting mesh nodes from mws/member: %s", err)
-            return fallback_nodes
+            raise
 
         return nodes or fallback_nodes
 

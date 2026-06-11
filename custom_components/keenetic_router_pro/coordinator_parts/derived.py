@@ -31,10 +31,30 @@ def mesh_associations(mesh_nodes: Any) -> dict[str, Any]:
         node_id = node.get("cid") or node.get("id")
         if not node_id:
             continue
-        count = coerce_int(node.get("associations"), 0)
+        associations = node.get("associations")
+        if isinstance(associations, (list, dict)):
+            # Some firmwares expose the associated stations themselves
+            # instead of a count.
+            count = len(associations)
+        else:
+            count = coerce_int(associations, 0)
         by_node[str(node_id)] = count
         total += count
     return {"total": total, "by_node": by_node}
+
+
+def real_client_macs(clients_by_mac: dict[str, dict[str, Any]]) -> set[str]:
+    """Return MACs of genuine hotspot clients, excluding neighbour-only ghosts.
+
+    Synthetic records built from the IP-neighbour (ARP/ND) table alone must
+    not participate in new-device detection — a host that was merely pinged
+    once is not a "new device connected".
+    """
+    return {
+        mac
+        for mac, client in clients_by_mac.items()
+        if isinstance(client, dict) and not client.get("neighbour-only")
+    }
 
 
 def build_clients_by_mac(clients: list[Any]) -> dict[str, dict[str, Any]]:

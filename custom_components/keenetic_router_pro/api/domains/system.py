@@ -63,8 +63,8 @@ class SystemMixin:
             current = data.get("title") or data.get("release")
             available = data.get("fw-available") or data.get("release-available")
 
-            has_update = (
-                current and available and 
+            has_update = bool(
+                current and available and
                 current != available and
                 data.get("fw-update-sandbox") == "stable"
             )
@@ -422,9 +422,11 @@ class SystemMixin:
                         node_ip,
                     )
                     await get_resp.read()
-                    headers = self._basic_auth_headers()
-                    self._node_auth_headers[(node_ip, port)] = headers
-                    return dict(headers)
+                    # Do NOT cache the Basic fallback: a transient error
+                    # page without the challenge header would otherwise
+                    # latch an unusable header for the whole session on a
+                    # challenge-auth node.
+                    return dict(self._basic_auth_headers())
 
                 # Step 2: Compute hash
                 ha1 = hashlib.md5(
@@ -528,14 +530,19 @@ class SystemMixin:
             # Ensure we always return a dict
             result = dict(data) if isinstance(data, dict) else {}
             
-            # Parse tunnel information if present
+            # Parse tunnel information if present. Build NEW dicts — the
+            # payload may be a shared tick-cache subtree served by
+            # reference from _rci_get, and in-place coercion would corrupt
+            # it for every other reader in the same refresh.
             if "ttp" in result and isinstance(result["ttp"], dict):
-                ttp = result["ttp"]
+                ttp = dict(result["ttp"])
+                result["ttp"] = ttp
                 # Ensure tunnel list is properly formatted
                 if "tunnel" in ttp and isinstance(ttp["tunnel"], list):
                     tunnels = []
                     for tunnel in ttp["tunnel"]:
                         if isinstance(tunnel, dict):
+                            tunnel = dict(tunnel)
                             # Convert string numbers to int where appropriate
                             for key in ["uptime", "idle", "timeout", "linger"]:
                                 if key in tunnel and tunnel[key] is not None:

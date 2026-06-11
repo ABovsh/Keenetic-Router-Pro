@@ -27,7 +27,8 @@ from custom_components.keenetic_router_pro.api import KeeneticApiError, Keenetic
         # Traffic flowing but zero answers -> down.
         ({"proxy-status": [{"proxy-name": "main", "proxy-config": "server https://dns.example/id", "proxy-stat": "1.1.1.1 53 10 0 0 5ms 6ms 10", "proxy-https": {"server-https": {"uri": "https://dns.example/private/path"}}}]}, "down", 1),
         ({"proxy-status": []}, "unknown", 0),
-        ({"proxy-status": "bad"}, None, 0),
+        # Malformed (non-list/dict) proxy-status degrades to "no proxies".
+        ({"proxy-status": "bad"}, "unknown", 0),
         ({}, "unknown", 0),
     ],
 )

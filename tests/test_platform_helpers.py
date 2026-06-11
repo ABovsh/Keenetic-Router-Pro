@@ -237,7 +237,8 @@ def test_mesh_reboot_button_uses_node_cid() -> None:
         "aa:bb:cc:dd:ee:ff",
     )
 
-    assert button.name == "Reboot Kitchen Extender"
+    # has_entity_name=True: the device (node) name is prepended by HA.
+    assert button.name == "Reboot"
 
     asyncio.run(button.async_press())
 

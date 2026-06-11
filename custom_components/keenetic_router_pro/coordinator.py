@@ -18,6 +18,7 @@ from .coordinator_parts.derived import (
     counter_rate_bytes_per_second,
     mesh_associations,
     order_wan_interfaces,
+    real_client_macs,
 )
 from .coordinator_parts.fetching import (
     FetchFailure,
@@ -293,7 +294,11 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             interfaces = _ok("interfaces", interfaces, [])
             ip_neighbours = _ok("ip_neighbours", ip_neighbours, [], silent=True)
             clients = merge_clients_with_neighbours(clients, ip_neighbours)
-            mesh_nodes = _ok("mesh_nodes", mesh_nodes, [])
+            # On a transient mesh fetch failure keep the previous snapshot:
+            # an empty default would flap every mesh entity unavailable, and
+            # the API layer now raises instead of returning MAC-keyed
+            # fallback nodes (which used to flip mesh unique_ids).
+            mesh_nodes = _ok("mesh_nodes", mesh_nodes, _prev.get("mesh_nodes", []))
             host_policies = dict_or_empty(_ok("host_policies", host_policies, {}))
             ndns_info = dict_or_empty(_ok("ndns_info", ndns_info, {}))
             ping_check_status = dict_or_empty(
@@ -671,7 +676,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # per tick; one walk now suffices and the index is the same
             # object that ends up in the coordinator data dict.
             clients_by_mac = build_clients_by_mac(clients)
-            current_macs = set(clients_by_mac.keys())
+            # Neighbour-only ghosts (ARP/ND records with no hotspot client)
+            # stay in the index for enrichment but never count as "new
+            # devices" — a host that was merely pinged is not a connection.
+            current_macs = real_client_macs(clients_by_mac)
 
             previous_by_mac = (
                 self.data.get("clients_by_mac", {}) if self.data else {}

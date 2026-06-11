@@ -106,10 +106,8 @@ class KeeneticMeshRebootButton(MeshEntity, ButtonEntity):
 
     @property
     def name(self) -> str:
-        node = self._node
-        node_name = node.get("name") if node else None
-        if node_name:
-            return f"Reboot {node_name}"
+        # has_entity_name=True: HA prepends the device (node) name itself;
+        # embedding the node name here double-printed it.
         return "Reboot"
 
     async def async_press(self, **_: Any) -> None:

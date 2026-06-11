@@ -76,9 +76,9 @@ class DnsMixin:
             return {}
         try:
             data = await self._rci_get("show/dns-proxy") or {}
-            proxy_status = data.get("proxy-status") or []
-            if not isinstance(proxy_status, list):
-                return {}
+            # Firmware may collapse a single proxy to a dict; _dict_items
+            # flattens both shapes (same pattern as server-https below).
+            proxy_status = _dict_items(data.get("proxy-status") or [])
             self._dns_proxy_supported = True
 
             proxies: List[Dict[str, Any]] = []

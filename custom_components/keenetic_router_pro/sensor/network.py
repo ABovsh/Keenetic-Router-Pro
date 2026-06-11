@@ -498,7 +498,7 @@ class _WanThroughputBase(_WanSensorBase):
         if not wan:
             return None
         v = wan.get(self._field)
-        if v is None:
+        if v is None or isinstance(v, bool):
             return None
         try:
             return float(v) * 8  # bytes/s → bit/s

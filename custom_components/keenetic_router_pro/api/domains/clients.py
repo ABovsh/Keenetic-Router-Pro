@@ -223,7 +223,9 @@ class ClientsMixin:
             mac: Client MAC address
             policy: Policy ID (e.g. "Policy0", "Policy1") or "deny"/"default"
         """
-        mac_clean = _validate_cli_arg(mac.lower().replace("-", ":"), "MAC address")
+        mac_clean = _validate_cli_arg(
+            str(mac or "").lower().replace("-", ":"), "MAC address"
+        )
         policy = _validate_cli_arg(policy, "policy")
 
         if policy.lower() == "deny":

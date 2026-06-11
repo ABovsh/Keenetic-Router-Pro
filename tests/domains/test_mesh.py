@@ -15,6 +15,9 @@ from custom_components.keenetic_router_pro.api import KeeneticApiError, Keenetic
 
 async def test_mesh_nodes_fallback_from_clients_without_mws_endpoint() -> None:
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    # MWS endpoint is absent on this model: only "not found" may trigger the
+    # MAC-keyed fallback (a transient error now raises instead).
+    client._rci_get = AsyncMock(side_effect=KeeneticApiError('not found: "member"'))
 
     result = await client.async_get_mesh_nodes(
         clients=[

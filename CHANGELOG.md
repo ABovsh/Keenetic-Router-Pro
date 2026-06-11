@@ -8,6 +8,50 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.54
+
+Reliability round: no more false re-authentication prompts, steadier mesh and
+client entities.
+
+### 🐛 Fixed
+
+- **An offline or rebooting router no longer asks you to re-enter the
+  password.** Connection timeouts, refused connections and router-side errors
+  during sign-in were treated as rejected credentials, so every outage could
+  pop a "re-authenticate" notice that vanished once the router came back.
+  The notice now appears only when the router actually rejects the
+  username/password; an unreachable router just shows its entities as
+  unavailable until it returns.
+- **Mesh devices no longer duplicate after a momentary hiccup.** A brief
+  timeout while reading the Wi-Fi System member list could re-key every mesh
+  node for one update and leave ghost/duplicate extender devices behind. A
+  failed read now keeps the previous mesh snapshot instead.
+- **A device that was merely seen in the ARP table no longer fires a "new
+  device connected" event**, so new-device notifications stop false-alarming
+  on hosts that were pinged once or linger in the neighbour cache.
+- **The per-client "Wi-Fi Session" and "Last Seen" sensors no longer freeze**
+  for a connected client that is idle (no traffic between polls).
+- **A mesh-node firmware update no longer gets stuck after a momentary node
+  error.** A transient error page during node sign-in used to lock in an
+  unusable login method until Home Assistant restarted.
+- **The OOM-events counter is more exact** around log rollover edges (events
+  in the same second can no longer be counted twice, and a Feb 29 log line is
+  no longer dropped).
+- **DNS proxy health sensors now work on firmware that reports a single
+  proxy** instead of staying unavailable.
+- Mesh client counts now read correctly on firmware that lists the associated
+  stations instead of reporting a count.
+- The mesh node **Reboot** button no longer repeats the node name twice in
+  its friendly name.
+- Malformed boolean values from the router can no longer appear as tiny
+  traffic/throughput readings; they show as unavailable instead.
+
+### 🔒 Privacy
+
+- Tracked-client device names (e.g. personal phone names) are now redacted
+  from the downloadable diagnostics file, matching the existing MAC/IP
+  redaction.
+
 ## 1.7.53
 
 No user-visible behavior changed.

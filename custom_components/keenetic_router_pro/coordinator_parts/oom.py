@@ -39,6 +39,11 @@ def parse_keenetic_log_ts(
         try:
             return parsed.replace(year=year)
         except ValueError:
+            # Feb 29 parsed against the leap base year cannot be re-stamped
+            # onto a non-leap year; clamp to Feb 28 instead of dropping the
+            # event from the OOM counter.
+            if parsed.month == 2 and parsed.day == 29:
+                return parsed.replace(year=year, day=28)
             return None
     return None
 
@@ -103,9 +108,17 @@ def advance_oom_state(
         if new_last_seen is None or event_dt > new_last_seen:
             new_last_seen = event_dt
 
-    new_last_seen_count = (
-        counts_by_ts.get(new_last_seen, last_seen_count) if new_last_seen else 0
-    )
+    if new_last_seen is None:
+        new_last_seen_count = 0
+    elif new_last_seen == last_seen_dt:
+        # The log window can slide so fewer events at the last-seen second
+        # remain visible; keep the high-water mark or a later re-grown
+        # window would double-count the same-second events.
+        new_last_seen_count = max(
+            last_seen_count, counts_by_ts.get(new_last_seen, 0)
+        )
+    else:
+        new_last_seen_count = counts_by_ts.get(new_last_seen, 0)
     return {
         "last_seen_iso": new_last_seen.isoformat() if new_last_seen else None,
         "last_seen_count": new_last_seen_count,

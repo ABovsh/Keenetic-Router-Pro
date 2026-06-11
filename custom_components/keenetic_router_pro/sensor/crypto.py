@@ -198,7 +198,7 @@ class _CryptoMapThroughputBase(_CryptoMapSensorBase):
         if cmap is None:
             return None
         v = cmap.get(self._field)
-        if v is None:
+        if v is None or isinstance(v, bool):
             return None
         try:
             return float(v) * 8  # bytes/s → bit/s

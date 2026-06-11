@@ -392,8 +392,10 @@ class ClientEntity(_FingerprintedCoordinatorEntity):
     # subscribe to ``_handle_coordinator_update`` of their own — those
     # sensors define their own native_value from the same coordinator data
     # and HA's own state-bus dedup handles them at the SQLite level.
-    _CLIENT_FINGERPRINT_IGNORE = frozenset({"last-seen", "uptime"})
-    _FINGERPRINT_IGNORE = _CLIENT_FINGERPRINT_IGNORE
+    # Subclasses that DO surface one of these fields (the dedicated uptime /
+    # last-seen sensors) override ``_FINGERPRINT_IGNORE`` directly — that is
+    # the attribute the live dedup in ``_handle_coordinator_update`` reads.
+    _FINGERPRINT_IGNORE = frozenset({"last-seen", "uptime"})
 
     def __init__(
         self,
@@ -412,12 +414,7 @@ class ClientEntity(_FingerprintedCoordinatorEntity):
         self._initial_ip = initial_ip
 
     def _client_fingerprint(self, client: dict[str, Any] | None) -> dict[str, Any] | None:
-        return _entity_fingerprint(client, self._client_ignored_fingerprint_fields)
-
-    @property
-    def _client_ignored_fingerprint_fields(self) -> frozenset[str]:
-        """Return client fields ignored for this entity's state writes."""
-        return self._CLIENT_FINGERPRINT_IGNORE
+        return _entity_fingerprint(client, self._FINGERPRINT_IGNORE)
 
     @property
     def _fingerprint_source(self) -> dict[str, Any] | None:

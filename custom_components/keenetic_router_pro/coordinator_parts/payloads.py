@@ -22,6 +22,10 @@ def merge_clients_with_neighbours(
     neighbours: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Attach IP-neighbour discovery data to hotspot client records."""
+    if not isinstance(neighbours, list):
+        # Firmware shape drift (dict instead of list) must not silently
+        # poison the merge — treat it as "no neighbour data".
+        neighbours = []
     neighbours_by_mac = {
         normalize_mac(neighbour.get("mac")): neighbour
         for neighbour in neighbours
@@ -74,6 +78,9 @@ def merge_clients_with_neighbours(
         merged.append(
             {
                 "mac": mac,
+                # Marks a record synthesized purely from the ARP/ND table —
+                # excluded from new-device detection (see real_client_macs).
+                "neighbour-only": True,
                 "via": neighbour.get("via"),
                 "ip": neighbour.get("address")
                 if neighbour.get("address-family") == "ipv4"

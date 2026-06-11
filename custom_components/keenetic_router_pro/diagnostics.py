@@ -16,7 +16,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from .const import CONF_TRACKED_CLIENTS, DOMAIN
 
 # Keys whose values should NEVER appear in a diagnostics dump.
 # Matching is case-insensitive (HA's redactor lower-cases keys).
@@ -88,6 +88,26 @@ def _strip_mac_keyed_indexes(data: Any) -> Any:
     return stripped
 
 
+def _redact_tracked_client_names(data: dict[str, Any]) -> dict[str, Any]:
+    """Strip human-readable client names from stored entry data.
+
+    Tracked-client dicts carry ``name`` (a LAN hostname / personal label);
+    ``async_redact_data`` already scrubs their ``mac``/``ip`` keys, but a
+    blanket ``name`` redaction would also blank harmless labels elsewhere,
+    so we redact it only inside the tracked-clients list.
+    """
+    tracked = data.get(CONF_TRACKED_CLIENTS)
+    if not isinstance(tracked, list):
+        return data
+    return {
+        **data,
+        CONF_TRACKED_CLIENTS: [
+            {**c, "name": "**REDACTED**"} if isinstance(c, dict) and "name" in c else c
+            for c in tracked
+        ],
+    }
+
+
 async def async_get_config_entry_diagnostics(
     _hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
@@ -106,8 +126,8 @@ async def async_get_config_entry_diagnostics(
             "version": entry.version,
             "domain": entry.domain,
             "source": entry.source,
-            "data": dict(entry.data),
-            "options": dict(entry.options),
+            "data": _redact_tracked_client_names(dict(entry.data)),
+            "options": _redact_tracked_client_names(dict(entry.options)),
         },
         "client": {
             # Defensive: KeeneticClient overrides __repr__ to redact creds,

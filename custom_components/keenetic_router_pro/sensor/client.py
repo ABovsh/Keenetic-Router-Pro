@@ -134,7 +134,9 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_suggested_display_precision = 0
-    _CLIENT_FINGERPRINT_IGNORE = frozenset({"last-seen"})
+    # Uptime must stay IN the fingerprint or this sensor freezes for idle
+    # clients; only last-seen remains noise here.
+    _FINGERPRINT_IGNORE = frozenset({"last-seen"})
 
     def __init__(
         self,
@@ -175,7 +177,8 @@ class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
     _attr_icon = "mdi:clock"
     _attr_device_class = None
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _CLIENT_FINGERPRINT_IGNORE = frozenset({"uptime"})
+    # last-seen must stay IN the fingerprint for this sensor to advance.
+    _FINGERPRINT_IGNORE = frozenset({"uptime"})
 
     def __init__(
         self,
