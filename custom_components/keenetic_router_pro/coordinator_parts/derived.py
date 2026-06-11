@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..utils import coerce_int, is_client_online, normalize_mac
+from ..utils import coerce_byte_count, coerce_int, is_client_online, normalize_mac
 
 
 def counter_rate_bytes_per_second(
@@ -15,14 +15,21 @@ def counter_rate_bytes_per_second(
     """Calculate a monotonic byte-counter rate, clamping resets to zero."""
     if elapsed_seconds <= 0:
         return 0.0
-    # A missing/garbage sample on either side must not fabricate a delta
-    # (a bool/None previous would coerce to 0 and produce a massive spike).
-    if current is None or previous is None or isinstance(current, bool) or isinstance(previous, bool):
+    # A missing/garbage sample on either side must not fabricate a delta:
+    # coerce_byte_count rejects None/bool/negative/non-finite values, so a
+    # malformed previous can't read as 0 (massive spike) and a huge current
+    # can't raise OverflowError out of the refresh.
+    cur = coerce_byte_count(current)
+    prev = coerce_byte_count(previous)
+    if cur is None or prev is None:
         return 0.0
-    delta = coerce_int(current) - coerce_int(previous)
+    delta = cur - prev
     if delta < 0:
         return 0.0
-    return max(0.0, delta / elapsed_seconds)
+    try:
+        return max(0.0, delta / elapsed_seconds)
+    except OverflowError:
+        return 0.0
 
 
 def mesh_associations(mesh_nodes: Any) -> dict[str, Any]:

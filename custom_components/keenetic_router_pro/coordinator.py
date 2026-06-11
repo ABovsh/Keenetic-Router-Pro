@@ -9,7 +9,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import KeeneticClient
 from .const import DOMAIN, FAST_SCAN_INTERVAL
@@ -322,10 +322,18 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # the api layer already debug-logs the reason. When the slow tier
             # is skipped, keep the previous snapshot instead of rebuilding it.
             if slow_refresh:
+                # On a transient fetch failure keep the previous snapshot —
+                # an empty default would flap every IPsec entity unavailable
+                # and wipe tunnel state for one tick.
                 crypto_maps = {
                     name: dict(cmap)
                     for name, cmap in dict_or_empty(
-                        _ok("crypto_maps", crypto_maps, {}, silent=True)
+                        _ok(
+                            "crypto_maps",
+                            crypto_maps,
+                            _prev.get("crypto_maps", {}),
+                            silent=True,
+                        )
                     ).items()
                     if isinstance(cmap, dict)
                 }
@@ -340,7 +348,12 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # very-slow cadence as DNS diagnostics. Missing log access is
             # non-critical and should not affect normal polling.
             ipsec_diagnostics = dict_or_empty(
-                _ok("ipsec_diagnostics", ipsec_diagnostics, {}, silent=True)
+                _ok(
+                    "ipsec_diagnostics",
+                    ipsec_diagnostics,
+                    _prev.get("ipsec_diagnostics", {}),
+                    silent=True,
+                )
             )
             # Monotonic OOM counter — persists across HA restarts via Store,
             # dedups against the per-event router timestamp so each OOM is
@@ -403,6 +416,16 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # masking real outages. Raise ``UpdateFailed`` so HA marks the
             # coordinator as failed and retries on the next tick.
             critical_failures_to_exception(failed_fetches)
+
+            # An HTTP-200 with an empty/garbled critical payload must fail
+            # the tick like an exception would — publishing it would flip
+            # every WAN/Wi-Fi/port entity to empty/down while staying
+            # "available" (ghost-mode update).
+            if not system or not interfaces:
+                raise UpdateFailed(
+                    "Critical router payload empty "
+                    f"(system={bool(system)}, interfaces={bool(interfaces)})"
+                )
 
             client_stats = self.client.summarize_client_stats(clients)
  
@@ -507,13 +530,24 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 interface_stats = _prev.get("interface_stats", {})
 
             interface_stats_failed = isinstance(interface_stats, BaseException)
-            wifi = _ok("wifi", wifi, [])
-            wireguard = _ok("wireguard", wireguard, [])
-            vpn_tunnels = _ok("vpn_tunnels", vpn_tunnels, [])
-            wan_status = dict_or_empty(_ok("wan_status", wan_status, {}))
-            wan_interfaces = _ok("wan_interfaces", wan_interfaces, [])
-            traffic_stats = dict_or_empty(_ok("traffic_stats", traffic_stats, {}))
-            port_info = list_or_empty(_ok("port_info", port_info, []))
+            # On a stage-2 task exception keep the previous snapshot — an
+            # empty default would make every existing entity of that family
+            # unavailable for the tick (same policy as mesh/crypto_maps).
+            wifi = _ok("wifi", wifi, _prev.get("wifi", []))
+            wireguard = _ok("wireguard", wireguard, _prev.get("wireguard", []))
+            vpn_tunnels = _ok("vpn_tunnels", vpn_tunnels, _prev.get("vpn_tunnels", []))
+            wan_status = dict_or_empty(
+                _ok("wan_status", wan_status, _prev.get("wan_status", {}))
+            )
+            wan_interfaces = _ok(
+                "wan_interfaces", wan_interfaces, _prev.get("wan_interfaces", [])
+            )
+            traffic_stats = dict_or_empty(
+                _ok("traffic_stats", traffic_stats, _prev.get("traffic_stats", {}))
+            )
+            port_info = list_or_empty(
+                _ok("port_info", port_info, _prev.get("port_info", []))
+            )
             interface_stats = dict_or_empty(_ok("interface_stats", interface_stats, {}))
             if interface_stats_failed:
                 interface_stats = _prev.get("interface_stats", {})

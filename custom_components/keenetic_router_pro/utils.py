@@ -39,7 +39,8 @@ def bracket_host(host: Any) -> str:
 
 def coerce_seconds(value: Any, default: int | None = 0) -> int | None:
     """Convert a Keenetic duration value to whole seconds."""
-    if value in UNKNOWN_SECONDS_VALUES:
+    if value in UNKNOWN_SECONDS_VALUES or isinstance(value, bool):
+        # bool is an int subclass; True would read as a 1-second duration.
         return default
 
     try:
@@ -105,7 +106,8 @@ def coerce_byte_count(value: Any) -> int | None:
         return None
     try:
         as_float = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: float(huge_int) on an absurd firmware integer.
         return None
     if not math.isfinite(as_float) or as_float < 0:
         return None
@@ -330,7 +332,7 @@ def get_mesh_device_info(
         node_ip = node.get("ip") or host
 
         scheme = "https" if ssl else "http"
-        if fqdn and fqdn.strip():
+        if isinstance(fqdn, str) and fqdn.strip():
             configuration_url = f"{scheme}://{fqdn}"
         else:
             configuration_url = (
@@ -451,11 +453,11 @@ def get_client_device_info(
     model = None
     if client:
         ssdp = client.get("ssdp")
-        if ssdp:
-            if ssdp.get("manufacturer"):
+        if isinstance(ssdp, dict):
+            if isinstance(ssdp.get("manufacturer"), str):
                 manufacturer = ssdp.get("manufacturer")
 
-            if ssdp.get("model"):
+            if isinstance(ssdp.get("model"), str):
                 model = ssdp.get("model")
 
     ip_address = usable_ip(initial_ip)

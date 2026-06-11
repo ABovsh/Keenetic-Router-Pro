@@ -131,6 +131,17 @@ config_entries.OptionsFlow = _OptionsFlow
 data_entry_flow = types.ModuleType("homeassistant.data_entry_flow")
 data_entry_flow.FlowResult = dict
 
+
+class _AbortFlow(Exception):
+    """Stub of homeassistant.data_entry_flow.AbortFlow."""
+
+    def __init__(self, reason: str = "aborted", *args: object) -> None:
+        super().__init__(reason, *args)
+        self.reason = reason
+
+
+data_entry_flow.AbortFlow = _AbortFlow
+
 core = types.ModuleType("homeassistant.core")
 core.HomeAssistant = object
 

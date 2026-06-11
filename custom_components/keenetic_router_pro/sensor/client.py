@@ -452,7 +452,7 @@ class KeeneticClientConnectionTypeSensor(ClientEntity, SensorEntity):
 
         # Try to determine from interface
         iface = client.get("interface")
-        if iface:
+        if isinstance(iface, (str, dict)):
             iface_name = iface if isinstance(iface, str) else iface.get("name", "")
             if "WifiMaster0" in str(iface_name):
                 return "WiFi 2.4 GHz"
@@ -595,7 +595,7 @@ class KeeneticClientWifiModeSensor(ClientEntity, SensorEntity):
         mws = client.get("mws")
         if isinstance(mws, dict):
             mode = mws.get("mode")
-            if mode:
+            if isinstance(mode, str) and mode:
                 return mode.upper()
 
         mode = client.get("mode")

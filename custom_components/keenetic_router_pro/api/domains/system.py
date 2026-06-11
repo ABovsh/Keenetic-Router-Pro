@@ -31,19 +31,20 @@ class SystemMixin:
     async def async_get_system_info(self) -> Dict[str, Any]:
         """Return basic system info: hostname, version, cpu, memory, uptime, etc."""
         data = await self._rci_get("show/system")
-        return data or {}
+        # A list/str payload would crash every dict consumer downstream.
+        return data if isinstance(data, dict) else {}
 
 
     async def async_get_current_version_info(self) -> Dict[str, Any]:
         """Return version info"""
         data = await self._rci_get(RCI_SHOW_VERSION)
-        return data or {}
-    
+        return data if isinstance(data, dict) else {}
+
 
     async def async_get_available_version_info(self) -> Dict[str, Any]:
         """Return version info"""
         data = await self._rci_get("components/check-update")
-        return data or {}
+        return data if isinstance(data, dict) else {}
 
 
     async def async_reboot(self) -> None:

@@ -38,7 +38,8 @@ class KeeneticCpuLoadSensor(ControllerEntity, SensorEntity):
         for key in ("cpu_load", "cpuload", "cpu", "cpu-utilization"):
             if key in sys:
                 value = coerce_float(sys[key])
-                if value is not None:
+                # A percentage outside 0-100 is firmware garbage, not load.
+                if value is not None and 0 <= value <= 100:
                     return value
         return None
 

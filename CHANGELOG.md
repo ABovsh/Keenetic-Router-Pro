@@ -8,6 +8,49 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.57
+
+Third deep-audit round: outage behaviour, sign-in robustness and data
+integrity.
+
+### 🐛 Fixed
+
+- **A rebooting router can no longer flip the whole dashboard to
+  empty/zero values.** A reply that came back technically successful but
+  with an empty or garbled core payload used to publish a "ghost" update
+  (every WAN/Wi-Fi/port entity empty-but-available); it now counts as a
+  failed poll, and a momentary glitch in one data family (Wi-Fi, WireGuard,
+  VPN, ports, traffic) keeps the previous snapshot instead of knocking
+  those entities out for a tick.
+- **Adding an already-configured router now says so** instead of failing
+  with "Unexpected error".
+- **The options dialog opens even for a damaged or legacy entry** that is
+  missing a stored connection field, falling back to the saved client list.
+- **Sign-in to the router can no longer stall indefinitely** when the
+  router accepts the connection but freezes mid-response.
+- **Router identity is validated** before it is derived from an interface
+  MAC, so placeholder values like "unknown" or a malformed zero MAC can't
+  create unstable duplicate entries.
+- **Multi-peer WireGuard interfaces now report total traffic** across all
+  peers instead of the first peer only.
+- **A backup WAN reported with a text "no" default-gateway flag** is no
+  longer mistaken for the default connection.
+- **A brief IPsec status glitch no longer drops tunnel entities** for one
+  update cycle.
+- A firmware update "available" indicator now respects the router's
+  explicit "no update available" verdict, matching the Update entity.
+- Several malformed-payload crashes were hardened: a non-text device
+  vendor record or mesh-node address, a list-shaped client interface
+  field, numeric mesh port labels, out-of-range CPU percentages, and
+  oversized counters can no longer break sensors or fabricate spikes.
+- New Wi-Fi networks created on the router now appear in Home Assistant
+  without a reload, like WAN and VPN switches already did.
+
+### 🔒 Privacy
+
+- Connection error messages no longer embed the router address from
+  low-level network errors.
+
 ## 1.7.56
 
 Second deep-audit round: steadier counters, sign-in resilience, less personal

@@ -20,7 +20,7 @@ from homeassistant.const import (
     CONF_SSL,
 )
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import AbortFlow, FlowResult
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -396,8 +396,14 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             for _iface_id, iface_data in bridge_candidates + candidates:
                 if not isinstance(iface_data, dict):
                     continue
-                mac = iface_data.get("mac")
-                if mac and mac != "00:00:00:00:00:00":
+                candidate = iface_data.get("mac")
+                # Validate properly: firmware/proxies can return "unknown",
+                # a differently formatted zero MAC, or a non-string — those
+                # would create unstable/colliding unique IDs or crash
+                # format_mac below.
+                normalized = normalize_mac(candidate)
+                if normalized and normalized != "00:00:00:00:00:00":
+                    mac = normalized
                     break
 
         vendor = system_info.get("vendor", "Keenetic")
@@ -529,6 +535,9 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     data={**data, CONF_TRACKED_CLIENTS: []},
                 )
 
+            except AbortFlow:
+                # "Already configured" must abort cleanly, not show "unknown".
+                raise
             except KeeneticAuthError:
                 errors["base"] = "invalid_auth"
             except KeeneticApiError:
@@ -777,18 +786,27 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
             session = async_get_clientsession(self.hass)
             try:
                 client = KeeneticClient(
-                    host=data[CONF_HOST],
-                    username=data[CONF_USERNAME],
-                    password=data[CONF_PASSWORD],
+                    # .get(): a legacy/damaged entry missing a stored field
+                    # must fall back to the preserved-client list below, not
+                    # crash the options dialog with a KeyError.
+                    host=data.get(CONF_HOST),
+                    username=data.get(CONF_USERNAME),
+                    password=data.get(CONF_PASSWORD),
                     port=data.get(CONF_PORT, DEFAULT_PORT),
                     ssl=data.get(CONF_SSL, DEFAULT_SSL),
                     use_challenge_auth=data.get(CONF_USE_CHALLENGE_AUTH, False),
                 )
                 await client.async_start(session)
-            except (KeeneticAuthError, KeeneticApiError) as err:
-                # Integration not loaded and the router is offline or rejecting
-                # credentials — keep the options form working from the preserved
-                # tracked-client list instead of raising out of the flow.
+            except (
+                KeeneticAuthError,
+                KeeneticApiError,
+                TypeError,
+                ValueError,
+            ) as err:
+                # Integration not loaded and the router is offline, rejecting
+                # credentials, or the stored entry is damaged — keep the
+                # options form working from the preserved tracked-client list
+                # instead of raising out of the flow.
                 _LOGGER.debug("Options flow could not reach router: %s", err)
                 client = None
 

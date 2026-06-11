@@ -165,6 +165,9 @@ class KeeneticMeshClientsSensor(MeshEntity, SensorEntity):
         node = self._node
         if node:
             associations = node.get("associations")
+            if isinstance(associations, (list, dict)):
+                # Some firmwares list the stations instead of a count.
+                return len(associations)
             if associations is not None:
                 return coerce_int(associations, 0)
         return 0
@@ -237,7 +240,11 @@ class KeeneticMeshCpuLoadSensor(MeshEntity, SensorEntity):
         if node:
             cpuload = node.get("cpuload")
             if cpuload is not None:
-                return coerce_float(cpuload)
+                value = coerce_float(cpuload)
+                # A percentage outside 0-100 is firmware garbage, not load.
+                if value is not None and 0 <= value <= 100:
+                    return value
+                return None
         return None
 
 
@@ -341,7 +348,7 @@ class KeeneticMeshPortSensor(MeshEntity, SensorEntity):
         for port in ports:
             if not isinstance(port, dict):
                 continue
-            if port.get("label") == self._port_label:
+            if str(port.get("label")) == self._port_label:
                 return port.get("link", "unknown")
 
         # Port no longer reported: go unavailable (see ``available``) instead
@@ -374,7 +381,7 @@ class KeeneticMeshPortSensor(MeshEntity, SensorEntity):
         for port in ports:
             if not isinstance(port, dict):
                 continue
-            if port.get("label") == self._port_label:
+            if str(port.get("label")) == self._port_label:
                 attrs = {
                     "label": port.get("label"),
                     "appearance": port.get("appearance"),

@@ -17,6 +17,7 @@ from ...const import (
     WAN_STATUS_DOWN,
     WAN_STATUS_LINK_UP,
 )
+from ...utils import coerce_bool
 from ..errors import KeeneticApiError
 from ..helpers import _dict_items, _is_endpoint_missing, _normalize_interfaces, iface_label
 from ..parsers.wan import (
@@ -195,7 +196,7 @@ class WanMixin:
                 "link_state": str(iface.get("state") or LINK_STATE_DOWN).lower(),
                 "enabled": derive_wan_enabled(iface),
                 "global": bool(iface.get("global")),
-                "defaultgw": bool(iface.get("defaultgw")),
+                "defaultgw": coerce_bool(iface.get("defaultgw")),
                 "priority": iface.get("priority"),
                 "role": role_list,
                 "security_level": iface.get("security-level"),

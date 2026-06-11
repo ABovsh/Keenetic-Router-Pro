@@ -84,14 +84,19 @@ class VpnMixin:
             peer = wg_info.get("peer")
 
             if isinstance(peer, list) and peer:
-                p = peer[0]
-                if not isinstance(p, dict):
-                    p = {}
-                remote = p.get("remote-endpoint-address")
-                if rx_val is None:
-                    rx_val = p.get("rxbytes")
-                if tx_val is None:
-                    tx_val = p.get("txbytes")
+                # Sum traffic across ALL peers — taking only the first
+                # undercounts multi-peer WireGuard interfaces.
+                dict_peers = [p for p in peer if isinstance(p, dict)]
+                first = dict_peers[0] if dict_peers else {}
+                remote = first.get("remote-endpoint-address")
+                if rx_val is None and dict_peers:
+                    vals = [p.get("rxbytes") for p in dict_peers]
+                    nums = [v for v in vals if isinstance(v, (int, float)) and not isinstance(v, bool)]
+                    rx_val = sum(nums) if nums else first.get("rxbytes")
+                if tx_val is None and dict_peers:
+                    vals = [p.get("txbytes") for p in dict_peers]
+                    nums = [v for v in vals if isinstance(v, (int, float)) and not isinstance(v, bool)]
+                    tx_val = sum(nums) if nums else first.get("txbytes")
             elif isinstance(peer, dict):
                 remote = peer.get("remote-endpoint-address")
                 if rx_val is None:

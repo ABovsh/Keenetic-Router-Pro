@@ -159,8 +159,9 @@ class KeeneticActiveConnectionsSensor(ControllerEntity, SensorEntity):
         conntotal = sys.get("conntotal", 0)
         connfree = sys.get("connfree", 0)
         try:
+            # OverflowError: int(float("inf")) on a non-finite firmware value.
             return max(0, int(conntotal) - int(connfree))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return 0
 
     @property
@@ -169,13 +170,18 @@ class KeeneticActiveConnectionsSensor(ControllerEntity, SensorEntity):
         try:
             conntotal = int(sys.get("conntotal", 0))
             connfree = int(sys.get("connfree", 0))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             conntotal = 0
             connfree = 0
+        used_percent = (
+            round(max(0, conntotal - connfree) * 100.0 / conntotal, 1)
+            if conntotal > 0
+            else 0
+        )
         return {
             "total_capacity": conntotal,
             "free": connfree,
-            "used_percent": round((conntotal - connfree) * 100.0 / conntotal, 1) if conntotal > 0 else 0,
+            "used_percent": used_percent,
         }
 
 

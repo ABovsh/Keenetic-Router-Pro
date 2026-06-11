@@ -182,7 +182,7 @@ class _Transport:
         except asyncio.TimeoutError as err:
             raise KeeneticApiError(f"Timeout for {path}") from err
         except aiohttp.ClientError as err:
-            raise KeeneticApiError(f"Connection error: {err}") from err
+            raise KeeneticApiError(f"Connection error: {type(err).__name__}") from err
 
     async def _handle_response(
         self,

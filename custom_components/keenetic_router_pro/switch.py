@@ -94,30 +94,35 @@ async def async_setup_entry(
     client: KeeneticClient = runtime.client
     entities: list[SwitchEntity] = []
 
-    # Wi-Fi interface switches
-    for net in coordinator.data.get("wifi", []):
-        if not isinstance(net, dict):
-            continue
-        iface_id = net.get("id") or net.get("name")
-        if not iface_id:
-            continue
-
-        display_name = net.get("name") or net.get("ssid") or iface_id
-
-        entities.append(
-            KeeneticWifiSwitch(
-                coordinator=coordinator,
-                entry=entry,
-                client=client,
-                interface_id=iface_id,
-                display_name=display_name,
-            )
-        )
-
     tracker = DynamicEntityTracker()
+    known_wifi_ids: set[str] = set()
+
+    def _add_wifi_switches(target: list[SwitchEntity]) -> None:
+        # Wi-Fi networks can be added on the router after setup — discover
+        # them on every coordinator update, like WAN/VPN/crypto switches.
+        for net in coordinator.data.get("wifi", []):
+            if not isinstance(net, dict):
+                continue
+            iface_id = net.get("id") or net.get("name")
+            if not iface_id or iface_id in known_wifi_ids:
+                continue
+            known_wifi_ids.add(iface_id)
+            display_name = net.get("name") or net.get("ssid") or iface_id
+            target.append(
+                KeeneticWifiSwitch(
+                    coordinator=coordinator,
+                    entry=entry,
+                    client=client,
+                    interface_id=iface_id,
+                    display_name=display_name,
+                )
+            )
+
+    _add_wifi_switches(entities)
 
     def _build_dynamic_switches() -> list[SwitchEntity]:
         dynamic_entities: list[SwitchEntity] = []
+        _add_wifi_switches(dynamic_entities)
         _add_wan_enabled_switches(
             dynamic_entities,
             coordinator,

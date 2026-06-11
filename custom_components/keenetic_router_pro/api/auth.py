@@ -57,7 +57,7 @@ class _AuthMixin:
         except asyncio.TimeoutError as err:
             raise KeeneticApiError("Auth connection timed out") from err
         except aiohttp.ClientError as err:
-            raise KeeneticApiError(f"Auth connection failed: {err}") from err
+            raise KeeneticApiError(f"Auth connection failed: {type(err).__name__}") from err
 
         self._auth_header = headers
         self._authenticated = True
@@ -94,9 +94,9 @@ class _AuthMixin:
         except asyncio.TimeoutError as err:
             raise KeeneticApiError("Challenge GET timed out") from err
         except aiohttp.ClientError as err:
-            raise KeeneticApiError(f"Challenge GET failed: {err}") from err
+            raise KeeneticApiError(f"Challenge GET failed: {type(err).__name__}") from err
 
-        async with get_resp:
+        async with asyncio.timeout(self._request_timeout), get_resp:
             _LOGGER.debug(
                 "NDW2 challenge GET response: status=%s has_challenge=%s has_cookie=%s",
                 get_resp.status,
@@ -160,9 +160,9 @@ class _AuthMixin:
         except asyncio.TimeoutError as err:
             raise KeeneticApiError("Challenge POST timed out") from err
         except aiohttp.ClientError as err:
-            raise KeeneticApiError(f"Challenge POST failed: {err}") from err
+            raise KeeneticApiError(f"Challenge POST failed: {type(err).__name__}") from err
 
-        async with post_resp:
+        async with asyncio.timeout(self._request_timeout), post_resp:
             post_text = await post_resp.text()
             _LOGGER.debug(
                 "NDW2 challenge POST response: status=%s body_length=%s",

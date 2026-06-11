@@ -376,6 +376,11 @@ class KeeneticControllerUpdateSensor(ControllerEntity, BinarySensorEntity):
         if channel != "stable":
             return False
 
+        # Honor the router's explicit verdict: stale release metadata can
+        # linger while fw-update-available says there is nothing to install.
+        if system.get("fw-update-available") is False:
+            return False
+
         return True
 
     @property
