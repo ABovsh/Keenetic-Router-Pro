@@ -8,6 +8,20 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.58
+
+### 🐛 Fixed
+
+- **Per-client "Wi-Fi Session" sensors no longer spam the log with "state is
+  not strictly increasing" warnings.** Session length is now reported as an
+  instantaneous gauge, which also stops nonsense monotonic totals in long-term
+  statistics. Router/PPPoE/WireGuard/mesh uptimes are unchanged.
+
+### 🔧 Internal
+
+- Updated a device-tracker import ahead of a Home Assistant 2027.6 removal; no
+  behaviour change.
+
 ## 1.7.57
 
 Third deep-audit round: outage behaviour, sign-in robustness and data

@@ -131,7 +131,12 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_icon = "mdi:timer-outline"
     _attr_device_class = SensorDeviceClass.DURATION
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    # A client session resets to a non-zero value on every roam/reconnect, so it
+    # is an instantaneous gauge — not a monotonic lifetime total. TOTAL_INCREASING
+    # here logs "state is not strictly increasing" recorder warnings and produces
+    # nonsense long-term sums (same reason KeeneticActiveConnectionsSensor uses
+    # MEASUREMENT). Infra uptimes that reset cleanly to ~0 on reboot stay TOTAL.
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_suggested_display_precision = 0
     # Uptime must stay IN the fingerprint or this sensor freezes for idle

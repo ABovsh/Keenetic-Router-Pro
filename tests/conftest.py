@@ -343,6 +343,9 @@ class _SourceType:
 
 
 device_tracker.SourceType = _SourceType
+# Real HA re-exports ScannerEntity at the package top level (the config_entry
+# path is deprecated for removal in 2027.6); mirror both here.
+device_tracker.ScannerEntity = _Entity
 device_tracker_config_entry = types.ModuleType(
     "homeassistant.components.device_tracker.config_entry"
 )

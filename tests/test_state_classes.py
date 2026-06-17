@@ -34,7 +34,6 @@ def _class_assignments(path: pathlib.Path, class_name: str) -> dict[str, str]:
         ("sensor/network.py", "KeeneticPppoeUptimeSensor"),
         ("sensor/wireguard.py", "KeeneticWgUptimeSensor"),
         ("sensor/mesh.py", "KeeneticMeshUptimeSensor"),
-        ("sensor/client.py", "KeeneticClientUptimeSensor"),
     ],
 )
 def test_uptime_sensors_use_total_increasing(
@@ -46,6 +45,22 @@ def test_uptime_sensors_use_total_increasing(
     assert (
         assignments.get("_attr_state_class") == "SensorStateClass.TOTAL_INCREASING"
     ), f"{class_name} must use TOTAL_INCREASING for monotonic uptime"
+
+
+def test_client_session_uptime_uses_measurement() -> None:
+    """A per-client Wi-Fi session is an instantaneous gauge, not a lifetime total.
+
+    Unlike infrastructure uptimes (router/PPPoE/WireGuard/mesh), which reset
+    cleanly to ~0 only on a reboot, a client's reported session length resets
+    to a non-zero value on every roam/reconnect. TOTAL_INCREASING then logs
+    "state is not strictly increasing" recorder warnings and produces nonsense
+    monotonic sums — the same problem KeeneticActiveConnectionsSensor avoids by
+    using MEASUREMENT.
+    """
+    assignments = _class_assignments(
+        ROOT / "sensor/client.py", "KeeneticClientUptimeSensor"
+    )
+    assert assignments.get("_attr_state_class") == "SensorStateClass.MEASUREMENT"
 
 
 def test_active_connections_sensor_uses_measurement() -> None:
