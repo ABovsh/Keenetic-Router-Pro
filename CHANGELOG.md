@@ -8,6 +8,18 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.59
+
+### 🐛 Fixed
+
+- **A WAN whose cable is up but has no internet (provider-side outage) now
+  shows as "not connected" instead of going unavailable.** Previously, when the
+  link was up but the ISP handed out no address, the per-WAN "Connected" sensor
+  went unavailable, so dashboards and other displays rendered the uplink as if
+  it were disabled — hiding a real outage. It now reports off (no internet),
+  matching the router's red "NO INTERNET ACCESS" badge, while the "Enabled"
+  sensor still shows the interface is on.
+
 ## 1.7.58
 
 ### 🐛 Fixed

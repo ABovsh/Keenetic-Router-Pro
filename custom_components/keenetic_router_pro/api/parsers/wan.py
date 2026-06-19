@@ -81,8 +81,13 @@ def derive_wan_enabled(iface: dict[str, Any]) -> bool:
     return True
 
 
-def derive_wan_internet_access(iface: dict[str, Any]) -> bool | None:
-    """Return the existing heuristic WAN internet-access state."""
+def derive_wan_internet_access(iface: dict[str, Any]) -> bool:
+    """Return the heuristic WAN internet-access state.
+
+    Always resolves to a concrete bool: a link-up interface with no usable
+    address is a real "no internet" condition (False), never an unknown
+    (None) that would make the connectivity sensor unavailable.
+    """
     state = str(iface.get("state") or "").lower()
     if state != LINK_STATE_UP:
         return False
@@ -93,14 +98,12 @@ def derive_wan_internet_access(iface: dict[str, Any]) -> bool | None:
     # lease is not falsely reported as internet-connected.
     ip = usable_ip(extract_wan_ip(iface))
     if not ip:
-        summary = iface.get("summary") or {}
-        if not isinstance(summary, dict):
-            summary = {}
-        layer = summary.get("layer") or {}
-        if not isinstance(layer, dict):
-            layer = {}
-        if str(layer.get("ipv4") or "").lower() == "pending":
-            return None
+        # Link up + global but no usable address (ipv4 "pending" or absent)
+        # means there is no internet right now — this is the Keenetic web UI's
+        # red "NO INTERNET ACCESS" state. Report a concrete False ("not
+        # connected") rather than None: None makes the connectivity sensor
+        # unavailable, which dashboards render as a disabled interface and
+        # hides a real provider-side outage.
         return False
     fail = str(iface.get("fail") or "").lower()
     if coerce_bool(fail):

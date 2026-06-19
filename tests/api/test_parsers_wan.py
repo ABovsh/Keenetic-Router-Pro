@@ -37,7 +37,12 @@ def test_ranked_wan_detection_matches_existing_rules() -> None:
     assert is_ranked_wan_interface({"global": True}) is False
 
 
-def test_derive_enabled_and_internet_access_preserve_pending_state() -> None:
+def test_derive_enabled_and_internet_access_report_link_up_no_ip_as_down() -> None:
+    # Real provider outage: cable/link is up and the interface is enabled,
+    # but the ISP hands out no address so ipv4 stays "pending". This is the
+    # Keenetic web UI's red "NO INTERNET ACCESS" state — it must read as
+    # "not connected" (off, available), never as None/unavailable which
+    # dashboards render as a disabled interface.
     iface = {
         "state": "up",
         "global": True,
@@ -45,7 +50,21 @@ def test_derive_enabled_and_internet_access_preserve_pending_state() -> None:
     }
 
     assert derive_wan_enabled(iface) is True
-    assert derive_wan_internet_access(iface) is None
+    assert derive_wan_internet_access(iface) is False
+
+
+def test_derive_internet_access_link_up_no_ip_is_down() -> None:
+    # Mirrors the live BKM backup payload: link/ctrl running, ipv4 pending,
+    # no usable address. Must be a concrete False (offline), not None.
+    iface = {
+        "state": "up",
+        "global": True,
+        "summary": {
+            "layer": {"conf": "running", "link": "running", "ipv4": "pending", "ctrl": "running"}
+        },
+    }
+
+    assert derive_wan_internet_access(iface) is False
 
 
 def test_derive_internet_access_preserves_fail_override() -> None:

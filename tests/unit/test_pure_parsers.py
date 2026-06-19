@@ -456,7 +456,9 @@ def test_async_get_wan_interfaces_normalizes_multi_interface_payload() -> None:
     assert wans[0]["enabled"] is True
     assert wans[0]["internet_access"] is True
     assert wans[1]["enabled"] is False
-    assert wans[1]["internet_access"] is None
+    # Up + global but no usable address (ipv4 pending) = no internet (False),
+    # not None/unavailable.
+    assert wans[1]["internet_access"] is False
 
 
 def test_normalize_interfaces_golden_values() -> None:

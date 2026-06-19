@@ -90,7 +90,9 @@ async def test_async_get_wan_interfaces_handles_missing_keys_and_pending_ip() ->
 
     assert len(result) == 1
     assert result[0]["id"] == "ISP"
-    assert result[0]["internet_access"] is None
+    # Link up but ipv4 still pending = real "no internet" (provider outage),
+    # reported as a concrete False, not None/unavailable.
+    assert result[0]["internet_access"] is False
 
 
 async def test_async_get_wan_interfaces_role_string_and_address_list_variants() -> None:

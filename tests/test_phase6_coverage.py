@@ -722,7 +722,9 @@ async def test_wan_network_vpn_wifi_domain_branches_pin_router_shapes() -> None:
 
     wans = await client.async_get_wan_interfaces(iface_list=iface_list)
     assert {wan["id"] for wan in wans} == {"PPPoE0", "Wireguard0"}
-    assert next(wan for wan in wans if wan["id"] == "Wireguard0")["internet_access"] is None
+    # Up + global but ipv4 pending (no usable address) = no internet (False),
+    # not None/unavailable.
+    assert next(wan for wan in wans if wan["id"] == "Wireguard0")["internet_access"] is False
 
     traffic = await client.async_get_traffic_stats(iface_list=iface_list)
     assert traffic == {
