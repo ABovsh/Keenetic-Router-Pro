@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
 
 from conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
 

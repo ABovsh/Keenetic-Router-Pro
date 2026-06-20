@@ -1,0 +1,9 @@
+# Bandit config for the pre-commit security pass (custom_components only).
+# B110 (try/except/pass) is allowed: best-effort cleanup blocks that
+# intentionally swallow errors are a normal resilience pattern here.
+# B104 (hardcoded_bind_all_interfaces) is a false positive here: the literals
+# "0.0.0.0"/"::" appear only in placeholder/unspecified-address *comparisons*
+# (config_flow.py, utils.py), never as a socket bind address.
+skips:
+  - B110
+  - B104

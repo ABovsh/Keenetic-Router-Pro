@@ -1,0 +1,39 @@
+# Local pre-commit gate for the Keenetic Router Pro fork.
+#
+# Catches secrets, real lint errors, and common security smells BEFORE a commit
+# lands — important because this fork pushes directly to `main`, so a bad commit
+# is immediately public. Activate once per clone with: `pre-commit install`.
+#
+# Deliberately scoped to this fork's rules:
+# * NO `no-commit-to-branch main` guard — committing to main is the intended
+#   workflow here (unlike eveus, which works on an rc branch).
+# * NO `ruff-format` — CI does not format-check, so we avoid a wholesale reformat;
+#   `ruff check --fix` only applies the minimal lint set from pyproject.toml.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.18
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^(custom_components|tests)/
+
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.9.4
+    hooks:
+      - id: bandit
+        args: [-c, .github/bandit.yaml]
+        files: ^custom_components/
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
