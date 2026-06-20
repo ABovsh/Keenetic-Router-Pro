@@ -10,7 +10,10 @@ import pytest
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
-from custom_components.keenetic_router_pro.api import KeeneticAuthError
+from custom_components.keenetic_router_pro.api import (
+    KeeneticApiError,
+    KeeneticAuthError,
+)
 from custom_components.keenetic_router_pro.coordinator_parts.derived import (
     build_clients_by_mac,
     counter_rate_bytes_per_second,
@@ -18,8 +21,10 @@ from custom_components.keenetic_router_pro.coordinator_parts.derived import (
     order_wan_interfaces,
 )
 from custom_components.keenetic_router_pro.coordinator_parts.fetching import (
+    CRITICAL_FETCH_GRACE_TICKS,
     FetchFailure,
     critical_failures_to_exception,
+    evaluate_critical_failures,
     ok_or_default,
 )
 from custom_components.keenetic_router_pro.coordinator_parts.oom import (
@@ -269,3 +274,58 @@ def test_critical_failures_map_non_auth_to_update_failed() -> None:
 def test_non_critical_failures_do_not_raise() -> None:
     """Optional endpoint failures remain fallback-only."""
     critical_failures_to_exception([FetchFailure("dns_proxy", RuntimeError("boom"))])
+
+
+def test_evaluate_critical_failures_ok_resets_streak() -> None:
+    """No critical failure clears any prior transient streak."""
+    decision = evaluate_critical_failures([], have_previous_data=True, streak=2)
+    assert decision.action == "ok"
+    assert decision.streak == 0
+
+
+def test_evaluate_critical_failures_auth_fails_immediately() -> None:
+    """Auth rejection on a critical fetch never enters the grace window."""
+    failures = [FetchFailure("system_info", KeeneticAuthError("bad auth"))]
+    decision = evaluate_critical_failures(
+        failures, have_previous_data=True, streak=0
+    )
+    assert decision.action == "auth"
+
+
+def test_evaluate_critical_failures_tolerates_transient_timeout() -> None:
+    """A single timeout with last-known data is tolerated, not fatal."""
+    failures = [
+        FetchFailure("system_info", KeeneticApiError("Timeout for /rci/show/system"))
+    ]
+    decision = evaluate_critical_failures(
+        failures, have_previous_data=True, streak=0, grace_ticks=3
+    )
+    assert decision.action == "tolerate"
+    assert decision.streak == 1
+
+
+def test_evaluate_critical_failures_fails_after_grace_exhausted() -> None:
+    """Once the grace window is spent the coordinator must fail for real."""
+    failures = [
+        FetchFailure("system_info", KeeneticApiError("Timeout for /rci/show/system"))
+    ]
+    decision = evaluate_critical_failures(
+        failures, have_previous_data=True, streak=3, grace_ticks=3
+    )
+    assert decision.action == "fail"
+    assert decision.streak == 4
+
+
+def test_evaluate_critical_failures_no_previous_data_fails_immediately() -> None:
+    """Without a snapshot to keep, there is nothing to tolerate."""
+    failures = [FetchFailure("interfaces", RuntimeError("boom"))]
+    decision = evaluate_critical_failures(
+        failures, have_previous_data=False, streak=0
+    )
+    assert decision.action == "fail"
+    assert decision.streak == 1
+
+
+def test_critical_fetch_grace_ticks_is_positive() -> None:
+    """The shipped grace window must allow at least one tolerated tick."""
+    assert CRITICAL_FETCH_GRACE_TICKS >= 1

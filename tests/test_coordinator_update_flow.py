@@ -744,3 +744,48 @@ def test_coordinator_critical_fetch_failures_raise_ha_errors(
 
     with pytest.raises(expected):
         asyncio.run(coordinator._async_update_data())
+
+
+def test_coordinator_tolerates_transient_system_timeout_keeping_last_data() -> None:
+    """A single system_info timeout after a good tick keeps the last snapshot."""
+    from custom_components.keenetic_router_pro.api import KeeneticApiError
+
+    client = FakeKeeneticClient()
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+
+    first = asyncio.run(coordinator._async_update_data())
+    coordinator.data = first
+    assert first["system"]["hostname"] == "router"
+
+    async def timeout_system_info() -> dict[str, Any]:
+        raise KeeneticApiError("Timeout for /rci/show/system")
+
+    client.async_get_system_info = timeout_system_info  # type: ignore[assignment]
+
+    # Within the grace window the tick succeeds and preserves the last system.
+    second = asyncio.run(coordinator._async_update_data())
+    assert second["system"]["hostname"] == "router"
+    assert coordinator._critical_fail_streak == 1
+
+
+def test_coordinator_fails_after_sustained_system_timeouts() -> None:
+    """Repeated system_info timeouts exhaust the grace window and then fail."""
+    from custom_components.keenetic_router_pro.api import KeeneticApiError
+    from custom_components.keenetic_router_pro.coordinator_parts.fetching import (
+        CRITICAL_FETCH_GRACE_TICKS,
+    )
+
+    client = FakeKeeneticClient()
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+    coordinator.data = asyncio.run(coordinator._async_update_data())
+
+    async def timeout_system_info() -> dict[str, Any]:
+        raise KeeneticApiError("Timeout for /rci/show/system")
+
+    client.async_get_system_info = timeout_system_info  # type: ignore[assignment]
+
+    for _ in range(CRITICAL_FETCH_GRACE_TICKS):
+        coordinator.data = asyncio.run(coordinator._async_update_data())
+
+    with pytest.raises(UpdateFailed):
+        asyncio.run(coordinator._async_update_data())

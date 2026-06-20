@@ -8,6 +8,7 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -22,7 +23,7 @@ from .coordinator_parts.derived import (
 )
 from .coordinator_parts.fetching import (
     FetchFailure,
-    critical_failures_to_exception,
+    evaluate_critical_failures,
     ok_or_default,
 )
 from .coordinator_parts.oom import advance_oom_state
@@ -91,6 +92,11 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.client = client
         self._refresh_count = 0
+        # Consecutive transient critical-fetch failures tolerated so far. A
+        # one-off ``system_info`` / ``interfaces`` timeout keeps the last-known
+        # snapshot instead of flipping every entity unavailable; reset on the
+        # first clean tick. See ``evaluate_critical_failures``.
+        self._critical_fail_streak = 0
         # Per-config-entry persistent OOM tracker. The Store key is
         # derived from the API host so two routers on the same HA
         # instance keep their counters independent. Schema:
@@ -119,16 +125,16 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def _async_update_data_unlocked(self) -> dict[str, Any]:
         """Fetch all router data with bounded, staged parallelism.
- 
+
         The Keenetic RCI endpoint is a single HTTP surface served by a
         modest router CPU, so we cap concurrency at 4 in-flight calls
         with a semaphore. Calls are split into dependency stages:
- 
+
           * Stage 1 has no dependencies and runs first.
           * Stage 2 needs ``interfaces`` from stage 1.
           * Stage 3 performs CPU-only WAN enrichment from already fetched
             interface statistics.
- 
+
         Within each stage we use ``asyncio.gather`` with
         ``return_exceptions=True`` so a single failing endpoint can no
         longer kill the whole update tick — failed fetches are
@@ -179,7 +185,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ):
                 _LOGGER.debug("Coordinator fetch %s failed: %s", name, value)
             return result
- 
+
         plan = refresh_plan(
             first_refresh=self.data is None,
             refresh_count=self._refresh_count,
@@ -301,11 +307,18 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     mesh_nodes = err
             else:
                 mesh_nodes = _prev.get("mesh_nodes", [])
- 
-            system = _ok("system_info", system, {})
+
+            # Critical fetches default to the previous snapshot, not an empty
+            # shape, so a tolerated transient failure (see the grace-window
+            # check below) keeps the last-known values instead of blanking
+            # every entity for one tick. ``_prev_sys`` is the previously
+            # published merged system dict; ``version`` re-merges on top below.
+            system = _ok("system_info", system, dict(_prev_sys))
             version = _ok("current_version", version, {})
             version_available = _ok("available_version", version_available, {})
-            interfaces = _ok("interfaces", interfaces, [])
+            interfaces = _ok(
+                "interfaces", interfaces, list(_prev.get("interfaces", []))
+            )
             ip_neighbours = _ok("ip_neighbours", ip_neighbours, [], silent=True)
             clients = merge_clients_with_neighbours(clients, ip_neighbours)
             # On a transient mesh fetch failure keep the previous snapshot:
@@ -412,15 +425,27 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ipsec_diagnostics["oom_total"] = self._oom_state["total"]
             ipsec_diagnostics["oom_last_seen"] = self._oom_state.get("last_seen_iso")
 
-            # Fail-fast on critical fetches. If the router is unreachable,
+            # Handle critical fetch failures. If the router is unreachable,
             # auth has expired, or the RCI surface is down, ``system_info``
             # and ``interfaces`` are the two calls that MUST succeed — every
-            # downstream computation depends on them. Letting them default
-            # to ``{}`` / ``[]`` would produce a ghost-mode tick where every
-            # entity silently shows "zero/empty" instead of ``unavailable``,
-            # masking real outages. Raise ``UpdateFailed`` so HA marks the
-            # coordinator as failed and retries on the next tick.
-            critical_failures_to_exception(failed_fetches)
+            # downstream computation depends on them. A single transient drop
+            # (e.g. a router-side ``/rci/show/system`` timeout), however, is
+            # tolerated for a few ticks: we keep the last-known snapshot (the
+            # ``_ok`` defaults above already substituted it) rather than flip
+            # every entity unavailable. Auth failures bypass the grace window;
+            # a sustained outage exhausts it and then raises ``UpdateFailed``.
+            critical_decision = evaluate_critical_failures(
+                failed_fetches,
+                have_previous_data=self.data is not None,
+                streak=getattr(self, "_critical_fail_streak", 0),
+            )
+            self._critical_fail_streak = critical_decision.streak
+            if critical_decision.action == "auth":
+                raise ConfigEntryAuthFailed(critical_decision.message)
+            if critical_decision.action == "fail":
+                raise UpdateFailed(critical_decision.message)
+            if critical_decision.action == "tolerate":
+                _LOGGER.warning(critical_decision.message)
 
             # An HTTP-200 with an empty/garbled critical payload must fail
             # the tick like an exception would — publishing it would flip
@@ -433,7 +458,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
 
             client_stats = self.client.summarize_client_stats(clients)
- 
+
             merged_system = {**system, **version}
             merged_system["release-available"] = (
                 version_available.get("title") or version_available.get("release")
@@ -442,7 +467,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             merged_system["fw-update-available"] = version_available.get(
                 "update-available", False
             )
- 
+
             # ---------- Stage 2: depends on stage-1 `interfaces` ----------
             # Fast ticks reuse the last published stage-2 snapshot instead of
             # fanning out extra router calls. Medium ticks refresh WAN and
@@ -726,7 +751,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             else:
                 mesh_associations_data = _prev.get("mesh_associations", {})
                 mesh_nodes_by_cid = _prev.get("mesh_nodes_by_cid", {})
- 
+
             # ---------- New-client detection ----------
             # Build the MAC->client index once and reuse it for both the
             # new-MAC diff and the output dict. Previously this walked
@@ -756,7 +781,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 }
                 previous_macs.discard("")
             new_macs = current_macs - previous_macs
- 
+
             self._refresh_count += 1
             return {
                 "system": merged_system,

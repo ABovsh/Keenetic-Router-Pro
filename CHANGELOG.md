@@ -8,6 +8,15 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.62
+
+### 🐛 Fixed
+
+- A single dropped router request (such as a brief `system info` timeout) no
+  longer marks every Keenetic entity unavailable for that update. The last
+  known values are kept for a few cycles; a genuine, sustained outage still
+  shows the integration as unavailable.
+
 ## 1.7.61
 
 Fourth deep-audit round: privacy in diagnostics, steadier counters, and
