@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -31,11 +32,15 @@ def _client_has_live_session(client: dict[str, Any] | None) -> bool:
 
 def _coerce_optional_int(value: Any) -> int | None:
     """Return an integer for router numeric fields, or None when absent."""
-    if value in (None, ""):
+    if value in (None, "") or isinstance(value, bool):
+        # bool is an int subclass; int(True) == 1 would fabricate telemetry.
+        return None
+    if isinstance(value, float) and not math.isfinite(value):
         return None
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: int(float("inf")) on a non-finite firmware number.
         return None
 
 

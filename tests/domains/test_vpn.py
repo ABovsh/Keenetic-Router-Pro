@@ -65,7 +65,9 @@ async def test_async_get_wireguard_status_interfaces_shape_skips_missing_name() 
     profile = result["profiles"]["Wireguard1"]
     assert profile["enabled"] is False
     assert profile["remote"] == "198.51.100.3"
-    assert profile["txbytes"] == "4"
+    # Peer counters reported as numeric strings are coerced to ints.
+    assert profile["rxbytes"] == 3
+    assert profile["txbytes"] == 4
 
 
 async def test_vpn_tunnels_skip_missing_ids_and_disabled_summary() -> None:

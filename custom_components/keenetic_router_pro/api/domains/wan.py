@@ -81,9 +81,12 @@ class WanMixin:
             sec = str(iface.get("security-level") or "").lower()
             if sec == "public":
                 return True
-            # role: inet
-            role = str(iface.get("role") or "").lower()
-            if role in UPLINK_ROLE_TOKENS:
+            # role: inet — may be a single string or a list of role tokens.
+            role = iface.get("role")
+            if isinstance(role, list):
+                if any(str(item).lower() in UPLINK_ROLE_TOKENS for item in role):
+                    return True
+            elif str(role or "").lower() in UPLINK_ROLE_TOKENS:
                 return True
             # İsim tabanlı arama
             name_fields = [
@@ -195,7 +198,7 @@ class WanMixin:
                 "type": iface.get("type"),
                 "link_state": str(iface.get("state") or LINK_STATE_DOWN).lower(),
                 "enabled": derive_wan_enabled(iface),
-                "global": bool(iface.get("global")),
+                "global": coerce_bool(iface.get("global")),
                 "defaultgw": coerce_bool(iface.get("defaultgw")),
                 "priority": iface.get("priority"),
                 "role": role_list,

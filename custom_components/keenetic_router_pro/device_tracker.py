@@ -77,7 +77,16 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
         # the key, so every Away/Home or unavailable transition still writes.
         # CoordinatorEntity registers a single listener for us in
         # async_added_to_hass; do NOT add a second.
-        presence = (self.available, self.is_connected, self.ip_address, self.hostname)
+        # Include the presence *evidence* (which router field proves presence)
+        # so an active->link transition that keeps is_connected/ip/hostname the
+        # same still refreshes the presence_source / link_status attributes.
+        presence = (
+            self.available,
+            self.is_connected,
+            self.ip_address,
+            self.hostname,
+            self._presence_source(self._client_from_main),
+        )
         if presence == self._last_presence:
             return
         self._last_presence = presence

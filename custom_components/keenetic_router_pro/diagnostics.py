@@ -17,6 +17,7 @@ from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
 from .const import CONF_TRACKED_CLIENTS
+from .utils import normalize_mac
 
 # Keys whose values should NEVER appear in a diagnostics dump.
 # Matching is case-insensitive (HA's redactor lower-cases keys).
@@ -60,6 +61,23 @@ TO_REDACT: set[str] = {
     "name",
     "known-host",
     "http_host",
+    # Network addresses / endpoints / public DNS names that identify the
+    # network or its peers. ``ip``/``host`` above don't cover these aliases.
+    "address",
+    "global-address",
+    "remote",
+    "remote_peer",
+    "remote-peer",
+    "remote_endpoint",
+    "remote-endpoint",
+    "remote-endpoint-address",
+    "local_endpoint",
+    "local-endpoint",
+    "endpoint",
+    "gateway",
+    "default-gateway",
+    "fqdn",
+    "domain",
 }
 
 
@@ -89,7 +107,31 @@ def _strip_mac_keyed_indexes(data: Any) -> Any:
             **mesh_assoc,
             "by_node": {"<redacted-mac-keys>": len(mesh_assoc["by_node"])},
         }
+    # ``new_clients`` is a set of MAC strings — async_redact_data only scrubs
+    # dict VALUES by key, so the MACs would leak (and a set isn't JSON-native).
+    new_clients = stripped.get("new_clients")
+    if isinstance(new_clients, (set, frozenset, list, tuple)):
+        stripped["new_clients"] = {"<redacted-mac-set>": len(new_clients)}
+    # Mesh node ``id``/``cid`` fall back to the node MAC on routers without
+    # MWS member data; redact those identifiers (the ``mac`` key is already
+    # redacted, but ``id``/``cid`` are not in TO_REDACT).
+    mesh_nodes = stripped.get("mesh_nodes")
+    if isinstance(mesh_nodes, list):
+        stripped["mesh_nodes"] = [
+            _redact_mesh_node_ids(node) for node in mesh_nodes
+        ]
     return stripped
+
+
+def _redact_mesh_node_ids(node: Any) -> Any:
+    """Replace MAC-shaped mesh node id/cid with a placeholder."""
+    if not isinstance(node, dict):
+        return node
+    redacted = dict(node)
+    for key in ("id", "cid"):
+        if normalize_mac(redacted.get(key)):
+            redacted[key] = "**REDACTED**"
+    return redacted
 
 
 def _redact_tracked_client_names(data: dict[str, Any]) -> dict[str, Any]:

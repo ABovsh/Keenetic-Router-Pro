@@ -16,7 +16,7 @@ from ...const import (
     LINK_STATE_DOWN,
     LINK_STATE_UP,
 )
-from ...utils import coerce_bool, first_present
+from ...utils import coerce_bool, coerce_byte_count, first_present
 from ..errors import KeeneticApiError
 from ..helpers import (
     _as_list,
@@ -90,12 +90,19 @@ class VpnMixin:
                 first = dict_peers[0] if dict_peers else {}
                 remote = first.get("remote-endpoint-address")
                 if rx_val is None and dict_peers:
-                    vals = [p.get("rxbytes") for p in dict_peers]
-                    nums = [v for v in vals if isinstance(v, (int, float)) and not isinstance(v, bool)]
+                    # Keenetic commonly reports counters as numeric strings;
+                    # coerce each peer before summing so multi-peer string
+                    # counters are not dropped (which undercounts to one peer).
+                    nums = [
+                        c for c in (coerce_byte_count(p.get("rxbytes")) for p in dict_peers)
+                        if c is not None
+                    ]
                     rx_val = sum(nums) if nums else first.get("rxbytes")
                 if tx_val is None and dict_peers:
-                    vals = [p.get("txbytes") for p in dict_peers]
-                    nums = [v for v in vals if isinstance(v, (int, float)) and not isinstance(v, bool)]
+                    nums = [
+                        c for c in (coerce_byte_count(p.get("txbytes")) for p in dict_peers)
+                        if c is not None
+                    ]
                     tx_val = sum(nums) if nums else first.get("txbytes")
             elif isinstance(peer, dict):
                 remote = peer.get("remote-endpoint-address")

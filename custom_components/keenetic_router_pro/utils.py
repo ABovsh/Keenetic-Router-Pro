@@ -45,7 +45,8 @@ def coerce_seconds(value: Any, default: int | None = 0) -> int | None:
 
     try:
         as_float = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: float(huge_int) on an absurd firmware integer.
         return default
     # ``int(float("inf"))`` raises OverflowError, and NaN/inf is never a
     # meaningful uptime. Treat both as missing so HA sees a clean default.
@@ -85,7 +86,8 @@ def coerce_float(value: Any, default: float | None = None) -> float | None:
         return default
     try:
         result = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: float(huge_int) on an absurd firmware integer.
         return default
     if not math.isfinite(result):
         return default
@@ -131,6 +133,9 @@ def coerce_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     if isinstance(value, (int, float)):
+        # NaN != 0 is True; a non-finite flag is garbage, not "on".
+        if isinstance(value, float) and not math.isfinite(value):
+            return False
         return value != 0
     if isinstance(value, str):
         return value.strip().lower() in TRUTHY_STRINGS

@@ -162,26 +162,38 @@ class _AuthMixin:
         except aiohttp.ClientError as err:
             raise KeeneticApiError(f"Challenge POST failed: {type(err).__name__}") from err
 
-        async with asyncio.timeout(self._request_timeout), post_resp:
-            post_text = await post_resp.text()
-            _LOGGER.debug(
-                "NDW2 challenge POST response: status=%s body_length=%s",
-                post_resp.status,
-                len(post_text),
-            )
+        # A router that accepts the request but stalls before returning the
+        # body must surface as a retryable connection error, not a raw
+        # asyncio.TimeoutError that escapes setup's error handling. The
+        # KeeneticAuthError/KeeneticApiError raised below are not
+        # TimeoutError/ClientError, so they propagate unchanged.
+        try:
+            async with asyncio.timeout(self._request_timeout), post_resp:
+                post_text = await post_resp.text()
+                _LOGGER.debug(
+                    "NDW2 challenge POST response: status=%s body_length=%s",
+                    post_resp.status,
+                    len(post_text),
+                )
 
-            if post_resp.status in (401, 403):
-                raise KeeneticAuthError(
-                    "Challenge auth rejected. Check the username, password and "
-                    "challenge-auth setting."
-                )
-            if post_resp.status not in (200, 204):
-                # Non-auth failure: router-side problem, not rejected creds.
-                raise KeeneticApiError(
-                    "Challenge auth failed "
-                    f"(status={post_resp.status}, body={_response_summary(post_text)!r})"
-                )
-            session_cookie = _cookie_header_from_response(post_resp) or session_cookie
+                if post_resp.status in (401, 403):
+                    raise KeeneticAuthError(
+                        "Challenge auth rejected. Check the username, password and "
+                        "challenge-auth setting."
+                    )
+                if post_resp.status not in (200, 204):
+                    # Non-auth failure: router-side problem, not rejected creds.
+                    raise KeeneticApiError(
+                        "Challenge auth failed "
+                        f"(status={post_resp.status}, body={_response_summary(post_text)!r})"
+                    )
+                session_cookie = _cookie_header_from_response(post_resp) or session_cookie
+        except asyncio.TimeoutError as err:
+            raise KeeneticApiError("Challenge auth response read timed out") from err
+        except aiohttp.ClientError as err:
+            raise KeeneticApiError(
+                f"Challenge auth response read failed: {type(err).__name__}"
+            ) from err
 
         if not session_cookie:
             # A 200/204 with no session cookie would mark us "authenticated"

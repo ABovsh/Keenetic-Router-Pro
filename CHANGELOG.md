@@ -8,6 +8,34 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.61
+
+Fourth deep-audit round: privacy in diagnostics, steadier counters, and
+sign-in/data hardening.
+
+### 🔒 Privacy
+
+- Downloaded diagnostics no longer expose new-client MAC addresses, mesh-node
+  MAC identifiers, or WAN/VPN addresses, peer endpoints, and KeenDNS/domain
+  names. These now join the existing redaction of credentials, IPs, and SSIDs.
+
+### 🐛 Fixed
+
+- **Multi-peer WireGuard interfaces report total traffic** even when the router
+  sends per-peer byte counters as text.
+- **A backup/VPN uplink whose role is reported as a list is recognised**
+  correctly, so the active connection is no longer shown as down.
+- A WAN "global" flag sent as text ("false"/"no") is no longer read as true.
+- Malformed or absurdly large router values (uptime, CPU/memory, signal,
+  byte counters, mesh client counts) can no longer disrupt a sensor update,
+  fabricate a false counter reset in long-term statistics, or publish a
+  negative client count.
+- **Sign-in to challenge-auth routers that accept the request but stall
+  mid-reply** now surfaces as a retryable connection error instead of failing
+  setup with an unclassified error.
+- The device tracker refreshes its presence-source and link attributes when the
+  router changes how it proves a device is home.
+
 ## 1.7.60
 
 ### 🐛 Fixed

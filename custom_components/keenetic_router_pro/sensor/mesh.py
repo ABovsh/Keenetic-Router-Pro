@@ -168,8 +168,10 @@ class KeeneticMeshClientsSensor(MeshEntity, SensorEntity):
             if isinstance(associations, (list, dict)):
                 # Some firmwares list the stations instead of a count.
                 return len(associations)
-            if associations is not None:
-                return coerce_int(associations, 0)
+            # A client count cannot be negative or boolean; reject bool drift
+            # and clamp negatives to 0 so the count sensor never publishes -1.
+            if associations is not None and not isinstance(associations, bool):
+                return max(0, coerce_int(associations, 0))
         return 0
 
     @property

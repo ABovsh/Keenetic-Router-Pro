@@ -70,7 +70,12 @@ def _first_stat_int(stats: dict[str, Any], *keys: str) -> int | None:
     value = first_present(stats, *keys, default=None)
     if value is None or isinstance(value, bool):
         return None
-    return coerce_int(value)
+    # A non-numeric/garbled sample must stay None (sensor unavailable), NOT
+    # collapse to 0 — a fake 0 reads as a TOTAL_INCREASING counter reset and
+    # corrupts long-term traffic statistics.
+    sentinel = object()
+    parsed = coerce_int(value, default=sentinel)  # type: ignore[arg-type]
+    return None if parsed is sentinel else parsed
 
 
 class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
