@@ -226,6 +226,46 @@ def test_coordinator_first_refresh_builds_enriched_payload() -> None:
     assert data["crypto_maps"]["SITE"]["rx_throughput"] == pytest.approx(0.0)
 
 
+def test_coordinator_refreshes_wan_uptime_when_iface_set_unchanged() -> None:
+    """WAN uptime must advance every medium tick even when the link set is stable.
+
+    Regression guard for the freeze where ``wan_interfaces`` (which carries
+    each interface's ``uptime``) was reused verbatim whenever the
+    ``(id, type, link, state)`` fingerprint matched. The router's interface
+    uptime ticks every second, but the fingerprint only changes on a link
+    flap, so the WAN uptime sensor stuck at its value from the last flap for
+    hours/days. The per-interface payload must be rebuilt every medium tick so
+    uptime (and ip) stay fresh.
+    """
+    client = FakeKeeneticClient()
+
+    calls = {"n": 0}
+
+    async def wan_interfaces(**kwargs: Any) -> list[dict[str, Any]]:
+        calls["n"] += 1
+        uptime = calls["n"] * 100  # 100 on first tick, 200 on the next, ...
+        return [
+            {"id": "PPPoE0", "defaultgw": True, "priority": 100, "uptime": uptime},
+            {"id": "Wireguard0", "defaultgw": False, "priority": 50, "uptime": uptime},
+        ]
+
+    client.async_get_wan_interfaces = wan_interfaces  # type: ignore[assignment]
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+
+    first = asyncio.run(coordinator._async_update_data())
+    assert first["wan_by_id"]["PPPoE0"]["uptime"] == 100
+
+    coordinator.data = first
+    coordinator._refresh_count = 3  # next tick is a medium refresh (count % 3 == 0)
+
+    second = asyncio.run(coordinator._async_update_data())
+
+    # The interface fingerprint is unchanged across both ticks, so the bug
+    # reused the cached payload and froze uptime at 100. It must advance.
+    assert second["wan_by_id"]["PPPoE0"]["uptime"] == 200
+    assert second["wan_by_id"]["Wireguard0"]["uptime"] == 200
+
+
 def test_coordinator_mesh_fetch_failure_falls_back_to_empty_mesh() -> None:
     """Optional mesh discovery must not fail the whole coordinator tick."""
     client = FakeKeeneticClient()

@@ -373,9 +373,11 @@ async def test_coordinator_medium_tick_refreshes_interface_derived_calls_only() 
         "traffic_stats",
         "port_info",
         "interface_stats",
+        # Rebuilt every medium tick so volatile per-interface fields
+        # (uptime, ip) stay fresh; no longer cached on the iface fingerprint.
+        "wan_interfaces",
     ):
         assert client.calls.get(expected, 0) == 1
-    assert client.calls.get("wan_interfaces", 0) == 0
     for skipped in (
         "current_version",
         "available_version",

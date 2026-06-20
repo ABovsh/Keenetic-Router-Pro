@@ -449,30 +449,27 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 for i in iface_list
             )
             if medium_refresh:
-                # WAN interface set rarely changes between ticks (links flap but
-                # the *set* of WAN-eligible interfaces is stable). Build a cheap
-                # fingerprint of the interface payload and reuse the previously
-                # derived WAN list when the fingerprint matches.
-                cached_wan = _prev.get("wan_interfaces")
-                cached_fp = _prev.get("_iface_fingerprint")
-                if (
-                    not first_refresh
-                    and cached_wan is not None
-                    and cached_fp == iface_fp
-                ):
-                    wan_interfaces = [dict(w) for w in cached_wan]
-                else:
-                    try:
-                        wan_interfaces = await _bounded(
-                            self.client.async_get_wan_interfaces(
-                                interfaces=interfaces,
-                                iface_list=iface_list,
-                            )
+                # Rebuild the per-WAN payload every medium tick. This is a
+                # CPU-only transform of the already-fetched ``iface_list``
+                # (``async_get_wan_interfaces`` makes no RCI call when
+                # ``iface_list`` is passed), so it is cheap. It must NOT be
+                # cached on the ``(id, type, link, state)`` interface
+                # fingerprint: that fingerprint excludes the volatile
+                # ``uptime`` / ``ip`` fields, so reusing the cached list froze
+                # every WAN-interface uptime sensor at its value from the last
+                # link flap until the next flap. ``iface_fp`` is still emitted
+                # below for diagnostics/contract consumers.
+                try:
+                    wan_interfaces = await _bounded(
+                        self.client.async_get_wan_interfaces(
+                            interfaces=interfaces,
+                            iface_list=iface_list,
                         )
-                    except asyncio.CancelledError:
-                        raise
-                    except Exception as err:  # noqa: BLE001
-                        wan_interfaces = err
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as err:  # noqa: BLE001
+                    wan_interfaces = err
                 (
                     wifi,
                     wireguard,

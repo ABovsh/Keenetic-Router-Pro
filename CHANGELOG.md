@@ -8,6 +8,16 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.60
+
+### 🐛 Fixed
+
+- **Per-WAN "Uptime" sensors now keep counting instead of freezing.** A WAN
+  uplink's uptime was being captured only when the link last went up/down and
+  then held at that value for hours — so a connection that had been up all day
+  could still read a few seconds, or simply stop updating. Uptime (and the
+  WAN's IP) now refresh on every poll while the link is stable.
+
 ## 1.7.59
 
 ### 🐛 Fixed
