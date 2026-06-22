@@ -3,7 +3,7 @@
 DOMAIN = "keenetic_router_pro"
 DEFAULT_PORT = 100
 DEFAULT_SSL = False
-FAST_SCAN_INTERVAL = 10
+FAST_SCAN_INTERVAL = 30
 CONF_TRACKED_CLIENTS = "tracked_clients"
 FIELD_CONNECTED = "connected"
 INTERFACE_CONF_DISABLED = "disabled"

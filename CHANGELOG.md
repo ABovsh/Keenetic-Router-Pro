@@ -8,6 +8,12 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.63
+
+### Improvements
+
+- Reduced router polling from 10s to 30s to cut Home Assistant database write load.
+
 ## 1.7.62
 
 ### 🐛 Fixed
