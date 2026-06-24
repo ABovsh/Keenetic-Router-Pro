@@ -8,6 +8,12 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.64
+
+### 🐛 Fixed
+
+- Fixed a crash that occurred when the router was temporarily unreachable via KeenDNS (SSL certificate error). WiFi temperature sensors would throw `AttributeError: 'list' object has no attribute 'items'` because the interfaces fallback value was incorrectly converted to a list of key names instead of preserving the previous data dict.
+
 ## 1.7.63
 
 ### Improvements

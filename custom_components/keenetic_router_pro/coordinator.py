@@ -317,7 +317,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             version = _ok("current_version", version, {})
             version_available = _ok("available_version", version_available, {})
             interfaces = _ok(
-                "interfaces", interfaces, list(_prev.get("interfaces", []))
+                "interfaces", interfaces, dict(_prev.get("interfaces", {}))
             )
             ip_neighbours = _ok("ip_neighbours", ip_neighbours, [], silent=True)
             clients = merge_clients_with_neighbours(clients, ip_neighbours)
