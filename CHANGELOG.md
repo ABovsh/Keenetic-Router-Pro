@@ -8,6 +8,12 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.65
+
+### Improvements
+
+- CI supply-chain hardening: all GitHub Actions pinned to full commit SHAs, checkout steps no longer persist the repo token on the runner, Dependabot keeps action pins updated (with a 7-day release cooldown), and new CodeQL + zizmor scans report to the Security tab. No functional changes to the integration.
+
 ## 1.7.64
 
 ### 🐛 Fixed
