@@ -10,6 +10,8 @@ import pytest
 
 from custom_components.keenetic_router_pro.api.domains.clients import ClientsMixin
 from custom_components.keenetic_router_pro.api.helpers import _normalize_interfaces
+from homeassistant.helpers.update_coordinator import UpdateFailed
+
 from custom_components.keenetic_router_pro.coordinator import KeeneticCoordinator
 from tests.fixtures.clients_rci import CLIENTS, HOST_POLICIES, IP_NEIGHBOURS
 from tests.fixtures.dns_rci import DNS_PROXY, NDNS_INFO
@@ -801,7 +803,7 @@ async def test_coordinator_clears_prefetch_cache_after_failed_refresh() -> None:
     client.async_get_system_info = fail_system_info  # type: ignore[method-assign]
     coordinator = _coordinator(client)
 
-    with pytest.raises(Exception):
+    with pytest.raises(UpdateFailed):
         await _updated_data(coordinator)
 
     assert client.clear_tick_cache_calls >= 2

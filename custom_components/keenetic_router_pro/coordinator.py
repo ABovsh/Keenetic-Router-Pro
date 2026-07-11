@@ -74,9 +74,10 @@ def _first_stat_int(stats: dict[str, Any], *keys: str) -> int | None:
     # A non-numeric/garbled sample must stay None (sensor unavailable), NOT
     # collapse to 0 — a fake 0 reads as a TOTAL_INCREASING counter reset and
     # corrupts long-term traffic statistics.
-    sentinel = object()
-    parsed = coerce_int(value, default=sentinel)  # type: ignore[arg-type]
-    return None if parsed is sentinel else parsed
+    try:
+        return int(value)
+    except (OverflowError, TypeError, ValueError):
+        return None
 
 
 class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
@@ -199,7 +200,6 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             first_refresh=self.data is None,
             refresh_count=self._refresh_count,
         )
-        first_refresh = plan.first_refresh
         medium_refresh = plan.medium_refresh
         slow_refresh = plan.slow_refresh
         very_slow_refresh = plan.very_slow_refresh
