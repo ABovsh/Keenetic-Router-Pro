@@ -8,6 +8,14 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.66
+
+### 🐛 Fixed
+
+- Changing a client's Connection Policy no longer snaps back to the previous value in the UI. The dropdown now updates immediately after the router accepts the change, and the confirming re-read happens on the next poll instead of waiting up to ~3 minutes for the slow refresh tier.
+- A policy change is no longer missed by the change-detection filter when nothing else about the client changed.
+- A transient failure while reading host policies keeps the last known values instead of briefly showing "Default" for every client.
+
 ## 1.7.65
 
 ### Improvements

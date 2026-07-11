@@ -51,10 +51,21 @@ async def test_async_get_policies_handles_string_booleans_and_missing_keys() -> 
     assert await client.async_get_policies() == {"Policy0": "VPN", "Policy1": "Policy1"}
 
 
-@pytest.mark.parametrize("exc", [KeeneticApiError("boom"), aiohttp.ClientError("boom"), asyncio.TimeoutError(), ValueError("bad json")])
-async def test_clients_error_paths_return_empty_shapes(exc: Exception) -> None:
+@pytest.mark.parametrize("exc", [KeeneticApiError("HTTP 503"), aiohttp.ClientError("boom"), asyncio.TimeoutError(), ValueError("bad json")])
+async def test_host_policies_transient_errors_propagate(exc: Exception) -> None:
+    """Transient failures must reach the coordinator so it can keep the
+    previous snapshot instead of silently collapsing to {} (which blanked
+    every policy select to Default until the next slow-tier refetch)."""
     client = _client()
     client._rci_get = AsyncMock(side_effect=exc)
+
+    with pytest.raises(type(exc)):
+        await client.async_get_host_policies()
+
+
+async def test_host_policies_missing_endpoint_returns_empty() -> None:
+    client = _client()
+    client._rci_get = AsyncMock(side_effect=KeeneticApiError("HTTP 404: no such node"))
 
     assert await client.async_get_host_policies() == {}
 

@@ -100,6 +100,36 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
             self._id_to_display[policy_id] = label
             self._display_to_id[label] = policy_id
 
+    @property
+    def _fingerprint_source(self) -> dict[str, Any] | None:
+        """Include policy state in the change-detection fingerprint.
+
+        The base ClientEntity fingerprint covers only the hotspot client
+        row, but this entity's state comes from ``host_policies`` /
+        ``policies`` — without these keys a policy-only change would be
+        suppressed as a no-op and the dropdown would keep the stale value.
+        """
+        client = self._client
+        if client is None:
+            return None
+        data = self.coordinator.data or {}
+        host_policies = data.get("host_policies")
+        host_info = (
+            host_policies.get(self._mac)
+            if isinstance(host_policies, dict)
+            else None
+        )
+        policies = data.get("policies")
+        # Copy the nested dicts so the stored fingerprint is a stable
+        # snapshot, not an alias of the live coordinator data (an in-place
+        # mutation of an aliased dict would compare equal to itself and
+        # suppress the state write).
+        return {
+            **client,
+            "_host_policy": dict(host_info) if isinstance(host_info, dict) else host_info,
+            "_policies": dict(policies) if isinstance(policies, dict) else policies,
+        }
+
     def _sync_policies(self) -> None:
         """Apply policy changes published by the coordinator."""
         policies = self.coordinator.data.get("policies")
@@ -130,7 +160,7 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
         """Return current selected policy."""
         self._sync_policies()
         host_policies = self.coordinator.data.get("host_policies", {})
-        
+
         host_info = host_policies.get(self._mac, {})
         access = host_info.get("access")
         policy_id = host_info.get("policy")
@@ -147,8 +177,10 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
         """Change the selected policy."""
         if option == DEFAULT_POLICY_OPTION:
             await self._api_client.async_set_client_policy(self._mac, "default")
+            self._apply_optimistic_policy(policy_id=None, access="permit")
         elif option == DENY_POLICY_OPTION:
             await self._api_client.async_set_client_policy(self._mac, "deny")
+            self._apply_optimistic_policy(policy_id=None, access="deny")
         else:
             policy_id = self._display_to_id.get(option)
             if not policy_id or policy_id in ("__default__", "__deny__"):
@@ -159,8 +191,31 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
                     f"Connection policy option is no longer available: {option}"
                 )
             await self._api_client.async_set_client_policy(self._mac, policy_id)
+            self._apply_optimistic_policy(policy_id=policy_id, access="permit")
 
+        # host_policies lives in the slow fetch tier (~3 min); without this
+        # the confirming refresh below would republish the stale cached
+        # snapshot and the dropdown would snap back to the old value.
+        self.coordinator.request_host_policies_refresh()
         await self.coordinator.async_request_refresh()
+
+    def _apply_optimistic_policy(self, policy_id: str | None, access: str) -> None:
+        """Publish the router-accepted policy into coordinator data now.
+
+        Fast coordinator ticks carry ``host_policies`` forward from the
+        previous snapshot, so this patched value survives until the next
+        real fetch confirms (or corrects) it.
+        """
+        data = self.coordinator.data
+        if not isinstance(data, dict):
+            return
+        host_policies = dict(data.get("host_policies") or {})
+        host_info = dict(host_policies.get(self._mac) or {})
+        host_info["policy"] = policy_id
+        host_info["access"] = access
+        host_policies[self._mac] = host_info
+        data["host_policies"] = host_policies
+        self.async_write_ha_state()
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:

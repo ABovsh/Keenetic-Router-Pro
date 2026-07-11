@@ -92,6 +92,11 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.client = client
         self._refresh_count = 0
+        # One-shot request to fetch host policies on the next tick even if
+        # the slow tier is skipped. Set by write-entities (policy select)
+        # right after a router-side change so the UI doesn't wait up to a
+        # full slow-tier interval (~3 min) to confirm the new value.
+        self._host_policies_refresh_pending = False
         # Consecutive transient critical-fetch failures tolerated so far. A
         # one-off ``system_info`` / ``interfaces`` timeout keeps the last-known
         # snapshot instead of flipping every entity unavailable; reset on the
@@ -113,6 +118,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "total": 0,
         }
         self._oom_state_loaded = False
+
+    def request_host_policies_refresh(self) -> None:
+        """Force a live host_policies fetch on the next refresh tick."""
+        self._host_policies_refresh_pending = True
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch all router data, serializing access to client tick caches."""
@@ -200,6 +209,11 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # events. Polled on the same ``slow_refresh`` cadence as WAN
         # traffic stats so throughput graphs have matching resolution.
         ipsec_status_refresh = plan.ipsec_status_refresh
+        # Consume the one-shot host-policies request (policy select just
+        # wrote a change) so the confirming fetch happens on this tick
+        # instead of waiting for the slow tier.
+        host_policies_refresh = slow_refresh or self._host_policies_refresh_pending
+        self._host_policies_refresh_pending = False
 
         # Precompute the cached fallbacks for skipped slow-tick fetches
         # outside the gather() call so the fast tick doesn't rebuild
@@ -266,7 +280,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _bounded(self.client.async_get_interfaces()),
                 _bounded(self.client.async_get_clients()),
                 _bounded(self.client.async_get_ip_neighbours()),
-                _bounded(self.client.async_get_host_policies()) if slow_refresh else _resolve(_prev.get("host_policies", {})),
+                _bounded(self.client.async_get_host_policies()) if host_policies_refresh else _resolve(_prev.get("host_policies", {})),
                 _bounded(self.client.async_get_policies()) if very_slow_refresh else _resolve(_prev.get("policies", {})),
                 _bounded(self.client.async_get_ndns_info()) if very_slow_refresh else _resolve(_prev.get("ndns", {})),
                 _bounded(self.client.async_get_ping_check_status()) if medium_refresh else _resolve(_prev.get("ping_check_status", {})),
@@ -326,7 +340,12 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # the API layer now raises instead of returning MAC-keyed
             # fallback nodes (which used to flip mesh unique_ids).
             mesh_nodes = _ok("mesh_nodes", mesh_nodes, _prev.get("mesh_nodes", []))
-            host_policies = dict_or_empty(_ok("host_policies", host_policies, {}))
+            # On a transient fetch failure keep the previous snapshot — an
+            # empty default would flip every policy select to "Default"
+            # until the next slow-tier refetch.
+            host_policies = dict_or_empty(
+                _ok("host_policies", host_policies, _prev.get("host_policies", {}))
+            )
             policies = dict_or_empty(
                 _ok("policies", policies, _prev.get("policies", {}))
             )

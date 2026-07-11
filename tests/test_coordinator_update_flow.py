@@ -453,6 +453,57 @@ def test_coordinator_fast_refresh_reuses_slow_cached_data_and_rates() -> None:
     assert second["crypto_maps"]["SITE"]["tx_throughput"] == pytest.approx(8.0)
 
 
+def test_coordinator_fast_tick_fetches_host_policies_when_requested() -> None:
+    """request_host_policies_refresh() must force a live host_policies fetch
+    on the next tick even when the slow tier is skipped (policy select fix)."""
+    client = FakeKeeneticClient()
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+
+    first = asyncio.run(coordinator._async_update_data())
+    first["host_policies"] = {"stale": {"policy": "PolicyOld"}}
+    coordinator.data = first
+    coordinator._refresh_count = 1  # fast tick: 1 % 6 != 0
+
+    # Without the request the fast tick must keep the cached snapshot.
+    second = asyncio.run(coordinator._async_update_data())
+    assert second["host_policies"] == {"stale": {"policy": "PolicyOld"}}
+
+    coordinator.data = second
+    coordinator._refresh_count = 2  # still a fast tick
+    coordinator.request_host_policies_refresh()
+
+    third = asyncio.run(coordinator._async_update_data())
+    assert third["host_policies"] == {"aa:bb:cc:dd:ee:ff": {"policy": "Policy0"}}
+
+    # The forced fetch is one-shot: the next fast tick caches again.
+    coordinator.data = third
+    coordinator._refresh_count = 3
+    third["host_policies"] = {"cached-again": {"policy": "PolicyX"}}
+
+    fourth = asyncio.run(coordinator._async_update_data())
+    assert fourth["host_policies"] == {"cached-again": {"policy": "PolicyX"}}
+
+
+def test_coordinator_keeps_previous_host_policies_on_fetch_failure() -> None:
+    """A transient host_policies fetch failure must not blank every client's
+    policy select to Default for the whole slow-tier interval."""
+    client = FakeKeeneticClient()
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+
+    first = asyncio.run(coordinator._async_update_data())
+    assert first["host_policies"] == {"aa:bb:cc:dd:ee:ff": {"policy": "Policy0"}}
+
+    async def failing_host_policies() -> dict[str, Any]:
+        raise asyncio.TimeoutError("transient")
+
+    client.async_get_host_policies = failing_host_policies  # type: ignore[assignment]
+    coordinator.data = first
+    coordinator._refresh_count = 6  # slow tick: refetch attempted
+
+    second = asyncio.run(coordinator._async_update_data())
+    assert second["host_policies"] == {"aa:bb:cc:dd:ee:ff": {"policy": "Policy0"}}
+
+
 def test_coordinator_fast_refresh_does_not_mutate_cached_crypto_maps() -> None:
     """Fast ticks should copy cached slow data before enrichment."""
     client = FakeKeeneticClient()

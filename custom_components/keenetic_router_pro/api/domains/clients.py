@@ -124,7 +124,7 @@ class ClientsMixin:
                     "description": client.get("description"),
                     "http_host": client.get("http-host"),
                 })
-                continue  
+                continue
 
             is_active = False
             if "active" in client:
@@ -154,7 +154,7 @@ class ClientsMixin:
         return {
             FIELD_CONNECTED: connected,
             "disconnected": disconnected,
-            "total": connected + disconnected, 
+            "total": connected + disconnected,
             "per_ap": per_ap,
             "extenders": extenders,
             "extender_count": len(extenders),
@@ -162,14 +162,14 @@ class ClientsMixin:
 
     async def async_get_client_stats(self) -> Dict[str, Any]:
         """Get connected/disconnected client counts and per-AP stats.
-        
+
         Extender/repeater cihazları client sayısından çıkarılır.
         """
         return self.summarize_client_stats(await self.async_get_clients())
 
     async def async_get_policies(self) -> Dict[str, str]:
         """Get available connection policies.
-        
+
         Returns:
             Dict mapping policy_id to description
             e.g. {"Policy0": "VPN", "Policy1": "Smart Home", ...}
@@ -193,7 +193,7 @@ class ClientsMixin:
 
     async def async_get_host_policies(self) -> Dict[str, Dict[str, Any]]:
         """Get policy assignments for all hosts.
-        
+
         Returns:
             Dict mapping MAC to policy info
             e.g. {"aa:bb:cc:dd:ee:ff": {"policy": "Policy1", "access": "permit"}, ...}
@@ -201,30 +201,32 @@ class ClientsMixin:
         try:
             # Doğru endpoint: GET /rci/ip/hotspot/host
             data = await self._rci_get("ip/hotspot/host")
-            if not data:
+        except KeeneticApiError as err:
+            if _is_endpoint_missing(err):
                 return {}
-
-            host_policies = {}
-            for host in _nested_dict_items(data, "host", "hosts"):
-                if not isinstance(host, dict):
-                    continue
-                mac = normalize_mac(host.get("mac"))
-                if mac:
-                    host_policies[mac] = {
-                        "policy": host.get("policy"), 
-                        "access": host.get("access"), 
-                    }
-
-            return host_policies
-        except asyncio.CancelledError:
+            # Transient failures must propagate so the coordinator keeps
+            # the previous snapshot instead of collapsing to {} (which
+            # would show "Default" on every client policy select).
             raise
-        except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError) as err:
-            _LOGGER.debug("Error getting host policies: %s", err)
+        if not data:
             return {}
+
+        host_policies = {}
+        for host in _nested_dict_items(data, "host", "hosts"):
+            if not isinstance(host, dict):
+                continue
+            mac = normalize_mac(host.get("mac"))
+            if mac:
+                host_policies[mac] = {
+                    "policy": host.get("policy"),
+                    "access": host.get("access"),
+                }
+
+        return host_policies
 
     async def async_set_client_policy(self, mac: str, policy: str) -> None:
         """Set connection policy for a client.
-        
+
         Args:
             mac: Client MAC address
             policy: Policy ID (e.g. "Policy0", "Policy1") or "deny"/"default"

@@ -20,6 +20,9 @@ def _coordinator() -> SimpleNamespace:
     async def async_request_refresh() -> None:
         calls.append("refresh")
 
+    def request_host_policies_refresh() -> None:
+        calls.append("policy_refetch")
+
     calls: list[str] = []
     return SimpleNamespace(
         data={
@@ -42,6 +45,7 @@ def _coordinator() -> SimpleNamespace:
             },
         },
         async_request_refresh=async_request_refresh,
+        request_host_policies_refresh=request_host_policies_refresh,
         refresh_calls=calls,
     )
 
@@ -80,11 +84,110 @@ def test_client_policy_select_maps_options_and_refreshes_after_change() -> None:
         ("aa:bb:cc:dd:ee:ff", "deny"),
         ("aa:bb:cc:dd:ee:ff", "default"),
     ]
-    assert coordinator.refresh_calls == ["refresh", "refresh", "refresh"]
+    assert coordinator.refresh_calls == [
+        "policy_refetch",
+        "refresh",
+        "policy_refetch",
+        "refresh",
+        "policy_refetch",
+        "refresh",
+    ]
 
     coordinator.data["host_policies"]["aa:bb:cc:dd:ee:ff"] = {"access": "deny"}
 
     assert entity.current_option == "Deny (Blocked)"
+
+
+def test_client_policy_select_updates_optimistically_before_refetch() -> None:
+    """The dropdown must reflect the chosen policy immediately after the
+    router accepted the command — not revert to the stale cached value
+    until the next slow-tier host_policies refetch (~3 min)."""
+    entry = _entry()
+    coordinator = _coordinator()
+
+    async def async_set_client_policy(mac: str, policy: str) -> None:
+        pass
+
+    entity = KeeneticClientPolicySelect(
+        coordinator=coordinator,
+        entry=entry,
+        api_client=SimpleNamespace(async_set_client_policy=async_set_client_policy),
+        mac="aa:bb:cc:dd:ee:ff",
+        label="Tablet",
+        initial_ip=None,
+        policies={"Policy1": "VPN", "Policy2": "Smart Home"},
+    )
+
+    assert entity.current_option == "VPN"
+
+    asyncio.run(entity.async_select_option("Smart Home"))
+    assert entity.current_option == "Smart Home"
+
+    asyncio.run(entity.async_select_option("Deny (Blocked)"))
+    assert entity.current_option == "Deny (Blocked)"
+
+    asyncio.run(entity.async_select_option("Default"))
+    assert entity.current_option == "Default"
+
+    asyncio.run(entity.async_select_option("VPN"))
+    assert entity.current_option == "VPN"
+
+
+def test_client_policy_select_does_not_update_when_router_rejects() -> None:
+    """A failed router write must not optimistically flip the dropdown."""
+    entry = _entry()
+    coordinator = _coordinator()
+
+    async def async_set_client_policy(mac: str, policy: str) -> None:
+        raise RuntimeError("router rejected")
+
+    entity = KeeneticClientPolicySelect(
+        coordinator=coordinator,
+        entry=entry,
+        api_client=SimpleNamespace(async_set_client_policy=async_set_client_policy),
+        mac="aa:bb:cc:dd:ee:ff",
+        label="Tablet",
+        initial_ip=None,
+        policies={"Policy1": "VPN", "Policy2": "Smart Home"},
+    )
+
+    try:
+        asyncio.run(entity.async_select_option("Smart Home"))
+    except RuntimeError:
+        pass
+
+    assert entity.current_option == "VPN"
+
+
+def test_client_policy_select_fingerprint_tracks_policy_changes() -> None:
+    """A policy-only change (client row untouched) must not be suppressed
+    by the ClientEntity change-detection fingerprint."""
+    entry = _entry()
+    coordinator = _coordinator()
+    entity = KeeneticClientPolicySelect(
+        coordinator=coordinator,
+        entry=entry,
+        api_client=SimpleNamespace(),
+        mac="aa:bb:cc:dd:ee:ff",
+        label="Tablet",
+        initial_ip=None,
+        policies={"Policy1": "VPN", "Policy2": "Smart Home"},
+    )
+
+    writes: list[str] = []
+    entity.async_write_ha_state = lambda: writes.append("write")  # type: ignore[method-assign]
+
+    entity._handle_coordinator_update()
+    assert writes == ["write"]
+
+    # Same coordinator data → suppressed.
+    entity._handle_coordinator_update()
+    assert writes == ["write"]
+
+    # Policy changed but client row identical → must write state.
+    coordinator.data["host_policies"]["aa:bb:cc:dd:ee:ff"]["policy"] = "Policy2"
+    entity._handle_coordinator_update()
+    assert writes == ["write", "write"]
 
 
 def test_client_policy_select_tracks_coordinator_policy_changes() -> None:
