@@ -33,7 +33,7 @@ class _Transport:
         password: str,
         port: int = 100,
         ssl: bool = False,
-        request_timeout: int = 15,
+        request_timeout: int = 25,
         use_challenge_auth: bool = False,
     ) -> None:
         target = normalize_connection_target(host, port, ssl)

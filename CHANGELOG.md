@@ -8,6 +8,12 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.68
+
+### Improvements
+
+- Raised the per-request HTTP timeout from 15s to 25s. On routers with a large ACL/client list, the `interfaces` call could occasionally exceed 15s even though the router was healthy, producing "Transient critical router fetch failure" log warnings that then self-resolved. The longer timeout still leaves headroom before the next 30s poll.
+
 ## 1.7.67
 
 ### Improvements
