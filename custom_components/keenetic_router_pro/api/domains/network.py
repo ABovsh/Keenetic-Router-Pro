@@ -437,10 +437,9 @@ class NetworkMixin:
                 }
             }
         }
-        try:
-            result = await self._rci_batch(tree)
-        except asyncio.CancelledError:
-            raise
+        # _rci_batch is deliberately non-raising (returns None on failure);
+        # only CancelledError propagates, and it should.
+        result = await self._rci_batch(tree)
         if result is None:
             return None
 
