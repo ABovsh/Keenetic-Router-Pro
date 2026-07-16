@@ -23,6 +23,8 @@ _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.release_notes")
 
 KEENETIC_SUPPORT_URL = "https://support.keenetic.com/"
 
+_FETCH_TIMEOUT = 10  # seconds per index-page fetch
+
 _CHANNEL_PAGES = {
     "stable": "latest-main-release",
     "preview": "latest-preview-release",
@@ -99,9 +101,12 @@ def _pick_article(html: str, page: str, lang: str) -> str | None:
         langs = by_page.get(candidate)
         if not langs:
             continue
-        found_lang = (
-            lang if lang in langs else "en" if "en" in langs else next(iter(langs))
-        )
+        if lang in langs:
+            found_lang = lang
+        elif "en" in langs:
+            found_lang = "en"
+        else:
+            found_lang = next(iter(langs))
         return f"{found_lang}/{langs[found_lang]}"
     return None
 
@@ -115,7 +120,6 @@ async def async_resolve_release_url(
     region: str | None = None,
     channel: str | None = None,
     lang: str = "en",
-    timeout: float = 10,
 ) -> str | None:
     """Resolve the model-specific changelog URL, or None if it can't be found.
 
@@ -142,7 +146,7 @@ async def async_resolve_release_url(
     for domain in domains:
         index_url = f"{domain}/{family}/{hw}/"
         try:
-            async with asyncio.timeout(timeout):
+            async with asyncio.timeout(_FETCH_TIMEOUT):
                 resp = await session.get(index_url)
                 async with resp:
                     if resp.status != 200:

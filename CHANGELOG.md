@@ -8,6 +8,12 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.70
+
+### Improvements
+
+- Improved internal code-quality checks; no user-visible behavior changed.
+
 ## 1.7.69
 
 ### Bug fixes
