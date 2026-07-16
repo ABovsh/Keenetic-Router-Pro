@@ -226,7 +226,7 @@ def test_build_batch_tree_includes_only_active_tier_paths() -> None:
         "show": {
             "system": {},
             "interface": {},
-            "ip": {"neighbour": {}},
+            "ip": {"neighbour": {}, "hotspot": {}},
         }
     }
     assert "ping-check" not in fast["show"]
@@ -238,6 +238,9 @@ def test_build_batch_tree_includes_only_active_tier_paths() -> None:
     assert very_slow["components"] == {"check-update": {}}
     assert "ndns" in very_slow["show"]
     assert "dns-proxy" in very_slow["show"]
+    # show/ip/hotspot is prefetched on every tick (fast, medium, slow, very-slow).
+    for tree in (fast, medium, slow, very_slow):
+        assert "hotspot" in tree["show"]["ip"]
 
 
 def test_ok_or_default_reraises_cancelled_error() -> None:

@@ -21,7 +21,7 @@ class NetworkMixin:
         self, ip_address: str, timeout_seconds: float = 2.0
     ) -> bool:
         """Ping an IP address using the router's ping functionality.
-        
+
         Returns True if the host is reachable, False otherwise.
         """
         try:
@@ -54,12 +54,12 @@ class NetworkMixin:
             return False
 
     async def async_ping_multiple(
-        self, 
-        ip_addresses: List[str], 
+        self,
+        ip_addresses: List[str],
         timeout_seconds: float = 2.0
     ) -> Dict[str, bool]:
         """Ping multiple IP addresses concurrently.
-        
+
         Returns a dict mapping IP address to reachability status.
         """
         if not ip_addresses:
@@ -82,33 +82,33 @@ class NetworkMixin:
 
     async def async_get_port_info(self, interfaces: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
         """Return physical port information for the main router.
-        
+
         Ports are found in show/interface as top-level entries with type "Port".
         Example keys: "0", "1", "2", "3", "4" with label and link status.
-        
+
         Also checks GigabitEthernet*.port nested dicts as fallback.
         """
         if interfaces is None:
             interfaces = await self.async_get_interfaces()
-        
+
         if not interfaces or not isinstance(interfaces, dict):
             return []
-        
+
         ports: List[Dict[str, Any]] = []
         seen_labels: set = set()
-        
+
         # Method 1: Top-level Port entries (keys like "0", "1", "2", "3", "4")
         for iface_id, iface in interfaces.items():
             if not isinstance(iface, dict):
                 continue
             if iface.get("type") != "Port":
                 continue
-            
+
             label = iface.get("label") or iface_label(iface, iface_id)
             if label in seen_labels:
                 continue
             seen_labels.add(label)
-            
+
             entry: Dict[str, Any] = {
                 "label": label,
                 "appearance": iface.get("type"),
@@ -118,24 +118,24 @@ class NetworkMixin:
                 entry["speed"] = iface.get("speed")
                 entry["duplex"] = iface.get("duplex")
             ports.append(entry)
-        
+
         if ports:
             # Sort by label for consistent ordering
             ports.sort(key=lambda p: str(p.get("label", "")))
             _LOGGER.debug("Found %d main router ports from top-level Port entries", len(ports))
             return ports
-        
+
         # Method 2: Nested port dicts inside GigabitEthernet interfaces
         for iface_id, iface in interfaces.items():
             if not isinstance(iface, dict):
                 continue
             if iface.get("type") != "GigabitEthernet":
                 continue
-            
+
             port_data = iface.get("port")
             if not port_data or not isinstance(port_data, dict):
                 continue
-            
+
             # port can be a single dict (GigabitEthernet1) or dict of dicts (GigabitEthernet0)
             if "label" in port_data:
                 # Single port dict
@@ -169,13 +169,13 @@ class NetworkMixin:
                         entry["speed"] = port_val.get("speed")
                         entry["duplex"] = port_val.get("duplex")
                     ports.append(entry)
-        
+
         if ports:
             ports.sort(key=lambda p: str(p.get("label", "")))
             _LOGGER.debug("Found %d main router ports from nested GigabitEthernet port data", len(ports))
         else:
             _LOGGER.warning("No physical ports found for main router")
-        
+
         return ports
 
     async def async_get_interfaces(self) -> Dict[str, Any]:
@@ -236,15 +236,15 @@ class NetworkMixin:
         iface_list: List[Dict[str, Any]] | None = None,
     ) -> Dict[str, Any]:
         """Get traffic statistics (speed, totals).
-        
+
         Args:
             interfaces: Pre-fetched interfaces data to avoid duplicate API calls.
         """
         stats: Dict[str, Any] = {
-            "download_speed": 0.0,  
-            "upload_speed": 0.0,    
-            "total_rx": 0,          
-            "total_tx": 0,          
+            "download_speed": 0.0,
+            "upload_speed": 0.0,
+            "total_rx": 0,
+            "total_tx": 0,
         }
 
         try:
@@ -285,17 +285,17 @@ class NetworkMixin:
                     )
 
                     rx_speed = (
-                        iface.get("rx-speed") or 
-                        iface.get("rxspeed") or 
-                        iface.get("speed-rx") or 
-                        iface.get("rx_rate") or 
+                        iface.get("rx-speed") or
+                        iface.get("rxspeed") or
+                        iface.get("speed-rx") or
+                        iface.get("rx_rate") or
                         0
                     )
                     tx_speed = (
-                        iface.get("tx-speed") or 
-                        iface.get("txspeed") or 
-                        iface.get("speed-tx") or 
-                        iface.get("tx_rate") or 
+                        iface.get("tx-speed") or
+                        iface.get("txspeed") or
+                        iface.get("speed-tx") or
+                        iface.get("tx_rate") or
                         0
                     )
 
@@ -356,28 +356,48 @@ class NetworkMixin:
                 "state": iface.get("state"),
             })
 
-        sem = asyncio.Semaphore(4)
+        raw_stats: Dict[str, Any] = {}
 
-        async def _bounded_interface_stat(name: str) -> Dict[str, Any]:
-            async with sem:
-                return await self.async_get_interface_stat(name)
+        batch_supported = getattr(self, "_rci_batch_supported", None)
+        if batch_supported is not False and len(targets) >= 2:
+            batch_stats = await self._try_batch_interface_stats(targets)
+            if batch_stats is not None:
+                raw_stats = batch_stats
 
-        results = await asyncio.gather(
-            *(_bounded_interface_stat(t["name"]) for t in targets),
-            return_exceptions=True,
-        )
+        missing_targets = [t for t in targets if t["name"] not in raw_stats]
+
+        if missing_targets:
+            sem = asyncio.Semaphore(4)
+
+            async def _bounded_interface_stat(name: str) -> Dict[str, Any]:
+                async with sem:
+                    return await self.async_get_interface_stat(name)
+
+            results = await asyncio.gather(
+                *(_bounded_interface_stat(t["name"]) for t in missing_targets),
+                return_exceptions=True,
+            )
+
+            for target, stats in zip(missing_targets, results):
+                if isinstance(stats, asyncio.CancelledError):
+                    raise stats
+                if isinstance(stats, Exception):
+                    _LOGGER.debug(
+                        "Failed to get stats for %s: %s", target["name"], stats
+                    )
+                    continue
+                if not stats:
+                    continue
+                if not isinstance(stats, dict):
+                    continue
+                raw_stats[target["name"]] = stats
 
         all_stats: Dict[str, Dict[str, Any]] = {}
-        for target, stats in zip(targets, results):
-            if isinstance(stats, asyncio.CancelledError):
-                raise stats
-            if isinstance(stats, Exception):
-                _LOGGER.debug("Failed to get stats for %s: %s", target["name"], stats)
+        for target in targets:
+            stats = raw_stats.get(target["name"])
+            if not stats or not isinstance(stats, dict):
                 continue
-            if not stats:
-                continue
-            if not isinstance(stats, dict):
-                continue
+            stats = dict(stats)
             stats["interface_name"] = target["name"]
             stats["interface_type"] = target["type"]
             stats["link"] = target["link"]
@@ -385,3 +405,56 @@ class NetworkMixin:
             all_stats[target["name"]] = stats
 
         return all_stats
+
+    @staticmethod
+    def _is_stat_error_record(stat: Any) -> bool:
+        """Return True if a batch stat entry is not usable interface stat data."""
+        if not isinstance(stat, dict) or not stat:
+            return True
+        status = stat.get("status")
+        if isinstance(status, list) and status:
+            first = status[0]
+            if isinstance(first, dict) and first.get("status") == "error":
+                return True
+        return False
+
+    async def _try_batch_interface_stats(
+        self, targets: List[Dict[str, Any]]
+    ) -> Dict[str, Dict[str, Any]] | None:
+        """Attempt a single composite POST for all interface stats.
+
+        Returns a dict of usable name -> stat dict for entries that came
+        back clean from the batch. Interfaces that are missing/error in
+        the batch response are simply absent from the result, so the
+        caller falls back to per-call fetches for just those. Returns
+        None if the overall response shape is unusable, so the caller
+        falls back to the fan-out path entirely.
+        """
+        tree = {
+            "show": {
+                "interface": {
+                    "stat": [{"name": t["name"]} for t in targets],
+                }
+            }
+        }
+        try:
+            result = await self._rci_batch(tree)
+        except asyncio.CancelledError:
+            raise
+        if result is None:
+            return None
+
+        stat_list = (
+            result.get("show", {}).get("interface", {}).get("stat")
+            if isinstance(result, dict)
+            else None
+        )
+        if not isinstance(stat_list, list) or len(stat_list) != len(targets):
+            return None
+
+        batch_stats: Dict[str, Dict[str, Any]] = {}
+        for target, stat in zip(targets, stat_list):
+            if self._is_stat_error_record(stat):
+                continue
+            batch_stats[target["name"]] = stat
+        return batch_stats

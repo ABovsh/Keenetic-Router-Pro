@@ -47,7 +47,7 @@ jobs:
           -m pytest -q tests
 
       - name: Report coverage
-        run: python -m coverage report --show-missing --fail-under=40
+        run: python -m coverage report --show-missing --fail-under=85
 
       - name: Generate coverage XML
         if: github.event_name == 'push'

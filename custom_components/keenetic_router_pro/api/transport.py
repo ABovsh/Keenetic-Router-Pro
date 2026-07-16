@@ -157,25 +157,33 @@ class _Transport:
                     headers=headers,
                 )
                 async with resp:
-                    # Auth cookies can expire. Retry once after a fresh
-                    # handshake before surfacing a real auth failure to HA.
-                    if resp.status == 401:
+                    needs_retry = resp.status == 401
+                    if needs_retry:
+                        # Auth cookies can expire. Retry once after a fresh
+                        # handshake before surfacing a real auth failure to
+                        # HA. The response is drained/released here; the
+                        # re-auth call and retry request get their own
+                        # fresh timeout window below so a slow first
+                        # attempt can't starve a recoverable retry.
                         await resp.read()
                         self._authenticated = False
-                        await self._ensure_auth()
-                        retry_headers: Dict[str, str] = dict(self._auth_header or {})
-                        resp = await self._session.request(
-                            method,
-                            url,
-                            params=params,
-                            json=json,
-                            headers=retry_headers,
+                    else:
+                        return await self._handle_response(
+                            resp, path, allow_text=allow_text
                         )
-                        async with resp:
-                            return await self._handle_response(
-                                resp, path, allow_text=allow_text
-                            )
 
+            # Falls through only when the first attempt returned 401.
+            async with asyncio.timeout(self._request_timeout):
+                await self._ensure_auth()
+                retry_headers: Dict[str, str] = dict(self._auth_header or {})
+                resp = await self._session.request(
+                    method,
+                    url,
+                    params=params,
+                    json=json,
+                    headers=retry_headers,
+                )
+                async with resp:
                     return await self._handle_response(
                         resp, path, allow_text=allow_text
                     )

@@ -8,6 +8,20 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.71
+
+### Improvements
+
+- Per-interface traffic statistics are fetched in a single composite RCI
+  request when the router supports it, instead of one request per interface.
+- The client list is served from the per-tick composite prefetch, removing
+  one HTTP request per update cycle.
+
+### Bug fixes
+
+- The automatic retry after an expired auth session now gets its own timeout
+  window; a slow first response no longer makes the retry fail.
+
 ## 1.7.70
 
 ### Improvements

@@ -45,6 +45,7 @@ def build_batch_tree(plan: RefreshPlan) -> dict[str, Any]:
     add("show/system")
     add("show/interface")
     add("show/ip/neighbour")
+    add("show/ip/hotspot")
     if plan.medium_refresh:
         add("show/ping-check")
     if plan.ipsec_status_refresh:

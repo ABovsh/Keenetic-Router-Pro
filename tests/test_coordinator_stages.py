@@ -820,8 +820,17 @@ async def test_coordinator_skips_prefetch_when_batch_latched_off() -> None:
     assert client.prefetch_calls == []
 
 
-async def test_coordinator_excludes_hotspot_winner_from_prefetch_tree() -> None:
-    """Optional hotspot subpaths must not poison composite batch capability."""
+async def test_coordinator_prefetches_hotspot_root_regardless_of_subpath_winner() -> None:
+    """The batch tree always requests show/ip/hotspot (never the /host leaf).
+
+    Verified live on KN-1811: the composite POST /rci/ accepts
+    ``show/ip/hotspot`` (returns ``{"host": [...]}``) but rejects
+    ``show/ip/hotspot/host`` directly. Requesting only the root subtree
+    means the tree-batch request never poisons capability detection
+    regardless of which subpath ``async_get_clients`` previously latched
+    onto — the tick-cache lookup for the ``/host`` leaf walks down into
+    the cached root and is served from cache either way.
+    """
     client = StageFixtureClient()
     client._rci_batch_supported = None
     client._hotspot_subpath_winner = "show/ip/hotspot/host"
@@ -830,5 +839,4 @@ async def test_coordinator_excludes_hotspot_winner_from_prefetch_tree() -> None:
     await _updated_data(coordinator)
 
     tree = client.prefetch_calls[0]
-    assert "hotspot" not in tree["show"]["ip"]
-    assert "hotspot" not in tree.get("ip", {})
+    assert tree["show"]["ip"]["hotspot"] == {}

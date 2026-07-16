@@ -204,6 +204,131 @@ async def test_async_get_all_interface_stats_propagates_cancelled_error() -> Non
         )
 
 
+async def test_async_get_all_interface_stats_uses_single_batch_call_on_success() -> None:
+    """When the composite POST succeeds cleanly, no per-call GETs happen."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    interfaces = deepcopy(MULTI_WAN_INTERFACES)
+
+    batch_response = {
+        "show": {
+            "interface": {
+                "stat": [
+                    deepcopy(INTERFACE_STATS_BY_NAME["PPPoE0"]),
+                    deepcopy(INTERFACE_STATS_BY_NAME["Wireguard0"]),
+                    deepcopy(INTERFACE_STATS_BY_NAME["GigabitEthernet1"]),
+                ]
+            }
+        }
+    }
+    client._rci_batch = AsyncMock(return_value=batch_response)
+    client.async_get_interface_stat = AsyncMock(
+        side_effect=AssertionError("must not fan out on clean batch success")
+    )
+
+    result = await client.async_get_all_interface_stats(interfaces=interfaces)
+
+    assert result == {
+        "PPPoE0": {
+            **INTERFACE_STATS_BY_NAME["PPPoE0"],
+            "interface_name": "PPPoE0",
+            "interface_type": "pppoe",
+            "link": "up",
+            "state": "up",
+        },
+        "Wireguard0": {
+            **INTERFACE_STATS_BY_NAME["Wireguard0"],
+            "interface_name": "Wireguard0",
+            "interface_type": "wireguard",
+            "link": "up",
+            "state": "up",
+        },
+        "GigabitEthernet1": {
+            **INTERFACE_STATS_BY_NAME["GigabitEthernet1"],
+            "interface_name": "GigabitEthernet1",
+            "interface_type": "gigabitethernet",
+            "link": "up",
+            "state": "up",
+        },
+    }
+    client._rci_batch.assert_awaited_once()
+    client.async_get_interface_stat.assert_not_called()
+
+
+async def test_async_get_all_interface_stats_falls_back_per_call_on_batch_error_entry() -> None:
+    """A partial error record in the batch is fetched per-call; others use the batch."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    interfaces = deepcopy(MULTI_WAN_INTERFACES)
+
+    batch_response = {
+        "show": {
+            "interface": {
+                "stat": [
+                    deepcopy(INTERFACE_STATS_BY_NAME["PPPoE0"]),
+                    {"status": [{"status": "error", "message": "not found"}]},
+                    deepcopy(INTERFACE_STATS_BY_NAME["GigabitEthernet1"]),
+                ]
+            }
+        }
+    }
+    client._rci_batch = AsyncMock(return_value=batch_response)
+
+    async def fake_stat(name: str) -> dict:
+        assert name == "Wireguard0"
+        return deepcopy(INTERFACE_STATS_BY_NAME["Wireguard0"])
+
+    client.async_get_interface_stat = AsyncMock(side_effect=fake_stat)
+
+    result = await client.async_get_all_interface_stats(interfaces=interfaces)
+
+    assert result["PPPoE0"]["rxbytes"] == INTERFACE_STATS_BY_NAME["PPPoE0"]["rxbytes"]
+    assert result["Wireguard0"]["rx-bytes"] == INTERFACE_STATS_BY_NAME["Wireguard0"]["rx-bytes"]
+    assert result["GigabitEthernet1"]["rxbytes"] == INTERFACE_STATS_BY_NAME["GigabitEthernet1"]["rxbytes"]
+    client.async_get_interface_stat.assert_awaited_once_with("Wireguard0")
+
+
+async def test_async_get_all_interface_stats_falls_back_fully_when_batch_returns_none() -> None:
+    """Batch unsupported/failed (_rci_batch returns None) -> full per-call fan-out."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    interfaces = deepcopy(MULTI_WAN_INTERFACES)
+
+    client._rci_batch = AsyncMock(return_value=None)
+
+    async def fake_stat(name: str) -> dict:
+        return deepcopy(INTERFACE_STATS_BY_NAME[name])
+
+    client.async_get_interface_stat = AsyncMock(side_effect=fake_stat)
+
+    result = await client.async_get_all_interface_stats(interfaces=interfaces)
+
+    assert set(result.keys()) == {"PPPoE0", "Wireguard0", "GigabitEthernet1"}
+    assert client.async_get_interface_stat.await_count == 3
+
+
+async def test_async_get_all_interface_stats_falls_back_fully_on_shape_mismatch() -> None:
+    """Batch response with a length mismatch is treated as unusable -> full fan-out."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    interfaces = deepcopy(MULTI_WAN_INTERFACES)
+
+    batch_response = {
+        "show": {
+            "interface": {
+                "stat": [deepcopy(INTERFACE_STATS_BY_NAME["PPPoE0"])]
+            }
+        }
+    }
+    client._rci_batch = AsyncMock(return_value=batch_response)
+
+    async def fake_stat(name: str) -> dict:
+        return deepcopy(INTERFACE_STATS_BY_NAME[name])
+
+    client.async_get_interface_stat = AsyncMock(side_effect=fake_stat)
+
+    result = await client.async_get_all_interface_stats(interfaces=interfaces)
+
+    assert set(result.keys()) == {"PPPoE0", "Wireguard0", "GigabitEthernet1"}
+    assert client.async_get_interface_stat.await_count == 3
+
+
 async def test_async_get_interface_stat_latches_get_only_after_get_success() -> None:
     """Once GET path returns real stats, parse-mode is skipped on future calls."""
     from custom_components.keenetic_router_pro.api import KeeneticClient
