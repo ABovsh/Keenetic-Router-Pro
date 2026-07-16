@@ -124,8 +124,9 @@ class MeshMixin:
                     "ip": member.get("ip"),
                     "name": member.get("known-host") or member.get("model") or mac,
                     "model": member.get("model"),
-                    "mode": member.get("mode"), 
+                    "mode": member.get("mode"),
                     "hw_id": member.get("hw_id"),
+                    "region": member.get("region"),
                     FIELD_CONNECTED: is_connected,
                     "state": LINK_STATE_UP if is_connected else LINK_STATE_DOWN,
                     "uptime": system_info.get("uptime"),
@@ -133,7 +134,7 @@ class MeshMixin:
                     "memory": system_info.get("memory"),
                     "firmware": member.get("fw"),
                     "firmware_available": member.get("fw-available"),
-                    "associations": member.get("associations", 0), 
+                    "associations": member.get("associations", 0),
                     "rci_errors": rci_info.get("errors", 0),
                     "fqdn": member.get("fqdn"),
                     "port": normalized_ports,
@@ -184,7 +185,7 @@ class MeshMixin:
 
             nodes.append({
                 "id": mac,
-                "cid": None, 
+                "cid": None,
                 "mac": mac,
                 "ip": client.get("ip"),
                 "name": client.get("name") or client.get("hostname") or mac,
@@ -199,7 +200,7 @@ class MeshMixin:
 
     async def async_reboot_mesh_node(self, cid: str) -> None:
         """Reboot a specific mesh/extender node by CID (component ID).
-        
+
         Command format: mws member {cid} reboot
         """
         cid = _validate_cli_arg(cid, "mesh node cid")

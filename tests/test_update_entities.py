@@ -285,3 +285,116 @@ def test_mesh_firmware_install_retries_transient_refresh_failures(
     asyncio.run(entity.async_install(version=None, backup=False))
 
     assert coordinator.refreshes == 3
+
+
+# ---------- per-model release-notes deep links ----------
+
+_SYSTEM_WITH_UPDATE = {
+    "title": "5.0.12",
+    "fw-available": "5.1.1",
+    "fw-update-sandbox": "stable",
+    "model": "Titan (KN-1812)",
+    "device": "Titan",
+    "hw_id": "KN-1812",
+    "region": "UA",
+}
+_DEEP_LINK = (
+    "https://support.keenetic.ua/titan/kn-1812/en/41380-latest-main-release.html"
+)
+
+
+def test_controller_release_url_defaults_to_support_portal() -> None:
+    coordinator = _Coordinator({"system": dict(_SYSTEM_WITH_UPDATE)})
+    entity = KeeneticFirmwareUpdate(coordinator, _entry(), SimpleNamespace())
+    assert entity.release_url == "https://support.keenetic.com/"
+
+
+def test_controller_release_notes_use_resolved_deep_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, Any] = {}
+
+    async def _fake_resolve(_session: Any, **kwargs: Any) -> str:
+        seen.update(kwargs)
+        return _DEEP_LINK
+
+    monkeypatch.setattr(update_module, "async_resolve_release_url", _fake_resolve)
+
+    coordinator = _Coordinator({"system": dict(_SYSTEM_WITH_UPDATE)})
+    entity = KeeneticFirmwareUpdate(
+        coordinator, _entry(), SimpleNamespace(_session=object())
+    )
+    entity.async_write_ha_state = lambda: None
+
+    notes = asyncio.run(entity.async_release_notes())
+
+    assert f"[Keenetic Release Notes]({_DEEP_LINK})" in notes
+    assert entity.release_url == _DEEP_LINK
+    assert seen["model"] == "Titan (KN-1812)"
+    assert seen["hw_id"] == "KN-1812"
+    assert seen["device"] == "Titan"
+    assert seen["region"] == "UA"
+    assert seen["channel"] == "stable"
+
+
+def test_controller_release_notes_fall_back_when_resolution_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_resolve(_session: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(update_module, "async_resolve_release_url", _fake_resolve)
+
+    coordinator = _Coordinator({"system": dict(_SYSTEM_WITH_UPDATE)})
+    entity = KeeneticFirmwareUpdate(
+        coordinator, _entry(), SimpleNamespace(_session=object())
+    )
+    entity.async_write_ha_state = lambda: None
+
+    notes = asyncio.run(entity.async_release_notes())
+
+    assert "[Keenetic Release Notes](https://support.keenetic.com/)" in notes
+    assert entity.release_url == "https://support.keenetic.com/"
+
+
+def test_mesh_release_notes_use_node_model_and_controller_region(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, Any] = {}
+    deep = "https://support.keenetic.ua/giga/kn-1011/en/9109-latest-main-release.html"
+
+    async def _fake_resolve(_session: Any, **kwargs: Any) -> str:
+        seen.update(kwargs)
+        return deep
+
+    monkeypatch.setattr(update_module, "async_resolve_release_url", _fake_resolve)
+
+    coordinator = _Coordinator(
+        {
+            "system": {"region": "UA", "fw-update-sandbox": "stable"},
+            "mesh_nodes": [
+                {
+                    "cid": "node-1",
+                    "name": "NH - Keenetic Giga",
+                    "model": "Giga (KN-1011)",
+                    "hw_id": "KN-1011",
+                    "region": "UA",
+                    "firmware": "5.0.12",
+                    "firmware_available": "5.1.1",
+                }
+            ],
+        }
+    )
+    entity = KeeneticMeshFirmwareUpdate(
+        coordinator, _entry(), "node-1", SimpleNamespace(_session=object())
+    )
+    entity.async_write_ha_state = lambda: None
+
+    notes = asyncio.run(entity.async_release_notes())
+
+    assert f"[Keenetic Release Notes]({deep})" in notes
+    assert entity.release_url == deep
+    assert seen["model"] == "Giga (KN-1011)"
+    assert seen["hw_id"] == "KN-1011"
+    assert seen["region"] == "UA"
+    assert seen["channel"] == "stable"

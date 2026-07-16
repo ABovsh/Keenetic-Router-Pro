@@ -8,6 +8,12 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.69
+
+### Bug fixes
+
+- The "Keenetic Release Notes" link on firmware update entities pointed at the retired help.keenetic.com portal, which now redirects every article to the generic support homepage. The link now resolves to the exact per-model changelog on the current support site (e.g. `support.keenetic.ua/titan/kn-1812/en/…-latest-main-release.html`), matching the link in the router's own web UI. Works for the main router and mesh nodes, follows the firmware channel (main/preview/LTS), prefers the router's regional support site, and falls back to the support homepage if the model page can't be resolved.
+
 ## 1.7.68
 
 ### Improvements

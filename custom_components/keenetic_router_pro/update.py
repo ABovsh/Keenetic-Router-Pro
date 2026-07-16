@@ -20,13 +20,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .api import KeeneticApiError, KeeneticAuthError, KeeneticClient
 from .coordinator import KeeneticCoordinator
 from .entity import ControllerEntity, MeshEntity
+from .release_notes import KEENETIC_SUPPORT_URL, async_resolve_release_url
 from .utils import mask_identifier
 from .entity_setup import DynamicEntityTracker, register_dynamic_entities
 from .utils import iter_new_items
 
 _LOGGER = logging.getLogger(__name__)
-
-KEENETIC_RELEASE_NOTES_URL = "https://help.keenetic.com/hc/en-us/categories/360000400920-KeeneticOS-Release-Notes"
 
 _UPDATE_PROGRESS_FALLBACK_ERRORS = (
     KeeneticApiError,
@@ -139,6 +138,7 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
         self._client = client
         self._update_progress: int | None = None
+        self._resolved_release_url: str | None = None
 
     @property
     def unique_id(self) -> str:
@@ -173,7 +173,23 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
     @property
     def release_url(self) -> str | None:
         """Return the release notes URL."""
-        return KEENETIC_RELEASE_NOTES_URL
+        return self._resolved_release_url or KEENETIC_SUPPORT_URL
+
+    async def _async_resolve_release_url(self) -> str | None:
+        """Resolve the model-specific changelog URL and cache it on the entity."""
+        system = self.coordinator.data.get("system", {}) or {}
+        url = await async_resolve_release_url(
+            getattr(self._client, "_session", None),
+            model=system.get("model"),
+            hw_id=system.get("hw_id"),
+            device=system.get("device"),
+            region=system.get("region"),
+            channel=system.get("fw-update-sandbox"),
+        )
+        if url and url != self._resolved_release_url:
+            self._resolved_release_url = url
+            self.async_write_ha_state()
+        return url
 
     async def async_release_notes(self) -> str | None:
         """Return release notes for the latest version."""
@@ -184,6 +200,7 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
         channel = system.get("fw-update-sandbox", "stable")
 
         if available and current and available != current:
+            notes_url = await self._async_resolve_release_url() or KEENETIC_SUPPORT_URL
             notes = (
                 f"**{model}** firmware update available\n\n"
                 f"- Current: `{current}`\n"
@@ -193,7 +210,7 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
             if channel and channel != "stable":
                 notes += f"⚠️ This is a **{channel}** release.\n\n"
             notes += (
-                f"Visit [Keenetic Release Notes]({KEENETIC_RELEASE_NOTES_URL}) "
+                f"Visit [Keenetic Release Notes]({notes_url}) "
                 f"for detailed changelog."
             )
             return notes
@@ -311,6 +328,7 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
     ) -> None:
         MeshEntity.__init__(self, coordinator, entry.entry_id, entry.title, node_cid)
         self._client = client
+        self._resolved_release_url: str | None = None
 
     @property
     def unique_id(self) -> str:
@@ -338,7 +356,23 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
     @property
     def release_url(self) -> str | None:
         """Return the release notes URL."""
-        return KEENETIC_RELEASE_NOTES_URL
+        return self._resolved_release_url or KEENETIC_SUPPORT_URL
+
+    async def _async_resolve_release_url(self) -> str | None:
+        """Resolve the node-model changelog URL and cache it on the entity."""
+        node = self._node or {}
+        system = self.coordinator.data.get("system", {}) or {}
+        url = await async_resolve_release_url(
+            getattr(self._client, "_session", None),
+            model=node.get("model"),
+            hw_id=node.get("hw_id"),
+            region=node.get("region") or system.get("region"),
+            channel=system.get("fw-update-sandbox"),
+        )
+        if url and url != self._resolved_release_url:
+            self._resolved_release_url = url
+            self.async_write_ha_state()
+        return url
 
     async def async_release_notes(self) -> str | None:
         """Return release notes for the latest version."""
@@ -350,12 +384,13 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
         name = node.get("name") or node.get("model") or self._node_cid
 
         if available and current and available != current:
+            notes_url = await self._async_resolve_release_url() or KEENETIC_SUPPORT_URL
             return (
                 f"**{name}** firmware update available\n\n"
                 f"- Current: `{current}`\n"
                 f"- Available: `{available}`\n\n"
                 f"Update is managed by the controller router.\n\n"
-                f"Visit [Keenetic Release Notes]({KEENETIC_RELEASE_NOTES_URL}) "
+                f"Visit [Keenetic Release Notes]({notes_url}) "
                 f"for detailed changelog."
             )
         return None

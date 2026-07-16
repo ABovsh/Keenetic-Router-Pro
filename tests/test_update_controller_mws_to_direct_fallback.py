@@ -120,7 +120,7 @@ def test_controller_update_beta_release_notes_include_channel_warning() -> None:
         "- Channel: preview\n\n"
         "⚠️ This is a **preview** release.\n\n"
         "Visit [Keenetic Release Notes]"
-        "(https://help.keenetic.com/hc/en-us/categories/360000400920-KeeneticOS-Release-Notes) "
+        "(https://support.keenetic.com/) "
         "for detailed changelog."
     )
 
@@ -137,7 +137,7 @@ def test_controller_update_without_available_version_has_release_url_and_no_note
         entity.release_url,
         asyncio.run(entity.async_release_notes()),
     ) == (
-        "https://help.keenetic.com/hc/en-us/categories/360000400920-KeeneticOS-Release-Notes",
+        "https://support.keenetic.com/",
         None,
     )
 
@@ -310,7 +310,7 @@ def test_mesh_update_missing_node_has_no_versions_or_notes() -> None:
     ) == (
         None,
         None,
-        "https://help.keenetic.com/hc/en-us/categories/360000400920-KeeneticOS-Release-Notes",
+        "https://support.keenetic.com/",
         None,
     )
 
