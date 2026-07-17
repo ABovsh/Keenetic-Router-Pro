@@ -16,7 +16,7 @@ import pytest
 from conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
 
 from custom_components.keenetic_router_pro.api import KeeneticApiError, KeeneticClient
-from custom_components.keenetic_router_pro.coordinator import _first_stat_int
+from custom_components.keenetic_router_pro.coordinator_parts.enrichment import _first_stat_int
 from custom_components.keenetic_router_pro.diagnostics import (
     async_get_config_entry_diagnostics,
 )

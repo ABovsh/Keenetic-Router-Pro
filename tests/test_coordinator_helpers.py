@@ -6,6 +6,8 @@ import pytest
 
 from custom_components.keenetic_router_pro.coordinator import (
     _counter_rate_bytes_per_second,
+)
+from custom_components.keenetic_router_pro.coordinator_parts.enrichment import (
     _first_stat_int,
 )
 from custom_components.keenetic_router_pro.utils import coerce_int

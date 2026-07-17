@@ -13,7 +13,7 @@ from custom_components.keenetic_router_pro.api import KeeneticApiError, Keenetic
 from custom_components.keenetic_router_pro.api.constants import _RCI_PARSE_ERROR_RE
 from custom_components.keenetic_router_pro.api.parsers.ipsec import parse_ipsec_vici_diagnostics
 from custom_components.keenetic_router_pro.api.parsers.wan import _extract_ip_from_value
-from custom_components.keenetic_router_pro.coordinator import _first_stat_int
+from custom_components.keenetic_router_pro.coordinator_parts.enrichment import _first_stat_int
 from custom_components.keenetic_router_pro.coordinator_parts.derived import (
     build_clients_by_mac,
     counter_rate_bytes_per_second,
