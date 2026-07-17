@@ -18,12 +18,16 @@ from .coordinator_parts.derived import (
     build_clients_by_mac,
     counter_rate_bytes_per_second,
     mesh_associations,
-    order_wan_interfaces,
     real_client_macs,
+)
+from .coordinator_parts.enrichment import (
+    enrich_crypto_maps,
+    enrich_wan_interfaces,
 )
 from .coordinator_parts.fetching import (
     FetchFailure,
     evaluate_critical_failures,
+    next_backoff_interval,
     ok_or_default,
 )
 from .coordinator_parts.oom import advance_oom_state
@@ -33,7 +37,7 @@ from .coordinator_parts.payloads import (
     merge_clients_with_neighbours,
 )
 from .coordinator_parts.refresh import build_batch_tree, refresh_plan
-from .utils import coerce_int, first_present, normalize_mac
+from .utils import coerce_int, normalize_mac
 
 
 _OOM_STORE_VERSION = 1
@@ -62,24 +66,6 @@ _VERSION_CACHE_KEYS = (
 )
 
 
-def _first_stat_int(stats: dict[str, Any], *keys: str) -> int | None:
-    """Return the first usable integer stat, or None for absent/garbage values.
-
-    Booleans are rejected (``int(False) == 0`` would look like a counter
-    reset and fabricate a throughput spike on the next real sample).
-    """
-    value = first_present(stats, *keys, default=None)
-    if value is None or isinstance(value, bool):
-        return None
-    # A non-numeric/garbled sample must stay None (sensor unavailable), NOT
-    # collapse to 0 — a fake 0 reads as a TOTAL_INCREASING counter reset and
-    # corrupts long-term traffic statistics.
-    try:
-        return int(value)
-    except (OverflowError, TypeError, ValueError):
-        return None
-
-
 class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Fetches all router data on each tick."""
 
@@ -103,6 +89,11 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # snapshot instead of flipping every entity unavailable; reset on the
         # first clean tick. See ``evaluate_critical_failures``.
         self._critical_fail_streak = 0
+        # Number of consecutive UpdateFailed ticks since the grace window
+        # (CRITICAL_FETCH_GRACE_TICKS) was exhausted — drives the adaptive
+        # poll backoff during a sustained outage. Reset to 0 on any tick that
+        # doesn't raise UpdateFailed. See ``next_backoff_interval``.
+        self._critical_fail_backoff_count = 0
         # Per-config-entry persistent OOM tracker. The Store key is
         # derived from the API host so two routers on the same HA
         # instance keep their counters independent. Schema:
@@ -462,6 +453,17 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if critical_decision.action == "auth":
                 raise ConfigEntryAuthFailed(critical_decision.message)
             if critical_decision.action == "fail":
+                # Sustained outage: the grace window is exhausted and this
+                # tick is about to raise UpdateFailed. Stretch the poll
+                # interval so we don't keep hammering a confirmed-down
+                # router every FAST_SCAN_INTERVAL; HA's DataUpdateCoordinator
+                # reschedules from ``self.update_interval`` on its next pass.
+                self._critical_fail_backoff_count = (
+                    getattr(self, "_critical_fail_backoff_count", 0) + 1
+                )
+                self.update_interval = timedelta(
+                    seconds=next_backoff_interval(self._critical_fail_backoff_count)
+                )
                 raise UpdateFailed(critical_decision.message)
             if critical_decision.action == "tolerate":
                 _LOGGER.warning(critical_decision.message)
@@ -621,101 +623,14 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # for every interface) instead of firing extra RCI calls. Throughput
             # is computed as a delta against the previous coordinator tick.
             if wan_stats_fresh:
-                prev_wan_by_id: dict[str, dict[str, Any]] = {}
-                if self.data:
-                    for prev in self.data.get("wan_interfaces", []) or []:
-                        pid = prev.get("id")
-                        if pid:
-                            prev_wan_by_id[pid] = prev
                 now_ts = asyncio.get_running_loop().time()
-
-                for wan in wan_interfaces:
-                    wan_id = wan.get("id")
-                    stats = (interface_stats or {}).get(wan_id) or {}
-                    rx_bytes = _first_stat_int(
-                        stats,
-                        "rxbytes",
-                        "rx-bytes",
-                        "rx_bytes",
-                    )
-                    tx_bytes = _first_stat_int(
-                        stats,
-                        "txbytes",
-                        "tx-bytes",
-                        "tx_bytes",
-                    )
-                    wan["rx_bytes"] = rx_bytes
-                    wan["tx_bytes"] = tx_bytes
-                    wan["rx_packets"] = _first_stat_int(
-                        stats,
-                        "rxpackets",
-                        "rx-packets",
-                    )
-                    wan["tx_packets"] = _first_stat_int(
-                        stats,
-                        "txpackets",
-                        "tx-packets",
-                    )
-                    wan["rx_speed_raw"] = _first_stat_int(
-                        stats,
-                        "rxspeed",
-                        "rx-speed",
-                        "rx_rate",
-                    )
-                    wan["tx_speed_raw"] = _first_stat_int(
-                        stats,
-                        "txspeed",
-                        "tx-speed",
-                        "tx_rate",
-                    )
-                    wan["stats_interface"] = stats.get("interface_name") or wan_id
-                    wan["stats_timestamp"] = stats.get("timestamp")
-                    wan["_sample_ts"] = now_ts
-
-                    # --- Authoritative ping-check override ---
-                    # When the router itself reports a ping-check result for
-                    # this WAN, trust it over the heuristic. Three cases:
-                    #   passing=True  -> internet_access=True (ping check ok)
-                    #   passing=False -> internet_access=False (real outage,
-                    #                    the case the feature request is about)
-                    #   passing=None  -> no real profile attached / mixed state
-                    #                    -> keep the heuristic value from api.py
-                    pc = ping_check_status.get(wan_id)
-                    if pc is not None:
-                        wan["ping_check"] = pc
-                        passing = pc.get("passing")
-                        if passing is True or passing is False:
-                            wan["internet_access"] = passing
-                            wan["internet_access_source"] = "ping_check"
-                        else:
-                            wan["internet_access_source"] = "heuristic"
-                    else:
-                        wan["ping_check"] = None
-                        wan["internet_access_source"] = "heuristic"
-
-                    prev = prev_wan_by_id.get(wan_id)
-                    if prev and prev.get("_sample_ts"):
-                        dt = now_ts - float(prev.get("_sample_ts") or 0)
-                        wan["rx_throughput"] = counter_rate_bytes_per_second(
-                            rx_bytes,
-                            prev.get("rx_bytes"),
-                            dt,
-                        )
-                        wan["tx_throughput"] = counter_rate_bytes_per_second(
-                            tx_bytes,
-                            prev.get("tx_bytes"),
-                            dt,
-                        )
-                    else:
-                        wan["rx_throughput"] = 0.0
-                        wan["tx_throughput"] = 0.0
-
-                wan_interfaces = order_wan_interfaces(wan_interfaces)
-                wan_by_id = {
-                    w.get("id"): w
-                    for w in wan_interfaces
-                    if isinstance(w, dict) and w.get("id")
-                }
+                wan_interfaces, wan_by_id = enrich_wan_interfaces(
+                    wan_interfaces,
+                    interface_stats,
+                    ping_check_status,
+                    self.data.get("wan_interfaces", []) if self.data else [],
+                    now_ts,
+                )
             else:
                 wan_by_id = _prev.get("wan_by_id", {})
 
@@ -725,40 +640,13 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # negative-delta clamp keeps throughput sensors from spiking
             # to absurd negative values on those events.
             if slow_refresh:
-                prev_cmap_by_name: dict[str, dict[str, Any]] = {}
-                if self.data:
-                    for pname, pentry in (self.data.get("crypto_maps") or {}).items():
-                        if isinstance(pentry, dict):
-                            prev_cmap_by_name[pname] = dict(pentry)
-
                 now_ts = asyncio.get_running_loop().time()
-                for cmap_name, cmap in crypto_maps.items():
-                    prev_cmap = prev_cmap_by_name.get(cmap_name)
-                    if not ipsec_status_refresh and prev_cmap:
-                        cmap["_sample_ts"] = prev_cmap.get("_sample_ts")
-                        cmap["rx_throughput"] = prev_cmap.get("rx_throughput", 0.0)
-                        cmap["tx_throughput"] = prev_cmap.get("tx_throughput", 0.0)
-                        continue
-
-                    cmap["_sample_ts"] = now_ts
-                    if prev_cmap and prev_cmap.get("_sample_ts"):
-                        dt = now_ts - float(prev_cmap.get("_sample_ts") or 0)
-                        # Pass raw values: counter_rate rejects None/bool
-                        # samples itself; pre-coercing None to 0 would
-                        # fabricate a reset + spike pair.
-                        cmap["rx_throughput"] = counter_rate_bytes_per_second(
-                            cmap.get("rx_bytes"),
-                            prev_cmap.get("rx_bytes"),
-                            dt,
-                        )
-                        cmap["tx_throughput"] = counter_rate_bytes_per_second(
-                            cmap.get("tx_bytes"),
-                            prev_cmap.get("tx_bytes"),
-                            dt,
-                        )
-                    else:
-                        cmap["rx_throughput"] = 0.0
-                        cmap["tx_throughput"] = 0.0
+                enrich_crypto_maps(
+                    crypto_maps,
+                    self.data.get("crypto_maps") if self.data else None,
+                    now_ts,
+                    ipsec_status_refresh,
+                )
 
             if slow_refresh:
                 mesh_associations_data = mesh_associations(mesh_nodes)
@@ -800,6 +688,13 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 }
                 previous_macs.discard("")
             new_macs = current_macs - previous_macs
+
+            # A tick that reaches this point did not raise UpdateFailed, so
+            # any backoff stretch applied during a prior outage is over —
+            # restore the normal fast poll cadence.
+            if getattr(self, "_critical_fail_backoff_count", 0):
+                self._critical_fail_backoff_count = 0
+            self.update_interval = timedelta(seconds=FAST_SCAN_INTERVAL)
 
             self._refresh_count += 1
             return {

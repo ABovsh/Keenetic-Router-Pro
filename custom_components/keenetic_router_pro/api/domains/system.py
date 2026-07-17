@@ -38,7 +38,23 @@ class SystemMixin:
     async def async_get_current_version_info(self) -> Dict[str, Any]:
         """Return version info"""
         data = await self._rci_get(RCI_SHOW_VERSION)
-        return data if isinstance(data, dict) else {}
+        if not isinstance(data, dict):
+            return {}
+
+        identity = data.get("release") or data.get("title")
+        if identity:
+            previous = self._last_seen_fw_version
+            if previous is not None and previous != identity:
+                _LOGGER.info(
+                    "Firmware version changed from %s to %s — "
+                    "re-probing router capability endpoints",
+                    previous,
+                    identity,
+                )
+                self.reset_capability_caches()
+            self._last_seen_fw_version = identity
+
+        return data
 
 
     async def async_get_available_version_info(self) -> Dict[str, Any]:
@@ -538,7 +554,7 @@ class SystemMixin:
 
     async def async_get_update_progress(self) -> Dict[str, Any]:
         """Get current update progress (if in progress).
-        
+
         Returns progress info or empty dict if no update running.
         """
         try:
@@ -557,11 +573,11 @@ class SystemMixin:
         except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError) as err:
             _LOGGER.debug("firmware progress fetch failed: %s", type(err).__name__)
             return {}
-        
+
 
     async def async_get_ndns_info(self) -> Dict[str, Any]:
         """Get NDNS (Dynamic DNS) information from /rci/show/ndns.
-        
+
         Returns detailed information about NDNS configuration and tunnels.
         Example response includes:
         - name: Hostname
@@ -578,10 +594,10 @@ class SystemMixin:
             if not data:
                 return {}
             self._ndns_supported = True
-            
+
             # Ensure we always return a dict
             result = dict(data) if isinstance(data, dict) else {}
-            
+
             # Parse tunnel information if present. Build NEW dicts — the
             # payload may be a shared tick-cache subtree served by
             # reference from _rci_get, and in-place coercion would corrupt
@@ -614,13 +630,13 @@ class SystemMixin:
                             except (ValueError, TypeError):
                                 pass
                     ttp["tunnel"] = tunnel
-            
+
             _LOGGER.debug(
                 "NDNS info retrieved (keys: %s)",
                 sorted(result.keys()) if isinstance(result, dict) else type(result).__name__,
             )
             return result
-            
+
         except asyncio.CancelledError:
             raise
         except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError) as err:

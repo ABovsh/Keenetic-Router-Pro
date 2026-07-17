@@ -10,6 +10,9 @@ from .coordinator import KeeneticCoordinator
 from .entity import ClientEntity
 from .utils import coerce_bool, find_client_by_mac, iter_tracked_clients, usable_ip
 
+# Read-only coordinator-driven platform: no writes to serialize, no limit needed.
+PARALLEL_UPDATES = 0
+
 
 async def async_setup_entry(
     _hass: HomeAssistant,
@@ -57,7 +60,7 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
         initial_ip: str | None = None,
     ) -> None:
         ClientEntity.__init__(
-            self, 
+            self,
             coordinator,
             entry.entry_id,
             entry.title,

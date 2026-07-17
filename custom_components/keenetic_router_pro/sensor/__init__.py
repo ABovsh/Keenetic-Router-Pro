@@ -11,6 +11,9 @@ from ..coordinator import KeeneticCoordinator
 from ..entity_setup import DynamicEntityTracker, register_dynamic_entities
 from ..utils import iter_new_items, iter_tracked_clients
 
+# Read-only coordinator-driven platform: no writes to serialize, no limit needed.
+PARALLEL_UPDATES = 0
+
 from .system import (
     KeeneticCpuLoadSensor,
     KeeneticMemoryUsageSensor,

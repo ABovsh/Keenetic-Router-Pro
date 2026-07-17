@@ -8,6 +8,20 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.72
+
+### Improvements
+
+- Router capability probes (composite batching, hotspot paths, optional
+  IPsec/DNS/NDNS endpoints) are re-tested automatically after a firmware
+  update instead of staying disabled until Home Assistant restarts.
+- Polling slows to 60s/120s while the router is confirmed unreachable and
+  returns to the normal 30s interval on the first successful update.
+- Entity actions that write to the router (switches, selects, buttons,
+  firmware update) are now serialized to reduce load on the router CPU.
+- Improved internal code structure and test coverage; no user-visible
+  behavior changed.
+
 ## 1.7.71
 
 ### Improvements

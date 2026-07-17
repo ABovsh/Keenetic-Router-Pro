@@ -11,6 +11,9 @@ from .entity import ControllerEntity, MeshEntity
 from .entity_setup import DynamicEntityTracker, register_dynamic_entities
 from .utils import iter_new_items
 
+# Serialize button presses so we don't hammer the router with concurrent commands.
+PARALLEL_UPDATES = 1
+
 
 async def async_setup_entry(
     _hass: HomeAssistant,

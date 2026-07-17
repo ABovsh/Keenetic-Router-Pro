@@ -27,6 +27,9 @@ from .utils import iter_new_items
 
 _LOGGER = logging.getLogger(__name__)
 
+# Serialize update-platform writes (install/reboot) to protect the router CPU.
+PARALLEL_UPDATES = 1
+
 _UPDATE_PROGRESS_FALLBACK_ERRORS = (
     KeeneticApiError,
     aiohttp.ClientError,

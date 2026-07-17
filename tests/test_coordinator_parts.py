@@ -20,11 +20,16 @@ from custom_components.keenetic_router_pro.coordinator_parts.derived import (
     mesh_associations,
     order_wan_interfaces,
 )
+from custom_components.keenetic_router_pro.coordinator_parts.enrichment import (
+    enrich_crypto_maps,
+    enrich_wan_interfaces,
+)
 from custom_components.keenetic_router_pro.coordinator_parts.fetching import (
     CRITICAL_FETCH_GRACE_TICKS,
     FetchFailure,
     critical_failures_to_exception,
     evaluate_critical_failures,
+    next_backoff_interval,
     ok_or_default,
 )
 from custom_components.keenetic_router_pro.coordinator_parts.oom import (
@@ -332,3 +337,178 @@ def test_evaluate_critical_failures_no_previous_data_fails_immediately() -> None
 def test_critical_fetch_grace_ticks_is_positive() -> None:
     """The shipped grace window must allow at least one tolerated tick."""
     assert CRITICAL_FETCH_GRACE_TICKS >= 1
+
+
+# --- next_backoff_interval (adaptive poll backoff) ---
+
+
+def test_next_backoff_interval_first_failed_tick_is_60s() -> None:
+    """The first UpdateFailed tick after grace exhaustion stretches to 60s."""
+    assert next_backoff_interval(1) == 60
+
+
+def test_next_backoff_interval_second_failed_tick_caps_at_120s() -> None:
+    """The second consecutive failed tick stretches further, to the 120s cap."""
+    assert next_backoff_interval(2) == 120
+
+
+def test_next_backoff_interval_stays_capped_for_further_failed_ticks() -> None:
+    """A long-running outage does not keep stretching past the 120s cap."""
+    assert next_backoff_interval(3) == 120
+    assert next_backoff_interval(50) == 120
+
+
+def test_next_backoff_interval_zero_or_negative_treated_as_first() -> None:
+    """A defensive floor: non-positive counts still return the first-step value."""
+    assert next_backoff_interval(0) == 60
+
+
+# --- enrich_wan_interfaces ---
+
+
+def test_enrich_wan_interfaces_computes_throughput_delta() -> None:
+    """Throughput is a delta against the previous tick's byte counters."""
+    wan_interfaces = [{"id": "PPPoE0", "defaultgw": True, "priority": 100}]
+    interface_stats = {"PPPoE0": {"rxbytes": 2000, "txbytes": 3000}}
+    prev = [{"id": "PPPoE0", "rx_bytes": 1000, "tx_bytes": 1000, "_sample_ts": 100.0}]
+
+    ordered, wan_by_id = enrich_wan_interfaces(
+        wan_interfaces, interface_stats, {}, prev, now_ts=110.0
+    )
+
+    assert ordered[0]["rx_throughput"] == pytest.approx(100.0)
+    assert ordered[0]["tx_throughput"] == pytest.approx(200.0)
+    assert wan_by_id["PPPoE0"] is ordered[0]
+
+
+def test_enrich_wan_interfaces_first_sample_has_zero_throughput() -> None:
+    """No previous sample -> throughput is 0.0, not a spike."""
+    wan_interfaces = [{"id": "PPPoE0", "defaultgw": True, "priority": 100}]
+    interface_stats = {"PPPoE0": {"rxbytes": 2000, "txbytes": 3000}}
+
+    ordered, _ = enrich_wan_interfaces(
+        wan_interfaces, interface_stats, {}, [], now_ts=110.0
+    )
+
+    assert ordered[0]["rx_throughput"] == 0.0
+    assert ordered[0]["tx_throughput"] == 0.0
+
+
+def test_enrich_wan_interfaces_counter_reset_clamps_rate_zero() -> None:
+    """A counter reset (current < previous) must clamp to 0, not go negative."""
+    wan_interfaces = [{"id": "PPPoE0", "defaultgw": True, "priority": 100}]
+    interface_stats = {"PPPoE0": {"rxbytes": 100, "txbytes": 100}}
+    prev = [{"id": "PPPoE0", "rx_bytes": 5000, "tx_bytes": 5000, "_sample_ts": 100.0}]
+
+    ordered, _ = enrich_wan_interfaces(
+        wan_interfaces, interface_stats, {}, prev, now_ts=110.0
+    )
+
+    assert ordered[0]["rx_throughput"] == 0.0
+    assert ordered[0]["tx_throughput"] == 0.0
+
+
+def test_enrich_wan_interfaces_ping_check_true_overrides_internet_access() -> None:
+    """passing=True -> internet_access=True, sourced from ping_check."""
+    wan_interfaces = [{"id": "PPPoE0", "internet_access": False}]
+    ping_check_status = {"PPPoE0": {"passing": True}}
+
+    ordered, _ = enrich_wan_interfaces(
+        wan_interfaces, {}, ping_check_status, [], now_ts=1.0
+    )
+
+    assert ordered[0]["internet_access"] is True
+    assert ordered[0]["internet_access_source"] == "ping_check"
+
+
+def test_enrich_wan_interfaces_ping_check_false_overrides_internet_access() -> None:
+    """passing=False -> internet_access=False (real outage case)."""
+    wan_interfaces = [{"id": "PPPoE0", "internet_access": True}]
+    ping_check_status = {"PPPoE0": {"passing": False}}
+
+    ordered, _ = enrich_wan_interfaces(
+        wan_interfaces, {}, ping_check_status, [], now_ts=1.0
+    )
+
+    assert ordered[0]["internet_access"] is False
+    assert ordered[0]["internet_access_source"] == "ping_check"
+
+
+def test_enrich_wan_interfaces_ping_check_none_keeps_heuristic() -> None:
+    """passing=None (mixed/no profile) -> keep the heuristic value untouched."""
+    wan_interfaces = [{"id": "PPPoE0", "internet_access": True}]
+    ping_check_status = {"PPPoE0": {"passing": None}}
+
+    ordered, _ = enrich_wan_interfaces(
+        wan_interfaces, {}, ping_check_status, [], now_ts=1.0
+    )
+
+    assert ordered[0]["internet_access"] is True
+    assert ordered[0]["internet_access_source"] == "heuristic"
+
+
+def test_enrich_wan_interfaces_ping_check_absent_keeps_heuristic() -> None:
+    """No ping-check entry at all for this WAN -> heuristic source, ping_check None."""
+    wan_interfaces = [{"id": "PPPoE0", "internet_access": True}]
+
+    ordered, _ = enrich_wan_interfaces(wan_interfaces, {}, {}, [], now_ts=1.0)
+
+    assert ordered[0]["internet_access"] is True
+    assert ordered[0]["internet_access_source"] == "heuristic"
+    assert ordered[0]["ping_check"] is None
+
+
+# --- enrich_crypto_maps ---
+
+
+def test_enrich_crypto_maps_computes_throughput_delta_on_refresh() -> None:
+    """On an ipsec-status-refresh tick, throughput is a delta against previous."""
+    crypto_maps = {"SITE": {"rx_bytes": 2000, "tx_bytes": 3000}}
+    prev = {"SITE": {"rx_bytes": 1000, "tx_bytes": 1000, "_sample_ts": 100.0}}
+
+    enrich_crypto_maps(crypto_maps, prev, now_ts=110.0, ipsec_status_refresh=True)
+
+    assert crypto_maps["SITE"]["rx_throughput"] == pytest.approx(100.0)
+    assert crypto_maps["SITE"]["tx_throughput"] == pytest.approx(200.0)
+    assert crypto_maps["SITE"]["_sample_ts"] == 110.0
+
+
+def test_enrich_crypto_maps_counter_reset_clamps_rate_zero() -> None:
+    """A rekeyed/bounced tunnel resets counters — clamp to 0, never negative."""
+    crypto_maps = {"SITE": {"rx_bytes": 50, "tx_bytes": 50}}
+    prev = {"SITE": {"rx_bytes": 9000, "tx_bytes": 9000, "_sample_ts": 100.0}}
+
+    enrich_crypto_maps(crypto_maps, prev, now_ts=110.0, ipsec_status_refresh=True)
+
+    assert crypto_maps["SITE"]["rx_throughput"] == 0.0
+    assert crypto_maps["SITE"]["tx_throughput"] == 0.0
+
+
+def test_enrich_crypto_maps_non_refresh_tick_preserves_previous_throughput() -> None:
+    """When the ipsec status tier is skipped, reuse the previous throughput verbatim."""
+    crypto_maps = {"SITE": {"rx_bytes": 2000, "tx_bytes": 3000}}
+    prev = {
+        "SITE": {
+            "rx_bytes": 1000,
+            "tx_bytes": 1000,
+            "_sample_ts": 100.0,
+            "rx_throughput": 42.0,
+            "tx_throughput": 84.0,
+        }
+    }
+
+    enrich_crypto_maps(crypto_maps, prev, now_ts=110.0, ipsec_status_refresh=False)
+
+    assert crypto_maps["SITE"]["rx_throughput"] == 42.0
+    assert crypto_maps["SITE"]["tx_throughput"] == 84.0
+    assert crypto_maps["SITE"]["_sample_ts"] == 100.0
+
+
+def test_enrich_crypto_maps_first_sample_has_zero_throughput() -> None:
+    """No previous crypto-map snapshot -> throughput is 0.0."""
+    crypto_maps = {"SITE": {"rx_bytes": 2000, "tx_bytes": 3000}}
+
+    enrich_crypto_maps(crypto_maps, None, now_ts=110.0, ipsec_status_refresh=True)
+
+    assert crypto_maps["SITE"]["rx_throughput"] == 0.0
+    assert crypto_maps["SITE"]["tx_throughput"] == 0.0

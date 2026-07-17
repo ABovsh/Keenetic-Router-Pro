@@ -12,6 +12,9 @@ from .entity import ControllerEntity, CryptoMapEntity, InterfaceEntity, WanEntit
 from .entity_setup import DynamicEntityTracker, register_dynamic_entities
 from .utils import iter_new_items
 
+# Serialize switch writes so we don't hammer the router with concurrent commands.
+PARALLEL_UPDATES = 1
+
 
 def _add_wan_enabled_switches(
     entities: list[SwitchEntity],

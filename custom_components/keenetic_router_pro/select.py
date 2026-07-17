@@ -11,6 +11,9 @@ from .coordinator import KeeneticCoordinator
 from .entity import ClientEntity
 from .utils import iter_tracked_clients
 
+# Serialize select writes so we don't hammer the router with concurrent commands.
+PARALLEL_UPDATES = 1
+
 DEFAULT_POLICY_OPTION = "Default"
 DENY_POLICY_OPTION = "Deny (Blocked)"
 

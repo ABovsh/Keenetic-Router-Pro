@@ -78,6 +78,10 @@ class _Transport:
         # POST succeeded, False -> batch POST failed once and we've latched
         # back to per-call mode for the rest of the session.
         self._rci_batch_supported: bool | None = None
+        # Firmware version identity (release/title) last observed by
+        # ``async_get_current_version_info``. Used to detect firmware
+        # updates and re-probe capability caches below.
+        self._last_seen_fw_version: str | None = None
         # Tick-scoped cache populated by ``prefetch_tick`` at the top of a
         # coordinator refresh. ``_rci_get`` walks this tree (segment by
         # segment) before issuing an HTTP request, so many params-less GETs
@@ -86,6 +90,26 @@ class _Transport:
         # Serialise authentication refreshes so concurrent RCI calls do not
         # race on `_auth_header` / `_authenticated`.
         self._auth_lock: asyncio.Lock = asyncio.Lock()
+
+    def reset_capability_caches(self) -> None:
+        """Reset all latched endpoint-capability caches to their defaults.
+
+        Does NOT touch auth state, the tick cache, or
+        ``_last_seen_fw_version`` — only the "does this endpoint exist on
+        this firmware" latches, so that a firmware update which adds or
+        repairs an endpoint gets re-probed instead of staying latched off
+        for the rest of the HA session.
+        """
+        self._mws_member_supported = None
+        self._crypto_map_supported = None
+        self._dns_proxy_supported = None
+        self._ping_check_supported = None
+        self._ndns_supported = None
+        self._ipsec_diagnostics_supported = None
+        self._hotspot_subpath_skip = set()
+        self._hotspot_subpath_winner = None
+        self._iface_stat_get_only = None
+        self._rci_batch_supported = None
 
     @property
     def host(self) -> str:

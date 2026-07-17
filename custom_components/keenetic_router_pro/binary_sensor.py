@@ -15,6 +15,9 @@ from .entity import MeshEntity, ControllerEntity, WanEntity, CryptoMapEntity
 from .entity_setup import DynamicEntityTracker, register_dynamic_entities
 from .utils import iter_new_items
 
+# Read-only coordinator-driven platform: no writes to serialize, no limit needed.
+PARALLEL_UPDATES = 0
+
 
 async def async_setup_entry(
     _hass: HomeAssistant,
@@ -334,11 +337,11 @@ class KeeneticMeshNodeSensor(MeshEntity, BinarySensorEntity):
             "associations": node.get("associations"),
             "rci_errors": node.get("rci_errors"),
         }
-    
+
 
 class KeeneticControllerUpdateSensor(ControllerEntity, BinarySensorEntity):
     """Binary sensor for main controller firmware update availability."""
-    
+
     _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.UPDATE
     _attr_icon = "mdi:package-up"
@@ -362,7 +365,7 @@ class KeeneticControllerUpdateSensor(ControllerEntity, BinarySensorEntity):
     def is_on(self) -> bool:
         """Return True if firmware update is available for controller."""
         system = self.coordinator.data.get("system", {}) or {}
-        
+
         current = system.get("title") or system.get("release")
         available = system.get("fw-available") or system.get("release-available")
 
@@ -392,20 +395,20 @@ class KeeneticControllerUpdateSensor(ControllerEntity, BinarySensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         system = self.coordinator.data.get("system", {}) or {}
-        
+
         current = system.get("title") or system.get("release")
         available = system.get("fw-available") or system.get("release-available")
-        
+
         attrs = {
             "current_version": current,
             "update_channel": system.get("fw-update-sandbox") or system.get("sandbox"),
         }
-        
+
         if available:
             attrs["available_version"] = available
-        
+
         return attrs
-    
+
 class KeeneticMeshUpdateSensor(MeshEntity, BinarySensorEntity):
     """Binary sensor for mesh/extender firmware update availability."""
     _attr_has_entity_name = True

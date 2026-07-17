@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -12,6 +13,7 @@ from custom_components.keenetic_router_pro.api.domains.clients import ClientsMix
 from custom_components.keenetic_router_pro.api.helpers import _normalize_interfaces
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
+from custom_components.keenetic_router_pro.const import FAST_SCAN_INTERVAL
 from custom_components.keenetic_router_pro.coordinator import KeeneticCoordinator
 from tests.fixtures.clients_rci import CLIENTS, HOST_POLICIES, IP_NEIGHBOURS
 from tests.fixtures.dns_rci import DNS_PROXY, NDNS_INFO
@@ -807,6 +809,57 @@ async def test_coordinator_clears_prefetch_cache_after_failed_refresh() -> None:
         await _updated_data(coordinator)
 
     assert client.clear_tick_cache_calls >= 2
+
+
+async def test_coordinator_critical_failure_stretches_poll_interval_then_restores() -> None:
+    """Sustained outage stretches the poll interval; recovery restores fast cadence.
+
+    First failed tick (no previous snapshot, so the grace window is bypassed
+    and the coordinator fails immediately) stretches to 60s. Every failed
+    tick after that caps at 120s. The next tick that completes without
+    raising UpdateFailed restores FAST_SCAN_INTERVAL.
+    """
+    client = StageFixtureClient()
+    state = {"fail": True}
+    original_system_info = client.async_get_system_info
+
+    async def flaky_system_info() -> dict[str, Any]:
+        if state["fail"]:
+            raise RuntimeError("router offline")
+        return await original_system_info()
+
+    client.async_get_system_info = flaky_system_info  # type: ignore[method-assign]
+    coordinator = _coordinator(client)
+    coordinator.update_interval = timedelta(seconds=FAST_SCAN_INTERVAL)
+
+    for expected_seconds in (60, 120, 120):
+        with pytest.raises(UpdateFailed):
+            await _updated_data(coordinator)
+        assert coordinator.update_interval == timedelta(seconds=expected_seconds)
+
+    state["fail"] = False
+    await _updated_data(coordinator)
+    assert coordinator.update_interval == timedelta(seconds=FAST_SCAN_INTERVAL)
+
+
+async def test_coordinator_auth_failure_does_not_change_poll_interval() -> None:
+    """A rejected credential must not stretch the poll interval."""
+    from custom_components.keenetic_router_pro.api import KeeneticAuthError
+    from homeassistant.exceptions import ConfigEntryAuthFailed
+
+    client = StageFixtureClient()
+
+    async def unauthorized_system_info() -> dict[str, Any]:
+        raise KeeneticAuthError("bad credentials")
+
+    client.async_get_system_info = unauthorized_system_info  # type: ignore[method-assign]
+    coordinator = _coordinator(client)
+    coordinator.update_interval = timedelta(seconds=FAST_SCAN_INTERVAL)
+
+    with pytest.raises(ConfigEntryAuthFailed):
+        await _updated_data(coordinator)
+
+    assert coordinator.update_interval == timedelta(seconds=FAST_SCAN_INTERVAL)
 
 
 async def test_coordinator_skips_prefetch_when_batch_latched_off() -> None:

@@ -119,3 +119,26 @@ def evaluate_critical_failures(
     return CriticalFetchDecision(
         "fail", new_streak, f"Critical router fetch failed ({details})"
     )
+
+
+# Adaptive backoff applied once the grace window (``CRITICAL_FETCH_GRACE_TICKS``)
+# is exhausted and the coordinator starts raising ``UpdateFailed`` every tick
+# (a sustained outage, not a one-off transient drop). Polling every
+# ``FAST_SCAN_INTERVAL`` (30s) against a router that is confirmed down for
+# multiple consecutive ticks wastes cycles and log noise; stretch the poll
+# interval instead. Auth failures (``ConfigEntryAuthFailed``) never go
+# through this path — see the coordinator's "auth" branch.
+BACKOFF_INTERVAL_SECONDS: tuple[int, int] = (60, 120)
+
+
+def next_backoff_interval(consecutive_fail_ticks: int) -> int:
+    """Return the poll interval (seconds) for the Nth consecutive failed tick.
+
+    ``consecutive_fail_ticks`` counts ``UpdateFailed`` ticks since the grace
+    window was exhausted: 1 for the first one, 2+ for every one after that.
+    The interval stretches to 60s on the first failed tick and caps at 120s
+    from the second failed tick onward.
+    """
+    if consecutive_fail_ticks <= 1:
+        return BACKOFF_INTERVAL_SECONDS[0]
+    return BACKOFF_INTERVAL_SECONDS[1]
