@@ -8,6 +8,15 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.73
+
+### Security
+
+- The "Use SSL" toggle in the setup and reconfigure dialogs now explains
+  that disabling it sends credentials over plaintext HTTP, so the choice
+  is informed at setup time (previously only a repair issue warned about
+  it after the fact).
+
 ## 1.7.72
 
 ### Improvements

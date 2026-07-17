@@ -429,6 +429,13 @@ class NetworkMixin:
         caller falls back to per-call fetches for just those. Returns
         None if the overall response shape is unusable, so the caller
         falls back to the fan-out path entirely.
+
+        Positional matching is safe: the RCI composite response mirrors
+        the request tree, so the ``stat`` array comes back in request
+        order and an unknown interface yields an in-place error record,
+        not an omission (verified live on KN-1812 5.x, 2026-07-17, incl.
+        a reversed-order and a bogus-name probe). Stat records carry no
+        self-identifying field, so identity matching is not possible.
         """
         tree = {
             "show": {

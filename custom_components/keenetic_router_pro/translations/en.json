@@ -18,6 +18,9 @@
           "password": "Password",
           "ssl": "Use SSL",
           "use_challenge_auth": "Use challenge authentication (NDW2, required for newer models like Hero)"
+        },
+        "data_description": {
+          "ssl": "When disabled, Home Assistant talks to the router over plaintext HTTP: credentials are sent unencrypted on your network. Keep it disabled only for direct LAN access to the router."
         }
       },
       "select_clients": {
@@ -53,6 +56,9 @@
           "password": "Password",
           "ssl": "Use SSL",
           "use_challenge_auth": "Use challenge authentication (NDW2)"
+        },
+        "data_description": {
+          "ssl": "When disabled, Home Assistant talks to the router over plaintext HTTP: credentials are sent unencrypted on your network. Keep it disabled only for direct LAN access to the router."
         }
       }
     },
