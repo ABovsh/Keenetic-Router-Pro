@@ -8,6 +8,30 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.74
+
+### Fixed
+
+- A temporary router error (e.g. a 5xx while the router is busy) whose
+  message happened to contain "not found" no longer permanently disables
+  optional features (mesh nodes, ping check, DNS proxy, NDNS, IPsec
+  status, request batching) until the next firmware update — only a real
+  HTTP 404 marks an endpoint as unsupported now.
+- A corrupted or absurdly large router byte counter is now discarded
+  instead of being recorded, protecting long-term traffic statistics for
+  every data-usage sensor.
+- The "new device connected" event no longer fires a duplicate for the
+  same device when the router becomes unreachable right after the device
+  joined.
+- Changing a policy in the connection-policy select right before a failed
+  poll no longer loses the fast confirmation — it retries on the next
+  poll instead of waiting for the slow refresh tier (~3 min).
+- Reconfiguring a router from KeenDNS mode back to direct LAN access no
+  longer pre-fills the KeenDNS port 443/SSL values into the form, which
+  made an unchanged submit fail with "cannot connect".
+- Diagnostics downloads now show the integration's own domain field
+  instead of redacting it (router network domain names remain redacted).
+
 ## 1.7.73
 
 ### Security

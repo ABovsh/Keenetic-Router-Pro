@@ -252,10 +252,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     @callback
     def _async_handle_new_device() -> None:
         """Fire an event when a new device connects."""
+        # HA notifies listeners on the first failed refresh after a success
+        # with ``data`` unchanged — re-firing would duplicate EVENT_NEW_DEVICE
+        # for devices already reported one tick earlier.
+        if not coordinator.last_update_success:
+            return
         new_clients = coordinator.data.get("new_clients", set())
         clients_by_mac = coordinator.data.get("clients_by_mac", {})
         clients = coordinator.data.get("clients", [])
-        
+
         for mac in new_clients:
             client_info = None
             if isinstance(clients_by_mac, dict):
@@ -269,18 +274,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     if normalize_mac(c.get("mac")) == mac:
                         client_info = c
                         break
-            
+
             if client_info:
                 name = client_info.get("name") or client_info.get("hostname") or mac.upper()
                 ip = client_info.get("ip")
-                
+
                 _LOGGER.info(
                     "New device connected: %s (%s) - %s",
                     _mask_identifier(name),
                     _mask_identifier(mac),
                     _mask_identifier(ip),
                 )
-                
+
                 hass.bus.async_fire(
                     EVENT_NEW_DEVICE,
                     {
@@ -302,7 +307,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    
+
     return True
 
 

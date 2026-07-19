@@ -113,6 +113,10 @@ def coerce_byte_count(value: Any) -> int | None:
         return None
     if not math.isfinite(as_float) or as_float < 0:
         return None
+    # Mirror ``coerce_seconds``: a finite-but-absurd magnitude (beyond any
+    # real 64-bit router counter) must not reach TOTAL_INCREASING statistics.
+    if as_float > 2**63:
+        return None
     return int(as_float)
 
 

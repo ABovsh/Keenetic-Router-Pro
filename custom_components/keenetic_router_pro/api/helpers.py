@@ -119,6 +119,11 @@ def _cookie_header_from_response(resp: aiohttp.ClientResponse) -> str | None:
 
 def _is_endpoint_missing(err: BaseException) -> bool:
     """Return True if ``err`` indicates the router did not recognise the RCI endpoint."""
+    status = getattr(err, "status", None)
+    if status is not None:
+        # A transient 5xx whose body happens to say "not found" must not
+        # latch a capability off for the rest of the session.
+        return status == 404
     msg = str(err).lower()
     return ("not found" in msg) or ("404" in msg)
 

@@ -183,4 +183,9 @@ async def async_get_config_entry_diagnostics(
         "coordinator_data": coordinator_data,
     }
 
-    return async_redact_data(payload, TO_REDACT)
+    result = async_redact_data(payload, TO_REDACT)
+    # "domain" in TO_REDACT scrubs router-network FQDN fields; the entry's
+    # own ``.domain`` is the constant integration slug, not user data, and
+    # is useful in diagnostics dumps.
+    result["entry"]["domain"] = entry.domain
+    return result

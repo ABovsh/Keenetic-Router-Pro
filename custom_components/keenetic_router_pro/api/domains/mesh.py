@@ -13,6 +13,7 @@ from ...utils import coerce_bool
 from ..errors import KeeneticApiError
 from ..helpers import (
     _dict_items,
+    _is_endpoint_missing,
     _nested_dict_items,
     _to_int,
     _validate_cli_arg,
@@ -145,8 +146,7 @@ class MeshMixin:
             raise
         except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError) as err:
             # "not found" durumunda tekrar denemeyip cache'leyelim
-            msg = str(err).lower()
-            if ("not found" in msg) or ("404" in msg):
+            if _is_endpoint_missing(err):
                 self._mws_member_supported = False
                 return fallback_nodes
 

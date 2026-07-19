@@ -238,10 +238,12 @@ class _Transport:
                     "HTTP error 502 for "
                     f"{path}: KeenDNS protected web app was reached, but its "
                     "internal published application/upstream is unavailable or "
-                    f"misconfigured: {_response_summary(text)}"
+                    f"misconfigured: {_response_summary(text)}",
+                    status=resp.status,
                 )
             raise KeeneticApiError(
-                f"HTTP error {resp.status} for {path}: {_response_summary(text)}"
+                f"HTTP error {resp.status} for {path}: {_response_summary(text)}",
+                status=resp.status,
             )
 
         if allow_text:

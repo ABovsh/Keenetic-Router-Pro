@@ -203,8 +203,12 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Consume the one-shot host-policies request (policy select just
         # wrote a change) so the confirming fetch happens on this tick
         # instead of waiting for the slow tier.
-        host_policies_refresh = slow_refresh or self._host_policies_refresh_pending
-        self._host_policies_refresh_pending = False
+        # Consumed only after the tick succeeds (see the end of this method):
+        # a tick that raises must keep the one-shot request armed so the
+        # confirming fetch retries on the very next tick instead of waiting
+        # for the slow tier.
+        pending_host_policies = getattr(self, "_host_policies_refresh_pending", False)
+        host_policies_refresh = slow_refresh or pending_host_policies
 
         # Precompute the cached fallbacks for skipped slow-tick fetches
         # outside the gather() call so the fast tick doesn't rebuild
@@ -695,6 +699,9 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if getattr(self, "_critical_fail_backoff_count", 0):
                 self._critical_fail_backoff_count = 0
             self.update_interval = timedelta(seconds=FAST_SCAN_INTERVAL)
+
+            if pending_host_policies:
+                self._host_policies_refresh_pending = False
 
             self._refresh_count += 1
             return {

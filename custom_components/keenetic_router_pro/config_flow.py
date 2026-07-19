@@ -419,7 +419,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_ssdp(self, discovery_info: SsdpServiceInfo) -> FlowResult:
         """Handle a discovered Keenetic router via SSDP."""
         _LOGGER.debug("SSDP discovery received")
-        
+
         hostname = urlparse(discovery_info.ssdp_location).hostname
         if not hostname:
             _LOGGER.debug("No hostname in SSDP discovery, aborting")
@@ -431,7 +431,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             len(current_entries),
             mask_identifier(hostname),
         )
-        
+
         for entry in current_entries:
             entry_host = entry.data.get(CONF_HOST)
             _LOGGER.debug(
@@ -446,7 +446,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     mask_identifier(entry.title),
                 )
                 return self.async_abort(reason="already_configured")
-        
+
         self._discovered_host = hostname
         self._discovered_name = discovery_info.upnp.get("friendlyName", _DEFAULT_DEVICE_NAME)
 
@@ -460,7 +460,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             mask_identifier(self._discovered_name),
             mask_identifier(hostname),
         )
-        
+
         return await self.async_step_user()
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -498,24 +498,24 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         mask_identifier(data[CONF_HOST]),
                     )
                 data = _normalize_connection_data(data)
-                
+
                 _LOGGER.debug(
                     "Attempting to connect to router at %s:%s",
                     mask_identifier(data[CONF_HOST]),
                     data[CONF_PORT],
                 )
-                
+
                 client, system_info, interfaces = await self._async_connect(data)
                 unique_id, title = self._unique_id_from_router(
                     system_info, interfaces, data[CONF_HOST]
                 )
-                
+
                 await self.async_set_unique_id(unique_id)
                 self._abort_if_unique_id_configured()
 
                 self._user_input = data
                 self._title = title
-                
+
                 available_clients = await _async_optional_clients(
                     client,
                     log_context="setup",
@@ -559,7 +559,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_HOST: default_host,
             }
         )
-        
+
         return self.async_show_form(
             step_id="connection",
             data_schema=_connection_schema(defaults, include_mode=False),
@@ -578,13 +578,13 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             selected_macs = user_input.get("tracked_clients", [])
             _LOGGER.debug("Selected %d tracked clients", len(selected_macs))
-            
+
             # Filter selected clients
             tracked_clients = [
                 client for client in self._available_clients
                 if client["mac"] in selected_macs
             ]
-            
+
             _LOGGER.debug(
                 "Creating entry with title %s",
                 mask_identifier(self._title),
@@ -593,11 +593,11 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 title=self._title,
                 data={**self._user_input, CONF_TRACKED_CLIENTS: tracked_clients},
             )
-        
+
         client_options = _client_options(self._available_clients)
-        
+
         _LOGGER.debug("Showing client selection form with %d options", len(client_options))
-        
+
         return self.async_show_form(
             step_id="select_clients",
             data_schema=vol.Schema(
@@ -672,6 +672,16 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         errors: dict[str, str] = {}
         entry_data = dict(entry.data)
+        if (
+            self._selected_connection_mode is not None
+            and _connection_mode(entry_data) != self._selected_connection_mode
+        ):
+            # Mode switched: the stored port/SSL belong to the OLD mode and
+            # would prefill a broken combination (e.g. 443/SSL into Direct
+            # mode). Drop them so the new mode's defaults apply; a submitted
+            # form always carries its own port/SSL via ``user_input``.
+            entry_data.pop(CONF_PORT, None)
+            entry_data.pop(CONF_SSL, None)
 
         if user_input is not None:
             try:
@@ -725,7 +735,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 class KeeneticOptionsFlow(config_entries.OptionsFlow):
     """Options flow for Keenetic Router Pro."""
-    
+
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
         self._config_entry = config_entry
@@ -736,13 +746,13 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
         runtime = getattr(self._config_entry, "runtime_data", None)
         client = getattr(runtime, "client", None)
         return client if hasattr(client, "async_get_clients") else None
-    
+
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Manage options."""
         _LOGGER.debug("Options flow init called with input=%s", user_input is not None)
-        
+
         if user_input is not None:
             selected_macs = user_input.get("tracked_clients", [])
             current_tracked = self._config_entry.data.get(CONF_TRACKED_CLIENTS, [])
@@ -750,7 +760,7 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
                 selected_macs,
                 _tracked_client_lookup(self._available_clients, current_tracked),
             )
-            
+
             # Update configuration only when the selection actually changed —
             # an unchanged save should not trigger a reload of the integration.
             new_data = dict(self._config_entry.data)
@@ -768,7 +778,7 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
                 title="",
                 data={},
             )
-        
+
         # Get current tracked clients
         current_tracked = self._config_entry.data.get(CONF_TRACKED_CLIENTS, [])
         current_macs = {
@@ -777,7 +787,7 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
             if isinstance(c, dict) and (mac := normalize_mac(c.get("mac")))
         }
         _LOGGER.debug("Loaded %d existing tracked MACs", len(current_macs))
-        
+
         # Try to get current clients from router
         client = self._runtime_client()
         available_clients: list[dict[str, Any]] = []
@@ -826,7 +836,7 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
             current_tracked,
         )
         _LOGGER.debug("Prepared %d client options", len(client_options))
-        
+
         # Show form
         return self.async_show_form(
             step_id="init",

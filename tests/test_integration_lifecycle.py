@@ -98,6 +98,7 @@ class _FakeCoordinator:
         self.hass = hass
         self.client = client
         self.listeners: list[Any] = []
+        self.last_update_success = True
         self.data = {
             "mesh_nodes": [],
             "new_clients": {"aa:bb:cc:dd:ee:ff"},
