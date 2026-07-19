@@ -135,22 +135,22 @@ class ControllerEntity(CoordinatorEntity):
             return str(version["device"])
         if version.get("hw_id"):
             return str(version["hw_id"])
-        
+
         return None
-    
+
     @property
     def device_info(self) -> DeviceInfo:
         ndns_info = self.coordinator.data.get("ndns", {})
         ndns_domain = None
-        
+
         if ndns_info:
             name = ndns_info.get("name")
             domain = ndns_info.get("domain")
             if name and domain:
                 ndns_domain = f"{name}.{domain}"
-        
+
         return get_main_device_info(
-            self._title, 
+            self._title,
             self._entry_id,
             self._firmware_version,
             self._model_name,
@@ -204,7 +204,7 @@ class MeshEntity(_FingerprintedCoordinatorEntity):
     def device_info(self) -> DeviceInfo:
         node = self._node
         node_ip = node.get("ip") if node else None
-        
+
         return get_mesh_device_info(
             self._title,
             self._entry_id,
@@ -214,7 +214,7 @@ class MeshEntity(_FingerprintedCoordinatorEntity):
             ssl=bool(getattr(self.coordinator.client, "ssl", False)),
             fqdn=node.get("fqdn") if node else None,
         )
-    
+
 class WanEntity(_FingerprintedCoordinatorEntity):
     """Base class for per-WAN-interface entities.
 
@@ -412,8 +412,20 @@ class ClientEntity(_FingerprintedCoordinatorEntity):
         self._label = label
         self._initial_ip = initial_ip
 
+    # The neighbour merge attaches a fresh nested ``neighbour`` dict (with
+    # its own last-seen/leasetime/expired counters) plus top-level copies on
+    # every fast tick — without excluding them the fingerprint differs every
+    # poll for any ARP/ND-known client and the write suppression above does
+    # nothing. Meaningful neighbour-derived signals (ip, last-seen,
+    # neighbour-wireless) are separate top-level keys and stay fingerprinted.
+    _NEIGHBOUR_VOLATILE = frozenset(
+        {"neighbour", "neighbour-expired", "neighbour-leasetime"}
+    )
+
     def _client_fingerprint(self, client: dict[str, Any] | None) -> dict[str, Any] | None:
-        return _entity_fingerprint(client, self._FINGERPRINT_IGNORE)
+        return _entity_fingerprint(
+            client, self._FINGERPRINT_IGNORE | self._NEIGHBOUR_VOLATILE
+        )
 
     @property
     def _fingerprint_source(self) -> dict[str, Any] | None:

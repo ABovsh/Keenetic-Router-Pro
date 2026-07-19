@@ -35,7 +35,9 @@ class KeeneticWifi24TemperatureSensor(ControllerEntity, SensorEntity):
         for iface_id, iface_data in interfaces.items():
             if iface_id.startswith(self._interface_prefix) and isinstance(iface_data, dict):
                 temp = coerce_float(iface_data.get("temperature"))
-                if temp is not None:
+                # A finite-but-implausible glitch reading (sensor/driver
+                # fault) must not reach MEASUREMENT long-term statistics.
+                if temp is not None and -40 <= temp <= 150:
                     return temp
         return None
 
@@ -68,7 +70,9 @@ class KeeneticWifi5TemperatureSensor(ControllerEntity, SensorEntity):
         for iface_id, iface_data in interfaces.items():
             if iface_id.startswith(self._interface_prefix) and isinstance(iface_data, dict):
                 temp = coerce_float(iface_data.get("temperature"))
-                if temp is not None:
+                # A finite-but-implausible glitch reading (sensor/driver
+                # fault) must not reach MEASUREMENT long-term statistics.
+                if temp is not None and -40 <= temp <= 150:
                     return temp
         return None
 

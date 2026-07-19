@@ -73,7 +73,8 @@
       "no_host": "No host found in discovery data",
       "no_clients": "No clients found on the network",
       "reauth_successful": "Reauthentication was successful",
-      "reconfigure_successful": "Reconfiguration was successful"
+      "reconfigure_successful": "Reconfiguration was successful",
+      "unknown": "Unexpected error — the router's config entry no longer exists or could not be loaded."
     }
   },
   "options": {

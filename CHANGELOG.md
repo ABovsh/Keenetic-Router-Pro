@@ -8,6 +8,27 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.75
+
+### Fixed
+
+- Changing connection policies twice in quick succession no longer loses
+  the second change's fast confirmation — it is now confirmed on the very
+  next poll instead of waiting for the slow refresh tier (~3 min).
+- Tracked-client entities no longer rewrite their state on every 30-second
+  poll for devices known to the router's ARP/ND table: the volatile
+  neighbour bookkeeping fields are now excluded from change detection,
+  restoring the intended reduction of Home Assistant database writes.
+- A glitched Wi-Fi radio temperature reading (outside −40…150 °C) is now
+  discarded instead of being recorded, protecting the sensor's long-term
+  statistics from one-off outliers.
+- Opening the integration's options right after the router rejected the
+  saved credentials no longer crashes the dialog — it opens with the
+  previously tracked client list instead.
+- Rare aborts during re-authentication or reconfiguration (e.g. the entry
+  was removed in another tab) now show a readable message instead of a raw
+  "unknown" key.
+
 ## 1.7.74
 
 ### Fixed

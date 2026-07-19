@@ -821,10 +821,17 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
                 client = None
 
         if client is not None:
-            available_clients = await _async_optional_clients(
-                client,
-                log_context="options",
-            )
+            try:
+                available_clients = await _async_optional_clients(
+                    client,
+                    log_context="options",
+                )
+            except KeeneticAuthError as err:
+                # Live client whose session/credentials were invalidated
+                # on-router: keep the options form working from the
+                # preserved tracked-client list, like the offline branch.
+                _LOGGER.debug("Options flow auth failure: %s", err)
+                available_clients = []
         _LOGGER.debug(
             "Found %d clients from router",
             len(available_clients) if available_clients else 0,

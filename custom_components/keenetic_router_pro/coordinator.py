@@ -84,6 +84,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # right after a router-side change so the UI doesn't wait up to a
         # full slow-tier interval (~3 min) to confirm the new value.
         self._host_policies_refresh_pending = False
+        # Bumped on every request; the tick snapshots it at start and only
+        # clears the pending flag if no NEWER request arrived while the
+        # fetch was in flight (two rapid policy changes within one tick).
+        self._host_policies_refresh_token = 0
         # Consecutive transient critical-fetch failures tolerated so far. A
         # one-off ``system_info`` / ``interfaces`` timeout keeps the last-known
         # snapshot instead of flipping every entity unavailable; reset on the
@@ -114,6 +118,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def request_host_policies_refresh(self) -> None:
         """Force a live host_policies fetch on the next refresh tick."""
         self._host_policies_refresh_pending = True
+        self._host_policies_refresh_token += 1
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch all router data, serializing access to client tick caches."""
@@ -208,6 +213,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # confirming fetch retries on the very next tick instead of waiting
         # for the slow tier.
         pending_host_policies = getattr(self, "_host_policies_refresh_pending", False)
+        pending_host_policies_token = getattr(self, "_host_policies_refresh_token", 0)
         host_policies_refresh = slow_refresh or pending_host_policies
 
         # Precompute the cached fallbacks for skipped slow-tick fetches
@@ -700,7 +706,12 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._critical_fail_backoff_count = 0
             self.update_interval = timedelta(seconds=FAST_SCAN_INTERVAL)
 
-            if pending_host_policies:
+            if (
+                pending_host_policies
+                and self._host_policies_refresh_token == pending_host_policies_token
+            ):
+                # A newer request that arrived mid-tick keeps the flag armed
+                # so its confirming fetch runs on the very next tick.
                 self._host_policies_refresh_pending = False
 
             self._refresh_count += 1
