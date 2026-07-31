@@ -242,6 +242,9 @@ class _DataUpdateCoordinator:
     async def async_refresh(self):
         return None
 
+    async def async_request_refresh(self):
+        return None
+
 
 class _UpdateFailed(Exception):
     pass
@@ -255,6 +258,12 @@ class _CoordinatorEntity:
 
     def __class_getitem__(cls, item):
         return cls
+
+    @property
+    def available(self) -> bool:
+        # Mirrors CoordinatorEntity.available so availability transitions
+        # driven by a failed refresh are exercised in unit tests too.
+        return bool(getattr(self.coordinator, "last_update_success", True))
 
     def _handle_coordinator_update(self) -> None:
         self.async_write_ha_state()

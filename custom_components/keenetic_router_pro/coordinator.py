@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
@@ -88,6 +89,15 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # clears the pending flag if no NEWER request arrived while the
         # fetch was in flight (two rapid policy changes within one tick).
         self._host_policies_refresh_token = 0
+        # One-shot request to run EVERY fetch tier on the next tick, armed by
+        # ``async_request_refresh`` — the confirming refresh each write entity
+        # fires after a router command. The medium/slow/very-slow tiers carry
+        # their previous snapshot forward on a fast tick, so without this the
+        # switch the user just flipped reads its old value back out of the
+        # cache and snaps back in the UI until the next tier tick (up to ~3
+        # min). Uses the same pending/token pair as the host-policies request.
+        self._full_refresh_pending = False
+        self._full_refresh_token = 0
         # Consecutive transient critical-fetch failures tolerated so far. A
         # one-off ``system_info`` / ``interfaces`` timeout keeps the last-known
         # snapshot instead of flipping every entity unavailable; reset on the
@@ -119,6 +129,22 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Force a live host_policies fetch on the next refresh tick."""
         self._host_policies_refresh_pending = True
         self._host_policies_refresh_token += 1
+
+    def request_full_refresh(self) -> None:
+        """Force every fetch tier to run on the next refresh tick."""
+        self._full_refresh_pending = True
+        self._full_refresh_token += 1
+
+    async def async_request_refresh(self) -> None:
+        """Arm a one-shot all-tier refresh, then run HA's debounced refresh.
+
+        Every caller in this integration is a write entity confirming a
+        command it just sent to the router, and the values those entities
+        read (Wi-Fi/VPN/WAN state, crypto maps, mesh nodes, firmware
+        version) live outside the fast tier.
+        """
+        self.request_full_refresh()
+        await super().async_request_refresh()
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Fetch all router data, serializing access to client tick caches."""
@@ -196,6 +222,20 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             first_refresh=self.data is None,
             refresh_count=self._refresh_count,
         )
+        # A confirming refresh after a router write must actually re-read the
+        # tier-gated data the write entity displays, not republish the cached
+        # snapshot. Consumed at the end of a successful tick (see below): a
+        # tick that raises keeps the request armed for the next one.
+        pending_full_refresh = getattr(self, "_full_refresh_pending", False)
+        pending_full_refresh_token = getattr(self, "_full_refresh_token", 0)
+        if pending_full_refresh:
+            plan = replace(
+                plan,
+                medium_refresh=True,
+                slow_refresh=True,
+                very_slow_refresh=True,
+                ipsec_status_refresh=True,
+            )
         medium_refresh = plan.medium_refresh
         slow_refresh = plan.slow_refresh
         very_slow_refresh = plan.very_slow_refresh
@@ -713,6 +753,12 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # A newer request that arrived mid-tick keeps the flag armed
                 # so its confirming fetch runs on the very next tick.
                 self._host_policies_refresh_pending = False
+
+            if (
+                pending_full_refresh
+                and self._full_refresh_token == pending_full_refresh_token
+            ):
+                self._full_refresh_pending = False
 
             self._refresh_count += 1
             return {

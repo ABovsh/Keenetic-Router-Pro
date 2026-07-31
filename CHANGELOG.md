@@ -8,6 +8,18 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.76
+
+### Fixed
+
+- Tracked-client entities now go unavailable while the router connection is
+  down or while their last client list is being reused after a failed poll,
+  instead of continuing to show the last reading as if it were current.
+- Switching Wi-Fi networks, WAN and VPN interfaces, or site-to-site IPsec
+  tunnels on or off now shows the new position immediately: the refresh that
+  follows the command re-reads the router state those switches display
+  instead of reusing the cached copy for up to three minutes.
+
 ## 1.7.75
 
 ### Fixed

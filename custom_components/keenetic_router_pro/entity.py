@@ -44,6 +44,7 @@ class _FingerprintedCoordinatorEntity(CoordinatorEntity):
 
     _FINGERPRINT_IGNORE: frozenset[str] = frozenset()
     _last_fingerprint: dict[str, Any] | None = None
+    _last_available: bool | None = None
 
     @property
     def _fingerprint_source(self) -> dict[str, Any] | None:
@@ -67,9 +68,20 @@ class _FingerprintedCoordinatorEntity(CoordinatorEntity):
         fingerprint = _entity_fingerprint(
             self._fingerprint_source, self._FINGERPRINT_IGNORE
         )
-        if fingerprint is not None and fingerprint == self._last_fingerprint:
+        # Availability can change while the fingerprinted payload does not —
+        # ``ClientEntity`` goes unavailable on a preserved (stale) client
+        # snapshot, and that snapshot is byte-identical to the previous tick
+        # by definition. Without availability in the dedup key the write is
+        # suppressed and the entity stays published as available.
+        available = self.available
+        if (
+            fingerprint is not None
+            and fingerprint == self._last_fingerprint
+            and available == self._last_available
+        ):
             return
         self._last_fingerprint = fingerprint
+        self._last_available = available
         super()._handle_coordinator_update()
 
 
