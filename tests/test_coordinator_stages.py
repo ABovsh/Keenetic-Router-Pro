@@ -770,7 +770,8 @@ async def test_coordinator_calls_prefetch_tick_on_each_refresh() -> None:
     show = tree["show"]
     assert "system" in show
     assert "interface" in show
-    assert "ip" in show and "neighbour" in show["ip"]
+    assert "ip" in show
+    assert "neighbour" in show["ip"]
     # Slow-tier subpaths present on first refresh.
     assert "version" in show
     assert "ping-check" in show

@@ -96,13 +96,15 @@ async def test_async_get_clients_latches_winner_subpath_for_next_call() -> None:
     client._rci_get = fake_get
 
     items = await client.async_get_clients()
-    assert items and items[0]["mac"] == "AA:BB:CC:00:00:01"
+    assert items
+    assert items[0]["mac"] == "AA:BB:CC:00:00:01"
     assert client._hotspot_subpath_winner == winner_path
     assert call_log == list(RCI_HOTSPOT_HOST_PATHS)
 
     call_log.clear()
     items = await client.async_get_clients()
-    assert items and items[0]["mac"] == "AA:BB:CC:00:00:01"
+    assert items
+    assert items[0]["mac"] == "AA:BB:CC:00:00:01"
     assert call_log[0] == winner_path
     assert len(call_log) == 1
 

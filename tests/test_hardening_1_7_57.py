@@ -50,7 +50,8 @@ def test_wan_defaultgw_string_false_is_false() -> None:
             ]
         )
     )
-    assert wans and wans[0]["defaultgw"] is False
+    assert wans
+    assert wans[0]["defaultgw"] is False
 
 
 # X107 — multi-peer WireGuard traffic is summed, not first-peer-only
