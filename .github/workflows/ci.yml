@@ -64,7 +64,10 @@ jobs:
   sonar:
     name: SonarCloud
     needs: test
-    if: github.event_name == 'push'
+    # Dependabot branches read the dependabot secret store, where SONAR_TOKEN
+    # doesn't exist — the scanner would fail with "Not authorized" on every
+    # bump PR. Skip instead of failing.
+    if: github.event_name == 'push' && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
