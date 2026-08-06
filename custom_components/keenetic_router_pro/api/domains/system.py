@@ -138,7 +138,7 @@ class SystemMixin:
                 _LOGGER.info("Controller firmware update started via components/commit")
                 return True
         except KeeneticApiError as err:
-            if "404" not in str(err):
+            if not _is_endpoint_missing(err):
                 raise HomeAssistantError(f"Failed to start update: {err}") from err
             _LOGGER.debug("Components update not available, trying system/update")
 
@@ -158,7 +158,7 @@ class SystemMixin:
                 _LOGGER.info("Controller firmware update started via system/update")
                 return True
         except KeeneticApiError as err:
-            if "404" not in str(err):
+            if not _is_endpoint_missing(err):
                 raise HomeAssistantError(f"Failed to start update: {err}") from err
             _LOGGER.debug("system/update returned 404")
 

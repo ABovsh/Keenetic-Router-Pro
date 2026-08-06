@@ -8,6 +8,22 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.77
+
+### Fixed
+
+- Tracked-client sensors no longer rewrite their state on every 30-second poll
+  for clients the router also sees in its ARP/neighbour table — the intended
+  filtering of those constantly-changing discovery counters was not actually
+  applied, so the history database was being filled with duplicate readings.
+- Starting a firmware update now reports a real router error instead of quietly
+  moving on to the legacy update method when the response text merely happens
+  to contain "404", and still falls back correctly when the router genuinely
+  lacks the newer update endpoint.
+- A plain IPv6 address (for example `2001:db8::1`) is now accepted as the router
+  host during setup instead of being rejected with a misleading "port must be
+  between 1 and 65535" error.
+
 ## 1.7.76
 
 ### Fixed
