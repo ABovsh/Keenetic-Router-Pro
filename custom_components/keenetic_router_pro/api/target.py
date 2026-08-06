@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from ipaddress import ip_address
 from urllib.parse import urlparse
 
 from ..utils import bracket_host
@@ -36,6 +37,15 @@ def normalize_connection_target(host: str, port: int, ssl: bool) -> KeeneticConn
     raw_host = str(host or "").strip()
     if not raw_host:
         raise KeeneticApiError("Host is required")
+
+    if "://" not in raw_host and not raw_host.startswith("["):
+        try:
+            # A bare IPv6 literal ("2001:db8::1") parses as host:port and would
+            # be rejected with a bogus port error — bracket it first.
+            if ip_address(raw_host).version == 6:
+                raw_host = f"[{raw_host}]"
+        except ValueError:
+            pass
 
     parsed = urlparse(raw_host if "://" in raw_host else f"//{raw_host}")
     if parsed.scheme and parsed.scheme not in ("http", "https"):

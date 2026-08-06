@@ -43,6 +43,10 @@ class _FingerprintedCoordinatorEntity(CoordinatorEntity):
     """
 
     _FINGERPRINT_IGNORE: frozenset[str] = frozenset()
+    # Volatile keys that must be stripped no matter how a subclass overrides
+    # ``_FINGERPRINT_IGNORE`` (the dedicated uptime / last-seen sensors replace
+    # it wholesale, which would otherwise drop these again).
+    _NEIGHBOUR_VOLATILE: frozenset[str] = frozenset()
     _last_fingerprint: dict[str, Any] | None = None
     _last_available: bool | None = None
 
@@ -66,7 +70,8 @@ class _FingerprintedCoordinatorEntity(CoordinatorEntity):
     @callback
     def _handle_coordinator_update(self) -> None:
         fingerprint = _entity_fingerprint(
-            self._fingerprint_source, self._FINGERPRINT_IGNORE
+            self._fingerprint_source,
+            self._FINGERPRINT_IGNORE | self._NEIGHBOUR_VOLATILE,
         )
         # Availability can change while the fingerprinted payload does not —
         # ``ClientEntity`` goes unavailable on a preserved (stale) client
