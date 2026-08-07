@@ -92,8 +92,10 @@ class KeeneticMemoryUsageSensor(ControllerEntity, SensorEntity):
                 value = coerce_float(sys[key])
                 if value is not None:
                     # Clamp to [0, 100] — a fallback percentage field is still
-                    # a percentage and must not publish an out-of-range value.
-                    return max(0.0, min(100.0, value))
+                    # a percentage and must not publish an out-of-range value —
+                    # and round like the paths above, or this firmware shape
+                    # keeps the per-poll decimal jitter.
+                    return round(max(0.0, min(100.0, value)))
 
         return None
 

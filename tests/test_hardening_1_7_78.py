@@ -271,6 +271,13 @@ def test_mesh_memory_sensor_returns_whole_percent() -> None:
     assert entity.native_value == 48
 
 
+def test_memory_usage_percent_fallback_field_also_rounds() -> None:
+    """The third firmware shape must not reintroduce the 0.1 % jitter."""
+    coordinator = _DummyCoordinator({"system": {"mem_used_percent": 48.1}})
+    entity = KeeneticMemoryUsageSensor(coordinator, _Entry())
+    assert entity.native_value == 48
+
+
 def test_memory_usage_sensor_returns_whole_percent() -> None:
     coordinator = _DummyCoordinator(
         {"system": {"memtotal": 1000, "memfree": 519}}  # 48.1% raw
