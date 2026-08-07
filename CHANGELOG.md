@@ -8,25 +8,6 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
-## 1.10.2
-
-### ⚠️ Breaking
-
-- **The per-interface enable switches added in 1.10.0 have been removed.** They
-  duplicated the switches that already existed for everything worth toggling —
-  Wi-Fi networks, WAN interfaces, VPN tunnels and IPsec tunnels — and because a
-  device row is created even for a disabled entity, they filled the device list
-  with dozens of entries containing nothing you could see, one for every unused
-  Wi-Fi access-point slot and switch port. They are removed from the registry
-  automatically on startup. Nothing you could previously control is lost.
-
-### 🐛 Fixed
-
-- Devices left behind with no entities at all are now cleaned up on startup,
-  and any that remain can be deleted from the UI. These accumulate when a
-  phone rotates its MAC address, or from older versions that named mesh and
-  client devices differently.
-
 ## 1.10.0
 
 ### ⚠️ Breaking
@@ -73,6 +54,10 @@ git log.
   every time. It now holds its reading until the load actually moves.
 - Removing a device from the tracked-client list now removes its sensors, which
   previously stayed behind permanently as unavailable entities.
+- Devices left behind with no entities at all are cleaned up on startup, and any
+  that remain can now be deleted from the UI. These accumulate when a phone
+  rotates its MAC address, or from older versions that named mesh and client
+  devices differently.
 - The DNS proxy failed-request counter could stop updating if the router ever
   reported an out-of-range value.
 
