@@ -124,6 +124,56 @@ def _needs_client_data(entry: ConfigEntry) -> bool:
     return bool(entry.data.get(CONF_TRACKED_CLIENTS) or ())
 
 
+@callback
+def _async_remove_stale_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete device rows this entry no longer has a single entity for.
+
+    Devices are created implicitly when an entity carrying ``device_info`` is
+    added, so a device with zero entities can never come back on its own — it
+    is the residue of an identifier scheme that changed (mesh and client
+    devices both moved to entry-scoped ids), of a phone rotating its MAC, or of
+    an entity family the configuration stopped creating. Home Assistant offers
+    no way to delete them from the UI unless the integration says it is safe,
+    so they accumulate forever.
+
+    Disabled entities count as alive: a device whose entities the user turned
+    off is wanted, and deleting it would silently discard that decision.
+    """
+    try:
+        dr = importlib.import_module("homeassistant.helpers.device_registry")
+        er = importlib.import_module("homeassistant.helpers.entity_registry")
+    except ImportError:
+        return
+
+    device_registry = dr.async_get(hass)
+    entity_registry = er.async_get(hass)
+    for device in list(dr.async_entries_for_config_entry(device_registry, entry.entry_id)):
+        entities = er.async_entries_for_device(
+            entity_registry, device.id, include_disabled_entities=True
+        )
+        if not entities:
+            _LOGGER.debug("Removing stale device with no entities: %s", device.id)
+            device_registry.async_remove_device(device.id)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: ConfigEntry, device: Any
+) -> bool:
+    """Allow deleting a device from the UI once nothing references it.
+
+    Without this hook Home Assistant refuses every manual delete, which is why
+    orphaned mesh nodes and rotated-MAC clients could not be cleared by hand.
+    """
+    try:
+        er = importlib.import_module("homeassistant.helpers.entity_registry")
+    except ImportError:
+        return False
+    entities = er.async_entries_for_device(
+        er.async_get(hass), device.id, include_disabled_entities=True
+    )
+    return not entities
+
+
 def _router_device_id(hass: HomeAssistant, entry: ConfigEntry) -> str | None:
     """Return the registry id of the router device, if it is registered yet.
 
@@ -514,6 +564,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(coordinator.async_add_listener(_async_handle_client_events))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # After the platforms have registered everything they create, any device
+    # still holding zero entities is residue. Must run AFTER the forward, or
+    # it would delete devices whose entities are about to be added.
+    _async_remove_stale_devices(hass, entry)
 
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
 

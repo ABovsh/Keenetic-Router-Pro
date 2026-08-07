@@ -8,6 +8,22 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.10.1
+
+### 🐛 Fixed
+
+- **Empty devices in the device list.** 1.10.0 offered an enable switch for
+  every interface the router reports, and because a device row is created even
+  for a disabled entity, that added dozens of devices containing nothing you
+  could see — one for each unused Wi-Fi access-point slot, Wi-Fi station and
+  port. The switch is now offered only for physical Ethernet ports, and it
+  lives on the router device instead of creating one of its own. Wi-Fi networks
+  already had their own switches.
+- Devices left behind with no entities at all are now cleaned up on startup,
+  and any that remain can be deleted from the UI. These accumulate when a
+  phone rotates its MAC address, or from older versions that named mesh and
+  client devices differently.
+
 ## 1.10.0
 
 ### ⚠️ Breaking

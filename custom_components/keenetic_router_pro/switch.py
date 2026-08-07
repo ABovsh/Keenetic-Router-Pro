@@ -219,19 +219,25 @@ async def async_setup_entry(
     )
 
 
-# Interfaces that must never get an enable switch. Bridges carry the LAN the
-# router is managed over, and GigabitEthernet0 is the management port on every
-# Keenetic model — a switch that can strand the router behind its own bridge
-# is a trap, not a feature.
-_UNSWITCHABLE_TYPES = frozenset({"bridge", "vlan"})
+# Only physical Ethernet ports get an enable switch.
+#
+# The first cut of this offered one for every interface the router lists, which
+# was a mistake with a very visible cost: a default-disabled entity still
+# creates its device row, so it added 71 empty devices to the UI — one per
+# unused AccessPoint slot, per WifiStation, per port. Wi-Fi already has
+# KeeneticWifiSwitch built from the wifi payload, WAN and VPN interfaces have
+# their own switches, and bridges must never be switchable at all because they
+# carry the LAN the router is managed over.
+_SWITCHABLE_TYPES = frozenset({"gigabitethernet", "fastethernet", "ethernet"})
+# GigabitEthernet0 is the management port on every Keenetic model.
 _UNSWITCHABLE_IDS = frozenset({"GigabitEthernet0", "Home", "Bridge0"})
 
 
 def is_interface_switchable(iface_id: str, iface_type: str | None) -> bool:
-    """Return True when it is safe to expose an enable switch for an interface."""
+    """Return True when it is safe and useful to offer an enable switch."""
     if iface_id in _UNSWITCHABLE_IDS:
         return False
-    return str(iface_type or "").lower() not in _UNSWITCHABLE_TYPES
+    return str(iface_type or "").lower() in _SWITCHABLE_TYPES
 
 
 class BaseKeeneticSwitch(ControllerEntity, SwitchEntity):
@@ -461,7 +467,7 @@ class KeeneticCryptoMapEnabledSwitch(CryptoMapEntity, SwitchEntity):
         await self.coordinator.async_request_refresh()
 
 
-class KeeneticInterfaceEnabledSwitch(InterfaceEntity, SwitchEntity):
+class KeeneticInterfaceEnabledSwitch(ControllerEntity, SwitchEntity):
     """Enable / disable a physical or Wi-Fi interface.
 
     Uses the same ``interface up/down`` command the WAN and VPN switches
@@ -470,7 +476,6 @@ class KeeneticInterfaceEnabledSwitch(InterfaceEntity, SwitchEntity):
     """
 
     _attr_has_entity_name = True
-    _attr_name = "Enabled"
     _attr_icon = "mdi:ethernet-cable"
     _attr_entity_category = EntityCategory.CONFIG
     _attr_entity_registry_enabled_default = False
@@ -484,16 +489,14 @@ class KeeneticInterfaceEnabledSwitch(InterfaceEntity, SwitchEntity):
         label: str | None = None,
         iface_type: str | None = None,
     ) -> None:
-        InterfaceEntity.__init__(
-            self,
-            coordinator,
-            entry.entry_id,
-            entry.title,
-            iface_id,
-            label=label,
-            iface_type=iface_type,
-        )
+        # ControllerEntity: these belong to the router itself. Giving each
+        # port its own sub-device is what produced the empty-device flood.
+        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
+        self._iface_id = iface_id
+        self._label = label or iface_id
+        self._iface_type = iface_type
         self._client = client
+        self._attr_name = f"Port {label or iface_id} enabled"
 
     @property
     def unique_id(self) -> str:

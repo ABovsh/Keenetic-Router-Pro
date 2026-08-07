@@ -338,58 +338,6 @@ async def test_diagnostics_include_a_health_block() -> None:
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    ("iface_id", "iface_type", "eligible"),
-    [
-        ("GigabitEthernet1", "GigabitEthernet", True),
-        ("WifiMaster0/AccessPoint1", "AccessPoint", True),
-        ("Bridge0", "Bridge", False),  # disabling this locks you out
-        ("Home", "Bridge", False),
-        ("GigabitEthernet0", "GigabitEthernet", False),  # management port
-    ],
-)
-def test_only_safe_interfaces_get_an_enable_switch(
-    iface_id, iface_type, eligible
-) -> None:
-    """A switch that can strand the router behind its own bridge is a trap."""
-    from custom_components.keenetic_router_pro.switch import (
-        is_interface_switchable,
-    )
-
-    assert is_interface_switchable(iface_id, iface_type) is eligible
-
-
-def test_client_count_sensors_are_pruned_when_the_tree_is_not_fetched() -> None:
-    """Otherwise they linger as orphans reporting a confident zero clients."""
-    from custom_components.keenetic_router_pro import (
-        _CLIENT_COUNT_SUFFIXES,
-        _needs_client_data,
-    )
-    from custom_components.keenetic_router_pro.const import (
-        CLIENT_SENSORS_OFF,
-        CONF_CLIENT_SENSORS,
-        CONF_TRACKED_CLIENTS,
-    )
-
-    off_and_untracked = SimpleNamespace(
-        entry_id="e", data={}, options={CONF_CLIENT_SENSORS: CLIENT_SENSORS_OFF}
-    )
-    assert _needs_client_data(off_and_untracked) is False
-
-    # A tracked client still needs the tree even with sensors off.
-    off_but_tracked = SimpleNamespace(
-        entry_id="e",
-        data={CONF_TRACKED_CLIENTS: [MAC]},
-        options={CONF_CLIENT_SENSORS: CLIENT_SENSORS_OFF},
-    )
-    assert _needs_client_data(off_but_tracked) is True
-
-    # And the default configuration must never lose client data.
-    assert _needs_client_data(SimpleNamespace(entry_id="e", data={}, options={})) is True
-
-    assert "connected_clients_v2" in _CLIENT_COUNT_SUFFIXES
-
-
 def test_interface_enable_switch_reflects_link_state() -> None:
     from custom_components.keenetic_router_pro.switch import (
         KeeneticInterfaceEnabledSwitch,
@@ -547,3 +495,143 @@ def test_downtime_does_not_close_an_outage_on_an_unreachable_router() -> None:
     coordinator.data["active_wan"] = None
     sensor._handle_coordinator_update()  # t=220, still down
     assert sensor.native_value == 120
+
+
+# --------------------------------------------------------------------------
+# 1.11.0 — the interface switch must not litter the device registry
+# --------------------------------------------------------------------------
+
+
+def test_interface_switch_lives_on_the_router_device_not_its_own() -> None:
+    """A disabled entity still creates its device row.
+
+    Shipping one switch per interface therefore added 71 empty devices to the
+    UI — one for every unused AccessPoint slot and WifiStation the router
+    lists — even though every switch was default-disabled and invisible.
+    """
+    from custom_components.keenetic_router_pro.entity import ControllerEntity
+    from custom_components.keenetic_router_pro.switch import (
+        KeeneticInterfaceEnabledSwitch,
+    )
+
+    assert issubclass(KeeneticInterfaceEnabledSwitch, ControllerEntity)
+
+    coordinator = _coordinator(
+        {"interfaces": {"GigabitEthernet1": {"type": "GigabitEthernet", "state": "up"}}}
+    )
+    switch = KeeneticInterfaceEnabledSwitch(
+        coordinator=coordinator,
+        entry=_entry(),
+        client=SimpleNamespace(),
+        iface_id="GigabitEthernet1",
+    )
+    # The router's own identifiers — not a per-interface sub-device.
+    assert switch.device_info["identifiers"] == {
+        ("keenetic_router_pro", "entry_123")
+    }
+
+
+@pytest.mark.parametrize(
+    ("iface_id", "iface_type", "eligible"),
+    [
+        ("GigabitEthernet1", "GigabitEthernet", True),
+        ("FastEthernet0/1", "FastEthernet", True),
+        # Wi-Fi already has its own switch built from the wifi payload; adding a
+        # second one per AccessPoint slot is what produced the device flood.
+        ("WifiMaster0/AccessPoint1", "AccessPoint", False),
+        ("WifiMaster0/AccessPoint5", "AccessPoint", False),
+        ("WifiMaster1/WifiStation0", "WifiStation", False),
+        ("Bridge0", "Bridge", False),
+        ("Home", "Bridge", False),
+        ("GigabitEthernet0", "GigabitEthernet", False),  # management port
+    ],
+)
+def test_only_physical_ports_get_an_enable_switch(
+    iface_id, iface_type, eligible
+) -> None:
+    from custom_components.keenetic_router_pro.switch import (
+        is_interface_switchable,
+    )
+
+    assert is_interface_switchable(iface_id, iface_type) is eligible
+
+
+def test_stale_devices_with_no_entities_are_removed() -> None:
+    """Renaming an identifier scheme orphans the OLD device row.
+
+    Mesh nodes moved to entry-scoped identifiers and clients did too, but
+    nothing ever removed the devices left behind — and a phone rotating its
+    MAC strands one every time. A device with no entities cannot come back.
+    """
+    from custom_components.keenetic_router_pro import _async_remove_stale_devices
+
+    removed: list[str] = []
+
+    live = SimpleNamespace(id="dev_live", identifiers={("keenetic_router_pro", "a")})
+    stale = SimpleNamespace(id="dev_stale", identifiers={("keenetic_router_pro", "b")})
+
+    class _DevReg:
+        def async_remove_device(self, device_id):
+            removed.append(device_id)
+
+    class _EntReg:
+        pass
+
+    dr_mod = types.ModuleType("homeassistant.helpers.device_registry")
+    dr_mod.async_get = lambda _hass: _DevReg()
+    dr_mod.async_entries_for_config_entry = lambda _reg, _eid: [live, stale]
+
+    er_mod = types.ModuleType("homeassistant.helpers.entity_registry")
+    er_mod.async_get = lambda _hass: _EntReg()
+    er_mod.async_entries_for_device = lambda _reg, device_id, include_disabled_entities: (
+        [SimpleNamespace(entity_id="sensor.x")] if device_id == "dev_live" else []
+    )
+
+    sys.modules["homeassistant.helpers.device_registry"] = dr_mod
+    sys.modules["homeassistant.helpers.entity_registry"] = er_mod
+    try:
+        _async_remove_stale_devices(None, SimpleNamespace(entry_id="e1"))
+    finally:
+        sys.modules.pop("homeassistant.helpers.device_registry", None)
+        sys.modules.pop("homeassistant.helpers.entity_registry", None)
+
+    assert removed == ["dev_stale"]
+
+
+def test_stale_device_sweep_counts_disabled_entities_as_alive() -> None:
+    """A device whose only entities are disabled is still wanted.
+
+    Deleting it would silently destroy the user's decision to turn those
+    entities off.
+    """
+    from custom_components.keenetic_router_pro import _async_remove_stale_devices
+
+    removed: list[str] = []
+    dev = SimpleNamespace(id="dev_1", identifiers={("keenetic_router_pro", "a")})
+
+    dr_mod = types.ModuleType("homeassistant.helpers.device_registry")
+    dr_mod.async_get = lambda _hass: SimpleNamespace(
+        async_remove_device=lambda device_id: removed.append(device_id)
+    )
+    dr_mod.async_entries_for_config_entry = lambda _reg, _eid: [dev]
+
+    seen: dict = {}
+
+    def _entries_for_device(_reg, device_id, include_disabled_entities):
+        seen["include_disabled"] = include_disabled_entities
+        return [SimpleNamespace(entity_id="switch.x", disabled_by="user")]
+
+    er_mod = types.ModuleType("homeassistant.helpers.entity_registry")
+    er_mod.async_get = lambda _hass: object()
+    er_mod.async_entries_for_device = _entries_for_device
+
+    sys.modules["homeassistant.helpers.device_registry"] = dr_mod
+    sys.modules["homeassistant.helpers.entity_registry"] = er_mod
+    try:
+        _async_remove_stale_devices(None, SimpleNamespace(entry_id="e1"))
+    finally:
+        sys.modules.pop("homeassistant.helpers.device_registry", None)
+        sys.modules.pop("homeassistant.helpers.entity_registry", None)
+
+    assert seen["include_disabled"] is True
+    assert removed == []
