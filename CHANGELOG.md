@@ -8,6 +8,51 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.10.0
+
+### ⚠️ Breaking
+
+- If you have set **Client sensors** to *Off* **and** track no clients, the
+  integration now stops requesting the router's client list entirely. This
+  removes the connected/disconnected/router-client count sensors for that
+  configuration, because the data behind them is no longer fetched. Any other
+  configuration is unaffected. If you want those counters back, set **Client
+  sensors** to *Basic*.
+
+### ✨ Added
+
+- **Device triggers.** The client-connected, client-disconnected and WAN
+  failover events now appear in the automation editor under the router device,
+  so you can build automations on them without hand-writing YAML.
+- **WAN Failover Count** and **WAN Downtime** sensors. Both feed long-term
+  statistics, so you can finally answer "how bad was my connection this month?"
+  with a number. Downtime only accrues while every WAN is down, so on a healthy
+  router these cost nothing.
+- Diagnostics downloads now include a health block: poll state, refresh count
+  and which API capabilities this router turned out to support. That makes a
+  bug report self-contained without any extra requests to the router.
+
+### 🔧 Changed
+
+- **Adaptive poll interval.** When nothing on the router has changed and no WAN
+  is carrying traffic, polling stretches from 30 s up to a maximum of 2 minutes.
+  Any change at all — a client appearing, a link dropping, traffic resuming —
+  snaps it straight back to 30 s, so nothing is reported late.
+- WAN throughput now holds its reading until it moves by 2 % instead of 10
+  kbit/s. On a fast link the old step still wrote a history row every poll; the
+  new band is finer than any graph can draw.
+
+### 🐛 Fixed
+
+- The WAN connection sensors published a ping-check failure counter that
+  flickered between 0 and 1 on a perfectly healthy link, because a single lost
+  ping bumps it and the next success clears it. It was responsible for the
+  large majority of the history rows those sensors wrote. The counter now
+  appears only while the check is actually failing, which is when it means
+  something.
+- CPU load flipped between 0 % and 1 % on an idle router, writing a history row
+  every time. It now holds its reading until the load actually moves.
+
 ## 1.9.1
 
 ### 🐛 Fixed

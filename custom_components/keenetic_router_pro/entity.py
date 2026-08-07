@@ -7,6 +7,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
 from .coordinator import KeeneticCoordinator
 from .utils import (
+    apply_deadband,
     find_client_by_mac,
     find_mesh_node,
     get_main_device_info,
@@ -31,6 +32,31 @@ def _entity_fingerprint(
     if not data:
         return None
     return {k: v for k, v in data.items() if k not in ignore}
+
+
+class DeadbandMixin:
+    """Hold a gauge steady until it moves by ``_DEADBAND``.
+
+    Router gauges dither: the Wi-Fi radio temperature alternates 59/61 °C
+    forever, CPU load flips 0/1 all day. Each flip writes a recorder row that
+    carries nothing. This was hand-rolled per sensor until three of them needed
+    it and a fourth was missed; putting it on a mixin makes the next gauge
+    correct by default.
+    """
+
+    _DEADBAND: float = 0.0
+
+    def _apply_deadband(self, value: float | None) -> float | None:
+        if value is None:
+            # An unavailable reading must not leave a stale value latched, or
+            # the sensor resumes from a baseline that is no longer true.
+            self._deadband_published = None
+            return None
+        published = apply_deadband(
+            value, getattr(self, "_deadband_published", None), self._DEADBAND
+        )
+        self._deadband_published = published
+        return published
 
 
 class _FingerprintedCoordinatorEntity(CoordinatorEntity):

@@ -9,17 +9,20 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfTime, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
-from ..entity import ControllerEntity
+from ..entity import ControllerEntity, DeadbandMixin
 from ..utils import coerce_float, coerce_seconds, parse_memory_fraction
 
 
-class KeeneticCpuLoadSensor(ControllerEntity, SensorEntity):
+class KeeneticCpuLoadSensor(DeadbandMixin, ControllerEntity, SensorEntity):
     """CPU load sensor."""
     _attr_has_entity_name = True
     _attr_translation_key = "cpu_load"
     _attr_icon = "mdi:cpu-64-bit"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_state_class = SensorStateClass.MEASUREMENT
+    # An idle router flips between 0 % and 1 % on every poll; only a move worth
+    # noticing should cost a row.
+    _DEADBAND = 3.0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -40,8 +43,8 @@ class KeeneticCpuLoadSensor(ControllerEntity, SensorEntity):
                 value = coerce_float(sys[key])
                 # A percentage outside 0-100 is firmware garbage, not load.
                 if value is not None and 0 <= value <= 100:
-                    return value
-        return None
+                    return self._apply_deadband(value)
+        return self._apply_deadband(None)
 
 
 class KeeneticMemoryUsageSensor(ControllerEntity, SensorEntity):

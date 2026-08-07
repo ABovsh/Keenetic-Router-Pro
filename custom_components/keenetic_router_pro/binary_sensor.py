@@ -188,7 +188,14 @@ class KeeneticWanConnectedSensor(WanEntity, BinarySensorEntity):
                 attrs["check_profile"] = pc.get("profile")
             # ``success_count`` is deliberately NOT published: it is a
             # monotonic counter, so it would change every poll.
-            if pc.get("fail_count") is not None:
+            #
+            # ``fail_count`` has the same problem for a subtler reason. On a
+            # healthy link a single lost ping bumps it to 1 and the next
+            # success clears it, so it dithers 0/1 forever — measured live, it
+            # was 96 of the 104 rows/day this entity wrote. While the check is
+            # passing the count is noise; once it is failing it is the whole
+            # diagnostic story, so publish it only then.
+            if pc.get("passing") is False and pc.get("fail_count") is not None:
                 attrs["fail_count"] = pc.get("fail_count")
             if pc.get("max_fails") is not None:
                 attrs["max_fails"] = pc.get("max_fails")

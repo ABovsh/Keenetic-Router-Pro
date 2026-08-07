@@ -144,6 +144,7 @@ data_entry_flow.AbortFlow = _AbortFlow
 
 core = types.ModuleType("homeassistant.core")
 core.HomeAssistant = object
+core.CALLBACK_TYPE = Any
 
 
 def _callback(func):  # mimic homeassistant.core.callback
@@ -299,6 +300,23 @@ storage.Store = _Store
 helpers.storage = storage
 sys.modules["homeassistant.helpers.storage"] = storage
 
+# Stub homeassistant.helpers.restore_state — entities that survive a restart
+# (rate limits, outage counters) only need async_get_last_state here.
+class _RestoreEntity:
+    async def async_added_to_hass(self):
+        parent = getattr(super(), "async_added_to_hass", None)
+        if parent is not None:
+            await parent()
+
+    async def async_get_last_state(self):
+        return None
+
+
+restore_state = types.ModuleType("homeassistant.helpers.restore_state")
+restore_state.RestoreEntity = _RestoreEntity
+helpers.restore_state = restore_state
+sys.modules["homeassistant.helpers.restore_state"] = restore_state
+
 device_registry = types.ModuleType("homeassistant.helpers.device_registry")
 device_registry.DeviceInfo = dict
 device_registry.format_mac = lambda mac: str(mac).lower()
@@ -377,12 +395,56 @@ def _async_redact_data(data, to_redact):
     return data
 
 
+# Stub the device-automation surface used by device_trigger.py.
+device_automation = types.ModuleType("homeassistant.components.device_automation")
+# The real base schema is a voluptuous schema; device_trigger.py only calls
+# .extend() on it, so a stub that records the extension is enough here.
+device_automation.DEVICE_TRIGGER_BASE_SCHEMA = types.SimpleNamespace(
+    extend=lambda spec: spec
+)
+components.device_automation = device_automation
+sys.modules["homeassistant.components.device_automation"] = device_automation
+
+_ha_component = types.ModuleType("homeassistant.components.homeassistant")
+_ha_component.__path__ = []
+_ha_triggers = types.ModuleType("homeassistant.components.homeassistant.triggers")
+_ha_triggers.__path__ = []
+_event_trigger = types.ModuleType(
+    "homeassistant.components.homeassistant.triggers.event"
+)
+_event_trigger.CONF_PLATFORM = "platform"
+_event_trigger.CONF_EVENT_TYPE = "event_type"
+_event_trigger.CONF_EVENT_DATA = "event_data"
+_event_trigger.TRIGGER_SCHEMA = lambda config: config
+_event_trigger.async_attach_trigger = None
+_ha_triggers.event = _event_trigger
+_ha_component.triggers = _ha_triggers
+components.homeassistant = _ha_component
+sys.modules["homeassistant.components.homeassistant"] = _ha_component
+sys.modules["homeassistant.components.homeassistant.triggers"] = _ha_triggers
+sys.modules["homeassistant.components.homeassistant.triggers.event"] = _event_trigger
+
+typing_helper = types.ModuleType("homeassistant.helpers.typing")
+typing_helper.ConfigType = dict
+helpers.typing = typing_helper
+sys.modules["homeassistant.helpers.typing"] = typing_helper
+
+trigger_helper = types.ModuleType("homeassistant.helpers.trigger")
+trigger_helper.TriggerActionType = Any
+trigger_helper.TriggerInfo = Any
+helpers.trigger = trigger_helper
+sys.modules["homeassistant.helpers.trigger"] = trigger_helper
+
 diagnostics = types.ModuleType("homeassistant.components.diagnostics")
 diagnostics.async_redact_data = _async_redact_data
 components.diagnostics = diagnostics
 
 const = types.ModuleType("homeassistant.const")
 const.CONF_HOST = "host"
+const.CONF_DEVICE_ID = "device_id"
+const.CONF_DOMAIN = "domain"
+const.CONF_PLATFORM = "platform"
+const.CONF_TYPE = "type"
 const.CONF_PASSWORD = "password"
 const.CONF_PORT = "port"
 const.CONF_USERNAME = "username"

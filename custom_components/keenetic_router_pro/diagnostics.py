@@ -154,6 +154,38 @@ def _redact_tracked_client_names(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# API capabilities the client latches at runtime. "Why is feature X missing?"
+# is the most common question a Keenetic bug report has to answer, and the
+# answer is almost always one of these coming back False on that firmware.
+_CAPABILITY_ATTRS = {
+    "rci_batch": "_rci_batch_supported",
+    "mws_member": "_mws_member_supported",
+    "crypto_map": "_crypto_map_supported",
+    "ipsec_diagnostics": "_ipsec_diagnostics_supported",
+    "ping_check": "_ping_check_supported",
+    "dns_proxy": "_dns_proxy_supported",
+    "ndns": "_ndns_supported",
+}
+
+
+def _health(coordinator: Any, client: Any) -> dict[str, Any]:
+    """Summarise poll state and capability latches — costs no API call."""
+    source = coordinator if coordinator is not None else None
+    api = getattr(source, "client", None) or client
+    interval = getattr(source, "update_interval", None)
+    return {
+        "last_update_success": getattr(source, "last_update_success", None),
+        "refresh_count": getattr(source, "_refresh_count", None),
+        "idle_streak": getattr(source, "_idle_streak", None),
+        "update_interval_seconds": (
+            interval.total_seconds() if interval is not None else None
+        ),
+        "capabilities": {
+            name: getattr(api, attr, None) for name, attr in _CAPABILITY_ATTRS.items()
+        },
+    }
+
+
 async def async_get_config_entry_diagnostics(
     _hass: HomeAssistant, entry: ConfigEntry
 ) -> dict[str, Any]:
@@ -181,6 +213,7 @@ async def async_get_config_entry_diagnostics(
             "repr": repr(client) if client is not None else None,
         },
         "coordinator_data": coordinator_data,
+        "health": _health(coordinator, client),
     }
 
     result = async_redact_data(payload, TO_REDACT)

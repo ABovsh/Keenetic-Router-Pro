@@ -105,7 +105,9 @@ def test_wan_connected_attrs_ignore_volatile_ping_check_fields() -> None:
     assert after == before
     assert "success_count" not in after
     assert "check_targets" not in after
-    assert after["fail_count"] == 0
+    # 1.10.0: fail_count is suppressed while the check passes — it dithers
+    # 0/1 on a healthy link. See test_hardening_1_10_0.
+    assert "fail_count" not in after
     assert after["max_fails"] == 3
     assert after["check_hosts"] == ["8.8.8.8", "1.1.1.1"]
 

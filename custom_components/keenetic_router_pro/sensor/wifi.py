@@ -7,8 +7,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfInformation, UnitOfTemperature, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
-from ..entity import ControllerEntity
-from ..utils import apply_deadband, bytes_to_gib, coerce_float
+from ..entity import ControllerEntity, DeadbandMixin
+from ..utils import bytes_to_gib, coerce_float
 
 # Measured on live hardware: the radio temperature alternates between two
 # readings 2 °C apart on every poll, writing ~1,000 recorder rows a day while
@@ -16,7 +16,7 @@ from ..utils import apply_deadband, bytes_to_gib, coerce_float
 _TEMPERATURE_DEADBAND_C = 3.0
 
 
-class KeeneticWifi24TemperatureSensor(ControllerEntity, SensorEntity):
+class KeeneticWifi24TemperatureSensor(DeadbandMixin, ControllerEntity, SensorEntity):
     """WiFi 2.4GHz radio temperature sensor."""
     _attr_has_entity_name = True
     _attr_translation_key = "wifi_24_temperature"
@@ -25,11 +25,11 @@ class KeeneticWifi24TemperatureSensor(ControllerEntity, SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:thermometer"
+    _DEADBAND = _TEMPERATURE_DEADBAND_C
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
         self._interface_prefix = "WifiMaster0"
-        self._published: float | None = None
 
     @property
     def unique_id(self) -> str:
@@ -45,19 +45,15 @@ class KeeneticWifi24TemperatureSensor(ControllerEntity, SensorEntity):
                 # fault) must not reach MEASUREMENT long-term statistics —
                 # and must not be held alive by the deadband either.
                 if temp is not None and -40 <= temp <= 150:
-                    self._published = apply_deadband(
-                        temp, self._published, _TEMPERATURE_DEADBAND_C
-                    )
-                    return self._published
-        self._published = None
-        return None
+                    return self._apply_deadband(temp)
+        return self._apply_deadband(None)
 
     @property
     def available(self) -> bool:
         return bool(getattr(super(), "available", True)) and self.native_value is not None
 
 
-class KeeneticWifi5TemperatureSensor(ControllerEntity, SensorEntity):
+class KeeneticWifi5TemperatureSensor(DeadbandMixin, ControllerEntity, SensorEntity):
     """WiFi 5GHz radio temperature sensor."""
     _attr_has_entity_name = True
     _attr_translation_key = "wifi_5_temperature"
@@ -66,11 +62,11 @@ class KeeneticWifi5TemperatureSensor(ControllerEntity, SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:thermometer"
+    _DEADBAND = _TEMPERATURE_DEADBAND_C
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
         self._interface_prefix = "WifiMaster1"
-        self._published: float | None = None
 
     @property
     def unique_id(self) -> str:
@@ -86,12 +82,8 @@ class KeeneticWifi5TemperatureSensor(ControllerEntity, SensorEntity):
                 # fault) must not reach MEASUREMENT long-term statistics —
                 # and must not be held alive by the deadband either.
                 if temp is not None and -40 <= temp <= 150:
-                    self._published = apply_deadband(
-                        temp, self._published, _TEMPERATURE_DEADBAND_C
-                    )
-                    return self._published
-        self._published = None
-        return None
+                    return self._apply_deadband(temp)
+        return self._apply_deadband(None)
 
     @property
     def available(self) -> bool:

@@ -23,6 +23,7 @@ from .const import (
     CLIENT_SENSORS_FULL,
     CLIENT_SENSORS_OFF,
     CONF_CLIENT_SENSORS,
+    CONF_TRACKED_CLIENTS,
     DEFAULT_CLIENT_SENSORS,
     EVENT_CLIENT_CONNECTED,
     EVENT_CLIENT_DISCONNECTED,
@@ -107,6 +108,37 @@ def _async_update_unsupported_features_issue(
 def _mask_identifier(value: Any, *, keep: int = 5) -> str:
     """Return a short non-sensitive suffix for logs."""
     return mask_identifier(value, keep=keep)
+
+
+def _needs_client_data(entry: ConfigEntry) -> bool:
+    """Return False only when nothing at all consumes the client tree.
+
+    ``show/ip/hotspot`` is the largest payload of every tick. A user who
+    tracks no clients and has turned the per-client sensors off has told us
+    they do not want client data, so there is no point fetching and parsing a
+    hundred hosts for entities that will never exist.
+    """
+    options = dict(getattr(entry, "options", None) or {})
+    if options.get(CONF_CLIENT_SENSORS, DEFAULT_CLIENT_SENSORS) != CLIENT_SENSORS_OFF:
+        return True
+    return bool(entry.data.get(CONF_TRACKED_CLIENTS) or ())
+
+
+def _router_device_id(hass: HomeAssistant, entry: ConfigEntry) -> str | None:
+    """Return the registry id of the router device, if it is registered yet.
+
+    Device triggers match on ``device_id``, so the events have to carry it.
+    The lookup is an in-memory dict hit, and returning None on the very first
+    tick (before the device exists) is fine — nothing can be listening yet.
+    """
+    try:
+        dr = importlib.import_module("homeassistant.helpers.device_registry")
+        device = dr.async_get(hass).async_get_device(
+            identifiers={(DOMAIN, entry.entry_id)}
+        )
+    except (ImportError, AttributeError, TypeError):
+        return None
+    return device.id if device else None
 
 
 def _is_loopback_host(host: str) -> bool:
@@ -230,6 +262,14 @@ _FULL_CLIENT_SUFFIXES = ("rx", "tx", "rssi", "txrate", "wifi_band", "wifi_mode")
 # Retired ids that must never be left behind: the seconds-counter session sensor
 # was replaced by a timestamp under a new unique_id (1.9.0).
 _RETIRED_CLIENT_SUFFIXES = ("uptime",)
+# Controller-level counts derived from the client tree (1.10.0): removed when
+# the tree is not fetched, since they would otherwise report a confident zero.
+_CLIENT_COUNT_SUFFIXES = (
+    "connected_clients_v2",
+    "router_clients_v2",
+    "disconnected_clients",
+    "extender_count",
+)
 
 
 @callback
@@ -259,6 +299,16 @@ def _async_prune_client_entities(hass: HomeAssistant, entry: ConfigEntry) -> Non
         for suffix in stale:
             entity_id = registry.async_get_entity_id(
                 "sensor", DOMAIN, f"{entry.entry_id}_client_{mac}_{suffix}"
+            )
+            if entity_id is not None:
+                registry.async_remove(entity_id)
+
+    # The controller-level counts go the same way once the client tree is no
+    # longer fetched at all, or they linger as orphans the user cannot delete.
+    if not _needs_client_data(entry):
+        for suffix in _CLIENT_COUNT_SUFFIXES:
+            entity_id = registry.async_get_entity_id(
+                "sensor", DOMAIN, f"{entry.entry_id}_{suffix}"
             )
             if entity_id is not None:
                 registry.async_remove(entity_id)
@@ -331,6 +381,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(f"Could not connect to Keenetic router: {err}") from err
 
     coordinator = KeeneticCoordinator(hass, client)
+    coordinator.needs_client_data = _needs_client_data(entry)
     await coordinator.async_config_entry_first_refresh()
     _async_migrate_mesh_unique_ids(
         hass,
@@ -413,6 +464,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 hass.bus.async_fire(
                     event,
                     {
+                        # Device triggers match on device_id, so every event
+                        # has to carry the router it came from.
+                        "device_id": _router_device_id(hass, entry),
                         "mac": mac,
                         "name": client_info.get("name")
                         or client_info.get("hostname")
@@ -430,7 +484,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.info(
                 "WAN failover: %s -> %s", failover.get("from"), failover.get("to")
             )
-            hass.bus.async_fire(EVENT_WAN_FAILOVER, dict(failover))
+            hass.bus.async_fire(
+                EVENT_WAN_FAILOVER,
+                {"device_id": _router_device_id(hass, entry), **failover},
+            )
 
     # async_add_listener returns an unsubscribe callable. Without
     # registering it via entry.async_on_unload, every reload of the

@@ -42,6 +42,8 @@ from .network import (
     KeeneticWanTxBytesSensor,
     KeeneticWanRxThroughputSensor,
     KeeneticWanTxThroughputSensor,
+    KeeneticWanFailoverCountSensor,
+    KeeneticWanDowntimeSensor,
 )
 from .clients import (
     KeeneticConnectedClientsSensor,
@@ -112,6 +114,8 @@ async def async_setup_entry(
     entities: list[SensorEntity] = []
 
     entities.append(KeeneticCpuLoadSensor(coordinator, entry))
+    entities.append(KeeneticWanFailoverCountSensor(coordinator, entry))
+    entities.append(KeeneticWanDowntimeSensor(coordinator, entry))
     entities.append(KeeneticMemoryUsageSensor(coordinator, entry))
     entities.append(KeeneticUptimeSensor(coordinator, entry))
     entities.append(KeeneticFirmwareVersionSensor(coordinator, entry))
@@ -126,10 +130,14 @@ async def async_setup_entry(
     entities.append(KeeneticDnsProxyStatusSensor(coordinator, entry))
     entities.append(KeeneticDnsProxyFailedRequestsSensor(coordinator, entry))
     entities.append(KeeneticIpsecViciOomTotalSensor(coordinator, entry))
-    entities.append(KeeneticConnectedClientsSensor(coordinator, entry))
-    entities.append(KeeneticRouterClientsSensor(coordinator, entry))
-    entities.append(KeeneticDisconnectedClientsSensor(coordinator, entry))
-    entities.append(KeeneticExtenderCountSensor(coordinator, entry))
+    # These four count the client tree. When the coordinator has been told not
+    # to fetch it, creating them anyway would be worse than omitting them:
+    # they would confidently report zero clients rather than going away.
+    if getattr(coordinator, "needs_client_data", True):
+        entities.append(KeeneticConnectedClientsSensor(coordinator, entry))
+        entities.append(KeeneticRouterClientsSensor(coordinator, entry))
+        entities.append(KeeneticDisconnectedClientsSensor(coordinator, entry))
+        entities.append(KeeneticExtenderCountSensor(coordinator, entry))
 
     # WiFi radio sensors
     entities.append(KeeneticWifi24TemperatureSensor(coordinator, entry))

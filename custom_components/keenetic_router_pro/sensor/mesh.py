@@ -10,7 +10,7 @@ from homeassistant.const import UnitOfTime, EntityCategory
 
 from ..const import FIELD_CONNECTED, LINK_STATE_DOWN, LINK_STATE_UP
 from ..coordinator import KeeneticCoordinator
-from ..entity import ControllerEntity, MeshEntity
+from ..entity import ControllerEntity, DeadbandMixin, MeshEntity
 from ..utils import coerce_float, coerce_int, coerce_seconds, parse_memory_fraction
 
 _ICON_ETHERNET = "mdi:ethernet"
@@ -206,7 +206,7 @@ class KeeneticMeshLocalIpSensor(MeshEntity, SensorEntity):
         return self._ip_address
 
 
-class KeeneticMeshCpuLoadSensor(MeshEntity, SensorEntity):
+class KeeneticMeshCpuLoadSensor(DeadbandMixin, MeshEntity, SensorEntity):
     """Mesh node CPU load sensor."""
     _attr_has_entity_name = True
     _attr_translation_key = "cpu_load"
@@ -216,6 +216,8 @@ class KeeneticMeshCpuLoadSensor(MeshEntity, SensorEntity):
     _attr_icon = "mdi:cpu-64-bit"
     # native_value reads node["cpuload"] — ignored by MeshEntity base.
     _FINGERPRINT_IGNORE = frozenset()
+    # Mesh nodes dither the same way the controller does; see KeeneticCpuLoadSensor.
+    _DEADBAND = 3.0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry, node_cid: str) -> None:
         MeshEntity.__init__(self, coordinator, entry.entry_id, entry.title, node_cid)
@@ -233,9 +235,9 @@ class KeeneticMeshCpuLoadSensor(MeshEntity, SensorEntity):
                 value = coerce_float(cpuload)
                 # A percentage outside 0-100 is firmware garbage, not load.
                 if value is not None and 0 <= value <= 100:
-                    return value
-                return None
-        return None
+                    return self._apply_deadband(value)
+                return self._apply_deadband(None)
+        return self._apply_deadband(None)
 
 
 class KeeneticMeshMemorySensor(MeshEntity, SensorEntity):

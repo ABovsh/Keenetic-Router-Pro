@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from time import monotonic
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -10,12 +11,18 @@ from homeassistant.components.sensor import (
     SensorDeviceClass,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.const import UnitOfTime, UnitOfInformation, UnitOfDataRate, EntityCategory
 
 from ..const import LINK_STATE_DOWN, LINK_STATE_UP, WAN_STATUS_CONNECTED, WAN_STATUS_LINK_UP
 from ..coordinator import KeeneticCoordinator
 from ..entity import ControllerEntity, WanEntity
-from ..utils import coerce_byte_count, coerce_seconds, quantize_data_rate
+from ..utils import (
+    apply_relative_deadband,
+    coerce_byte_count,
+    coerce_seconds,
+    quantize_data_rate,
+)
 
 _ICON_ETHERNET = "mdi:ethernet"
 _ICON_IP_NETWORK = "mdi:ip-network"
@@ -498,6 +505,12 @@ class KeeneticWanTxBytesSensor(_WanBytesBase):
 class _WanThroughputBase(_WanSensorBase):
     _attr_device_class = SensorDeviceClass.DATA_RATE
     _attr_state_class = SensorStateClass.MEASUREMENT
+    # Throughput spans six orders of magnitude, so a fixed step cannot serve
+    # it: the 10 kbit/s quantization that flattens idle noise still let a
+    # gigabit link write a row per poll. A 2 % band is finer than any graph
+    # can render, with the old step kept as the near-zero floor.
+    _THROUGHPUT_DEADBAND = 0.02
+    _THROUGHPUT_FLOOR = 10_000.0
     # See _WanBytesBase: throughput fields are also in the base ignore set.
     _FINGERPRINT_IGNORE = frozenset()
     _attr_native_unit_of_measurement = UnitOfDataRate.BITS_PER_SECOND
@@ -513,9 +526,16 @@ class _WanThroughputBase(_WanSensorBase):
         if v is None or isinstance(v, bool):
             return None
         try:
-            return quantize_data_rate(float(v) * 8)  # bytes/s → bit/s
+            rate = quantize_data_rate(float(v) * 8)  # bytes/s → bit/s
         except (TypeError, ValueError):
             return None
+        self._published_rate = apply_relative_deadband(
+            rate,
+            getattr(self, "_published_rate", None),
+            self._THROUGHPUT_DEADBAND,
+            floor=self._THROUGHPUT_FLOOR,
+        )
+        return self._published_rate
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
@@ -553,3 +573,105 @@ class KeeneticWanTxThroughputSensor(_WanThroughputBase):
     @property
     def name(self) -> str:
         return "TX Throughput"
+
+
+class KeeneticWanFailoverCountSensor(ControllerEntity, SensorEntity, RestoreEntity):
+    """How many times the router changed its default gateway.
+
+    Long-term statistics answer "how flaky was my ISP this month?" — a
+    question no amount of raw state history answers well. This costs a
+    recorder row per failover and nothing at all in between.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "wan_failover_count"
+    _attr_icon = "mdi:swap-horizontal"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
+        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
+        self._count = 0
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self._entry_id}_wan_failover_count"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state not in (None, "unknown", "unavailable"):
+            try:
+                self._count = int(float(last.state))
+            except (TypeError, ValueError):
+                self._count = 0
+
+    @property
+    def native_value(self) -> int:
+        return self._count
+
+    def _handle_coordinator_update(self) -> None:
+        # The coordinator raises this key only on the tick where the active
+        # WAN actually changed, so counting it is exact — no edge detection
+        # of our own to get wrong.
+        if (self.coordinator.data or {}).get("wan_failover"):
+            self._count += 1
+        super()._handle_coordinator_update()
+
+
+class KeeneticWanDowntimeSensor(ControllerEntity, SensorEntity, RestoreEntity):
+    """Cumulative seconds with no working WAN at all.
+
+    Only accrues while every WAN is down, so on a healthy router it writes
+    nothing. That makes it both cheap and exactly the number you want when
+    arguing with an ISP.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "wan_downtime"
+    _attr_icon = "mdi:timer-alert-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
+        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
+        self._seconds = 0.0
+        self._down_since: float | None = None
+
+    @staticmethod
+    def _now() -> float:
+        # Monotonic: a wall-clock step (NTP sync, DST) must not invent or
+        # erase an outage.
+        return monotonic()
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self._entry_id}_wan_downtime"
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state not in (None, "unknown", "unavailable"):
+            try:
+                self._seconds = float(last.state)
+            except (TypeError, ValueError):
+                self._seconds = 0.0
+
+    @property
+    def native_value(self) -> int:
+        return int(self._seconds)
+
+    def _handle_coordinator_update(self) -> None:
+        now = self._now()
+        down = not (self.coordinator.data or {}).get("active_wan")
+        if down:
+            if self._down_since is not None:
+                self._seconds += now - self._down_since
+            self._down_since = now
+        else:
+            if self._down_since is not None:
+                self._seconds += now - self._down_since
+            self._down_since = None
+        super()._handle_coordinator_update()

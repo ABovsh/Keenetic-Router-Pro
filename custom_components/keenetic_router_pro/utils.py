@@ -277,6 +277,28 @@ def apply_deadband(
     return previous
 
 
+def apply_relative_deadband(
+    value: float, previous: float | None, fraction: float, *, floor: float
+) -> float:
+    """Hold a reading until it moves by ``fraction`` of its own magnitude.
+
+    A fixed deadband cannot serve a value that spans several orders of
+    magnitude: 10 kbit/s is noise on a gigabit link and the entire signal on an
+    idle one. ``floor`` is the absolute band that applies near zero, so
+    background ARP and keepalive chatter still flattens to a steady reading.
+
+    Dropping to zero always publishes: "the link went quiet" is information.
+    Coming back off zero still has to clear the floor, so a few hundred byte/s
+    of chatter does not count as the link waking up.
+    """
+    if previous is None or value == 0:
+        return value
+    band = max(floor, fraction * max(abs(value), abs(previous)))
+    if abs(value - previous) >= band:
+        return value
+    return previous
+
+
 def quantize_data_rate(bits_per_second: float) -> float:
     """Snap a bit/s rate to the nearest 10 kbit/s.
 
