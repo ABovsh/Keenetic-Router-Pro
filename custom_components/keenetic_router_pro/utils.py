@@ -261,6 +261,22 @@ def is_client_online(client: dict[str, Any] | None) -> bool:
     return coerce_bool(client.get("active"))
 
 
+def apply_deadband(
+    value: float, previous: float | None, threshold: float
+) -> float:
+    """Hold a reading at its previous value until it moves by ``threshold``.
+
+    Some router gauges dither between two adjacent readings on every poll — the
+    Wi-Fi radio temperature alternates 59/61 °C indefinitely — which writes a
+    recorder row per tick while carrying no information. Rounding cannot fix a
+    value that straddles a boundary; only comparing against what was last
+    published can.
+    """
+    if previous is None or abs(value - previous) >= threshold:
+        return value
+    return previous
+
+
 def quantize_data_rate(bits_per_second: float) -> float:
     """Snap a bit/s rate to the nearest 10 kbit/s.
 

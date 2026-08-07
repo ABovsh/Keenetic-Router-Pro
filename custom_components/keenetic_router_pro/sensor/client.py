@@ -211,6 +211,11 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
         return self._session_start
 
 
+# Wide enough to swallow the recompute jitter, far too small to hide a genuine
+# new sighting (which resets the router's counter by minutes or hours).
+_LAST_SEEN_TOLERANCE = timedelta(seconds=15)
+
+
 class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
     """Local date/time when the router last saw the offline client."""
     _attr_has_entity_name = True
@@ -228,6 +233,7 @@ class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
         label: str,
     ) -> None:
         ClientEntity.__init__(self, coordinator, entry.entry_id, entry.title, mac, label)
+        self._seen_at: datetime | None = None
 
     @property
     def unique_id(self) -> str:
@@ -259,7 +265,16 @@ class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
         if seconds is None:
             return None
         seen_at = datetime.now().astimezone() - timedelta(seconds=seconds)
-        return seen_at.strftime("%d.%m.%Y %H:%M:%S")
+        # Measured live: this recomputation wobbles by a second between polls
+        # (the router's counter and our clock round differently), which wrote a
+        # recorder row per tick for a client that had not been seen in hours.
+        # Hold the previous instant unless the sighting really moved.
+        if (
+            self._seen_at is None
+            or abs(seen_at - self._seen_at) > _LAST_SEEN_TOLERANCE
+        ):
+            self._seen_at = seen_at
+        return self._seen_at.strftime("%d.%m.%Y %H:%M:%S")
 
 
 class KeeneticClientRxSensor(ClientEntity, SensorEntity):

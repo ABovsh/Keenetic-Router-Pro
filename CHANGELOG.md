@@ -8,6 +8,20 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.9.1
+
+### 🐛 Fixed
+
+- The Wi-Fi radio temperature sensors alternated between two readings 2 °C
+  apart on every poll, writing about a thousand history rows a day each while
+  the radio's temperature had not meaningfully changed. They now hold their
+  reading until it moves by 3 °C. Trends and alerts are unaffected; a radio
+  thermometer is an indicator, not an instrument.
+- **Last Seen** wobbled by one second between polls, because it is computed
+  from "now minus elapsed" and the router's counter and Home Assistant's clock
+  round differently. It now holds the same instant unless the sighting really
+  moved, instead of recording a row every poll for a client last seen hours ago.
+
 ## 1.9.0
 
 ### ⚠️ Breaking

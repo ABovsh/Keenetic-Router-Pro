@@ -8,7 +8,12 @@ from homeassistant.const import UnitOfInformation, UnitOfTemperature, EntityCate
 
 from ..coordinator import KeeneticCoordinator
 from ..entity import ControllerEntity
-from ..utils import bytes_to_gib, coerce_float
+from ..utils import apply_deadband, bytes_to_gib, coerce_float
+
+# Measured on live hardware: the radio temperature alternates between two
+# readings 2 °C apart on every poll, writing ~1,000 recorder rows a day while
+# saying nothing. A radio thermometer is a trend indicator, not an instrument.
+_TEMPERATURE_DEADBAND_C = 3.0
 
 
 class KeeneticWifi24TemperatureSensor(ControllerEntity, SensorEntity):
@@ -24,6 +29,7 @@ class KeeneticWifi24TemperatureSensor(ControllerEntity, SensorEntity):
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
         self._interface_prefix = "WifiMaster0"
+        self._published: float | None = None
 
     @property
     def unique_id(self) -> str:
@@ -36,9 +42,14 @@ class KeeneticWifi24TemperatureSensor(ControllerEntity, SensorEntity):
             if iface_id.startswith(self._interface_prefix) and isinstance(iface_data, dict):
                 temp = coerce_float(iface_data.get("temperature"))
                 # A finite-but-implausible glitch reading (sensor/driver
-                # fault) must not reach MEASUREMENT long-term statistics.
+                # fault) must not reach MEASUREMENT long-term statistics —
+                # and must not be held alive by the deadband either.
                 if temp is not None and -40 <= temp <= 150:
-                    return temp
+                    self._published = apply_deadband(
+                        temp, self._published, _TEMPERATURE_DEADBAND_C
+                    )
+                    return self._published
+        self._published = None
         return None
 
     @property
@@ -59,6 +70,7 @@ class KeeneticWifi5TemperatureSensor(ControllerEntity, SensorEntity):
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
         self._interface_prefix = "WifiMaster1"
+        self._published: float | None = None
 
     @property
     def unique_id(self) -> str:
@@ -71,9 +83,14 @@ class KeeneticWifi5TemperatureSensor(ControllerEntity, SensorEntity):
             if iface_id.startswith(self._interface_prefix) and isinstance(iface_data, dict):
                 temp = coerce_float(iface_data.get("temperature"))
                 # A finite-but-implausible glitch reading (sensor/driver
-                # fault) must not reach MEASUREMENT long-term statistics.
+                # fault) must not reach MEASUREMENT long-term statistics —
+                # and must not be held alive by the deadband either.
                 if temp is not None and -40 <= temp <= 150:
-                    return temp
+                    self._published = apply_deadband(
+                        temp, self._published, _TEMPERATURE_DEADBAND_C
+                    )
+                    return self._published
+        self._published = None
         return None
 
     @property
