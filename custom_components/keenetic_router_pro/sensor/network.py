@@ -612,9 +612,13 @@ class KeeneticWanFailoverCountSensor(ControllerEntity, SensorEntity, RestoreEnti
 
     def _handle_coordinator_update(self) -> None:
         # The coordinator raises this key only on the tick where the active
-        # WAN actually changed, so counting it is exact — no edge detection
-        # of our own to get wrong.
-        if (self.coordinator.data or {}).get("wan_failover"):
+        # WAN actually changed. The listener also fires on the first FAILED
+        # tick after a success, though, and that call still sees the previous
+        # payload — so without the success check a failover followed by one
+        # hiccup (a very ordinary sequence) counted twice.
+        if self.coordinator.last_update_success and (
+            self.coordinator.data or {}
+        ).get("wan_failover"):
             self._count += 1
         super()._handle_coordinator_update()
 

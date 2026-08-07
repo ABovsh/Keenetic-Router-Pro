@@ -8,7 +8,7 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
-## 1.10.0
+## 1.10.1
 
 ### ⚠️ Breaking
 
@@ -52,6 +52,10 @@ git log.
   something.
 - CPU load flipped between 0 % and 1 % on an idle router, writing a history row
   every time. It now holds its reading until the load actually moves.
+- **WAN Failover Count** could count a single failover twice when the very next
+  poll failed, which is a common sequence right after a link changes.
+- Recovering from a router outage now always resumes fast polling, instead of
+  potentially staying on the stretched idle interval through a flapping link.
 
 ## 1.9.1
 

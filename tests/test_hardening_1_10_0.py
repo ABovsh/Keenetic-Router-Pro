@@ -410,3 +410,32 @@ def test_interface_enable_switch_reflects_link_state() -> None:
     assert switch.is_on is True
     # It must stay off by default: nobody expects HA to be able to kill a port.
     assert switch._attr_entity_registry_enabled_default is False
+
+
+# --------------------------------------------------------------------------
+# Adversarial-review fixes
+# --------------------------------------------------------------------------
+
+
+def test_failover_count_ignores_a_tick_that_failed() -> None:
+    """The listener also fires on the success->failure transition.
+
+    On that call ``coordinator.data`` still holds the previous payload, so a
+    failover followed by one failed tick — a very ordinary sequence, since the
+    link that just changed is often the one that hiccups — counted twice.
+    """
+    from custom_components.keenetic_router_pro.sensor.network import (
+        KeeneticWanFailoverCountSensor,
+    )
+
+    coordinator = _coordinator({"active_wan": "LTE", "wan_failover": {"to": "LTE"}})
+    sensor = KeeneticWanFailoverCountSensor(coordinator, _entry())
+    sensor.async_write_ha_state = lambda: None
+
+    sensor._handle_coordinator_update()
+    assert sensor.native_value == 1
+
+    # Next tick fails: same stale payload, must not count again.
+    coordinator.last_update_success = False
+    sensor._handle_coordinator_update()
+    assert sensor.native_value == 1

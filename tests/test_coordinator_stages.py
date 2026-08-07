@@ -903,3 +903,69 @@ async def test_coordinator_prefetches_hotspot_root_regardless_of_subpath_winner(
 
     tree = client.prefetch_calls[0]
     assert tree["show"]["ip"]["hotspot"] == {}
+
+
+async def test_coordinator_outage_recovery_resets_the_idle_streak() -> None:
+    """A router that goes down and comes back must resume fast polling.
+
+    The idle backoff keys on a topology/traffic fingerprint, and an outage is
+    not part of that fingerprint. Without an explicit reset, a router that
+    returns to exactly the state it left would stay on the stretched interval
+    right through a flapping link — the opposite of what you want.
+    """
+    client = StageFixtureClient()
+    state = {"fail": False}
+    original_system_info = client.async_get_system_info
+
+    async def flaky_system_info() -> dict[str, Any]:
+        if state["fail"]:
+            raise RuntimeError("router offline")
+        return await original_system_info()
+
+    client.async_get_system_info = flaky_system_info  # type: ignore[method-assign]
+    coordinator = _coordinator(client)
+
+    # Two identical quiet ticks build up an idle streak.
+    await _updated_data(coordinator)
+    await _updated_data(coordinator)
+    coordinator._idle_streak = 100  # as if quiet for a long while
+
+    # The router drops out, then returns to exactly the state it left.
+    state["fail"] = True
+    with pytest.raises(UpdateFailed):
+        await _updated_data(coordinator)
+    state["fail"] = False
+    await _updated_data(coordinator)
+
+    assert coordinator._idle_streak == 0
+    assert coordinator.update_interval == timedelta(seconds=FAST_SCAN_INTERVAL)
+
+
+async def test_coordinator_does_not_fetch_clients_when_they_are_not_needed() -> None:
+    """Dropping show/ip/hotspot from the batch tree is not enough on its own.
+
+    ``async_get_clients`` runs unconditionally in the gather and falls back to
+    its own live GET on a tick-cache miss, so removing the subtree from the
+    batch only converted one batched sub-request into a separate round trip —
+    strictly worse than before. The fetch itself has to be skipped.
+    """
+    client = StageFixtureClient()
+    calls = {"n": 0}
+    original = client.async_get_clients
+
+    async def counted_clients() -> Any:
+        calls["n"] += 1
+        return await original()
+
+    client.async_get_clients = counted_clients  # type: ignore[method-assign]
+
+    coordinator = _coordinator(client)
+    coordinator.needs_client_data = False
+    data = await _updated_data(coordinator)
+
+    assert calls["n"] == 0
+    # The payload must still be well-formed. ``show/ip/neighbour`` is a much
+    # smaller request and is still made, so ARP-discovered hosts remain — the
+    # point is that the large hotspot host list is not fetched.
+    assert isinstance(data["clients_by_mac"], dict)
+    assert isinstance(data["online_clients"], set)

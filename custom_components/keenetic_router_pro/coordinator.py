@@ -266,6 +266,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             first_refresh=self.data is None,
             refresh_count=self._refresh_count,
         )
+        # Skipping ``show/ip/hotspot`` in the batch tree only helps if the
+        # per-domain client fetch is skipped with it — otherwise it just
+        # becomes a separate round trip, which is strictly worse.
+        needs_clients = getattr(self, "needs_client_data", True)
         # A confirming refresh after a router write must actually re-read the
         # tier-gated data the write entity displays, not republish the cached
         # snapshot. Consumed at the end of a successful tick (see below): a
@@ -328,9 +332,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # in the ``finally`` block below.
         try:
             if self.client._rci_batch_supported is not False:
-                batch_tree = build_batch_tree(
-                    plan, needs_clients=getattr(self, "needs_client_data", True)
-                )
+                batch_tree = build_batch_tree(plan, needs_clients=needs_clients)
                 try:
                     await self.client.prefetch_tick(batch_tree)
                 except asyncio.CancelledError:
@@ -369,7 +371,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _bounded(self.client.async_get_current_version_info()) if very_slow_refresh else _resolve(_cached_version),
                 _bounded(self.client.async_get_available_version_info()) if update_check_refresh else _resolve(_cached_version_available),
                 _bounded(self.client.async_get_interfaces()),
-                _bounded(self.client.async_get_clients()),
+                _bounded(self.client.async_get_clients()) if needs_clients else _resolve([]),
                 _bounded(self.client.async_get_ip_neighbours()),
                 _bounded(self.client.async_get_host_policies()) if host_policies_refresh else _resolve(_prev.get("host_policies", {})),
                 _bounded(self.client.async_get_policies()) if very_slow_refresh else _resolve(_prev.get("policies", {})),
@@ -839,6 +841,12 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # restore the normal fast poll cadence.
             if getattr(self, "_critical_fail_backoff_count", 0):
                 self._critical_fail_backoff_count = 0
+                # An outage is not part of the idle fingerprint, so a router
+                # that returns to exactly the state it left would otherwise
+                # stay stretched right through a flapping link. Recovery
+                # always earns at least one fast tick.
+                self._idle_streak = 0
+                self._idle_fingerprint = None
 
             # A tick counts as idle only when the topology is unchanged AND
             # every WAN is quantized to zero throughput, so an unattended
