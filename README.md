@@ -39,7 +39,19 @@ An actively maintained, hardened fork of the original Keenetic Router Pro integr
   totals reuse already-fetched client data, and interface stats are polled
   only for interfaces that back enabled entities. On KeeneticOS 5.x the
   per-tick reads are batched into a single composite RCI request,
-  cutting HTTP round-trips by ~10×.
+  cutting HTTP round-trips by ~10×. The firmware update check asks Keenetic's
+  update service once a day rather than every few minutes.
+- **Gentle on your Home Assistant database.** Entities never publish
+  attributes that change on every poll — no monotonic counters, router
+  timestamps or nested payload snapshots — because Home Assistant records a new
+  history row whenever the state *or any attribute* changes. Where a value is
+  worth keeping it gets its own entity instead. Router gauges are published on
+  a slower cadence than they are polled, and percentages are whole numbers, so
+  they stop writing a row for every tenth of a percent. On a three-router
+  install this cut the integration's recorder writes by roughly a third.
+- **No third-party dependencies.** The integration installs nothing into your
+  Home Assistant environment (upstream pulls in `icmplib`, `pyqrcode` and
+  `pypng`).
 - **Better WAN and VPN visibility.** Per-uplink devices expose status,
   enabled state, role, public IP, uptime, counters and throughput. VLAN WAN
   interfaces and IPsec crypto-map throughput are handled, and VPN controls are
@@ -68,6 +80,12 @@ An actively maintained, hardened fork of the original Keenetic Router Pro integr
 - **USB storage polling removed** — this required frequent polling of optional components that may not be present, adding load and noise.
 - **English only** — the upstream shipped mixed-language source comments and non-English translations. Everything here is English.
 - **HACS source download** — no release ZIP assets required; installs directly from the repository archive.
+
+### Upstream features not carried over
+
+- **Per-client bandwidth limit** (upstream 1.3.8) — the `number` entity that
+  writes `ip traffic-shape host <mac> rate` to the router is not implemented
+  here. Open an issue if you want it.
 
 ## Features
 
