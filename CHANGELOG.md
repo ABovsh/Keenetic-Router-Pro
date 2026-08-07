@@ -8,7 +8,7 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
-## 1.7.78
+## 1.8.0
 
 ### ⚠️ Breaking
 

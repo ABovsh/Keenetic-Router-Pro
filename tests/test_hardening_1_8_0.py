@@ -1,4 +1,4 @@
-"""Hardening tests for the 1.7.78 audit round.
+"""Hardening tests for the 1.8.0 audit round.
 
 A. Attribute stability — HA's recorder only skips a write when *both* state
    and ``extra_state_attributes`` are unchanged between polls. Several
