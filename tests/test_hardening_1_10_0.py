@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import sys
 import types
+from contextlib import contextmanager
 from types import SimpleNamespace
 from typing import Any
 
@@ -25,6 +26,25 @@ from custom_components.keenetic_router_pro.coordinator_parts.refresh import (
     refresh_plan,
 )
 from custom_components.keenetic_router_pro.utils import apply_relative_deadband
+
+@contextmanager
+def _patched_registries(**modules):
+    """Swap registry modules in, then put the originals BACK.
+
+    Popping them instead would delete conftest's own stubs and break every
+    later test in the session — which is exactly what happened first time.
+    """
+    saved = {name: sys.modules.get(name) for name in modules}
+    sys.modules.update(modules)
+    try:
+        yield
+    finally:
+        for name, original in saved.items():
+            if original is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = original
+
 
 MAC = "aa:bb:cc:dd:ee:ff"
 
@@ -438,11 +458,8 @@ def test_untracking_a_client_removes_its_entities() -> None:
     er_mod = types.ModuleType("homeassistant.helpers.entity_registry")
     er_mod.async_get = lambda _hass: registry
     er_mod.async_entries_for_config_entry = lambda _reg, _eid: entries
-    sys.modules["homeassistant.helpers.entity_registry"] = er_mod
-    try:
+    with _patched_registries(**{"homeassistant.helpers.entity_registry": er_mod}):
         _async_prune_client_entities(None, entry)
-    finally:
-        sys.modules.pop("homeassistant.helpers.entity_registry", None)
 
     assert "sensor.gone_ip" in removed
     # A client that is still tracked, and unrelated entities, must survive.
@@ -587,13 +604,13 @@ def test_stale_devices_with_no_entities_are_removed() -> None:
         [SimpleNamespace(entity_id="sensor.x")] if device_id == "dev_live" else []
     )
 
-    sys.modules["homeassistant.helpers.device_registry"] = dr_mod
-    sys.modules["homeassistant.helpers.entity_registry"] = er_mod
-    try:
+    with _patched_registries(
+        **{
+            "homeassistant.helpers.device_registry": dr_mod,
+            "homeassistant.helpers.entity_registry": er_mod,
+        }
+    ):
         _async_remove_stale_devices(None, SimpleNamespace(entry_id="e1"))
-    finally:
-        sys.modules.pop("homeassistant.helpers.device_registry", None)
-        sys.modules.pop("homeassistant.helpers.entity_registry", None)
 
     assert removed == ["dev_stale"]
 
@@ -625,13 +642,86 @@ def test_stale_device_sweep_counts_disabled_entities_as_alive() -> None:
     er_mod.async_get = lambda _hass: object()
     er_mod.async_entries_for_device = _entries_for_device
 
-    sys.modules["homeassistant.helpers.device_registry"] = dr_mod
-    sys.modules["homeassistant.helpers.entity_registry"] = er_mod
-    try:
+    with _patched_registries(
+        **{
+            "homeassistant.helpers.device_registry": dr_mod,
+            "homeassistant.helpers.entity_registry": er_mod,
+        }
+    ):
         _async_remove_stale_devices(None, SimpleNamespace(entry_id="e1"))
-    finally:
-        sys.modules.pop("homeassistant.helpers.device_registry", None)
-        sys.modules.pop("homeassistant.helpers.entity_registry", None)
 
     assert seen["include_disabled"] is True
     assert removed == []
+
+
+def test_obsolete_interface_switches_are_pruned_and_the_rest_re_pointed() -> None:
+    """Disabled entities are never re-added, so they never fix themselves.
+
+    1.10.0 registered one switch per interface, each on its own device. Those
+    entities are all disabled, which means the platform never touches them
+    again — the stale device link persists forever unless setup rewrites it.
+    """
+    from custom_components.keenetic_router_pro import _async_prune_interface_switches
+
+    removed: list[str] = []
+    repointed: list[tuple] = []
+
+    entries = [
+        SimpleNamespace(
+            entity_id="switch.ap5",
+            unique_id="e1_interface_WifiMaster0/AccessPoint5_enabled",
+            domain="switch",
+            device_id="dev_ap5",
+            disabled_by="integration",
+        ),
+        SimpleNamespace(
+            entity_id="switch.port1",
+            unique_id="e1_interface_GigabitEthernet1_enabled",
+            domain="switch",
+            device_id="dev_port1",
+            disabled_by="integration",
+        ),
+        SimpleNamespace(
+            entity_id="sensor.cpu",
+            unique_id="e1_cpu_load",
+            domain="sensor",
+            device_id="dev_router",
+            disabled_by=None,
+        ),
+    ]
+
+    class _Registry:
+        def async_remove(self, entity_id):
+            removed.append(entity_id)
+
+        def async_update_entity(self, entity_id, **kwargs):
+            repointed.append((entity_id, kwargs.get("device_id")))
+
+    er_mod = types.ModuleType("homeassistant.helpers.entity_registry")
+    er_mod.async_get = lambda _hass: _Registry()
+    er_mod.async_entries_for_config_entry = lambda _reg, _eid: entries
+    dr_mod = types.ModuleType("homeassistant.helpers.device_registry")
+    dr_mod.async_get = lambda _hass: SimpleNamespace(
+        async_get_device=lambda identifiers: SimpleNamespace(id="dev_router")
+    )
+
+    coordinator = SimpleNamespace(
+        data={
+            "interfaces": {
+                "WifiMaster0/AccessPoint5": {"type": "AccessPoint"},
+                "GigabitEthernet1": {"type": "GigabitEthernet"},
+            }
+        }
+    )
+    entry = SimpleNamespace(entry_id="e1", data={}, options={})
+
+    with _patched_registries(
+        **{
+            "homeassistant.helpers.entity_registry": er_mod,
+            "homeassistant.helpers.device_registry": dr_mod,
+        }
+    ):
+        _async_prune_interface_switches(None, entry, coordinator)
+
+    assert removed == ["switch.ap5"]
+    assert repointed == [("switch.port1", "dev_router")]

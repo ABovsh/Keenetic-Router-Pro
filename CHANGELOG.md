@@ -8,7 +8,7 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
-## 1.10.1
+## 1.10.2
 
 ### 🐛 Fixed
 
@@ -19,6 +19,10 @@ git log.
   port. The switch is now offered only for physical Ethernet ports, and it
   lives on the router device instead of creating one of its own. Wi-Fi networks
   already had their own switches.
+- The switches 1.10.0 had already registered are cleaned up on startup too: the
+  ones that should never have existed are removed, and the port switches move
+  onto the router device. They are disabled entities, so nothing would have
+  touched them again on its own.
 - Devices left behind with no entities at all are now cleaned up on startup,
   and any that remain can be deleted from the UI. These accumulate when a
   phone rotates its MAC address, or from older versions that named mesh and

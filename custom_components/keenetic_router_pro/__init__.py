@@ -125,6 +125,55 @@ def _needs_client_data(entry: ConfigEntry) -> bool:
 
 
 @callback
+def _async_prune_interface_switches(
+    hass: HomeAssistant, entry: ConfigEntry, coordinator: KeeneticCoordinator
+) -> None:
+    """Clean up the per-interface enable switches 1.10.0 created too many of.
+
+    That release offered a switch for every interface the router reports, each
+    on a device of its own, which added dozens of empty-looking devices to the
+    UI. These entities are disabled by default, and a disabled entity is never
+    added to its platform again — so nothing rewrites their device link and
+    they cannot fix themselves. Setup has to do it: drop the ones that should
+    never have existed, and move the survivors onto the router device.
+    """
+    try:
+        er = importlib.import_module("homeassistant.helpers.entity_registry")
+    except ImportError:
+        return
+    from .switch import is_interface_switchable
+
+    interfaces = (getattr(coordinator, "data", None) or {}).get("interfaces") or {}
+    if not isinstance(interfaces, dict):
+        interfaces = {}
+
+    entries_for = getattr(er, "async_entries_for_config_entry", None)
+    if entries_for is None:
+        return
+
+    registry = er.async_get(hass)
+    router_device_id = _router_device_id(hass, entry)
+    prefix = f"{entry.entry_id}_interface_"
+    suffix = "_enabled"
+
+    for registry_entry in list(entries_for(registry, entry.entry_id)):
+        unique_id = getattr(registry_entry, "unique_id", "") or ""
+        if not unique_id.startswith(prefix) or not unique_id.endswith(suffix):
+            continue
+        iface_id = unique_id[len(prefix) : -len(suffix)]
+        iface = interfaces.get(iface_id)
+        iface_type = iface.get("type") if isinstance(iface, dict) else None
+        if not is_interface_switchable(iface_id, iface_type):
+            registry.async_remove(registry_entry.entity_id)
+        elif router_device_id and registry_entry.device_id != router_device_id:
+            # Survivors keep their entity id and the user's enable choice; only
+            # the device they hang off changes.
+            registry.async_update_entity(
+                registry_entry.entity_id, device_id=router_device_id
+            )
+
+
+@callback
 def _async_remove_stale_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Delete device rows this entry no longer has a single entity for.
 
@@ -145,10 +194,15 @@ def _async_remove_stale_devices(hass: HomeAssistant, entry: ConfigEntry) -> None
     except ImportError:
         return
 
+    devices_for = getattr(dr, "async_entries_for_config_entry", None)
+    entities_for = getattr(er, "async_entries_for_device", None)
+    if devices_for is None or entities_for is None:
+        return
+
     device_registry = dr.async_get(hass)
     entity_registry = er.async_get(hass)
-    for device in list(dr.async_entries_for_config_entry(device_registry, entry.entry_id)):
-        entities = er.async_entries_for_device(
+    for device in list(devices_for(device_registry, entry.entry_id)):
+        entities = entities_for(
             entity_registry, device.id, include_disabled_entities=True
         )
         if not entities:
@@ -168,7 +222,10 @@ async def async_remove_config_entry_device(
         er = importlib.import_module("homeassistant.helpers.entity_registry")
     except ImportError:
         return False
-    entities = er.async_entries_for_device(
+    entities_for = getattr(er, "async_entries_for_device", None)
+    if entities_for is None:
+        return False
+    entities = entities_for(
         er.async_get(hass), device.id, include_disabled_entities=True
     )
     return not entities
@@ -458,6 +515,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     _async_prune_client_entities(hass, entry)
+    _async_prune_interface_switches(hass, entry, coordinator)
 
     _async_update_insecure_http_issue(hass, entry, host, use_ssl)
 
