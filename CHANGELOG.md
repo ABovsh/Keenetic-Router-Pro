@@ -8,7 +8,7 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
-## 1.10.1
+## 1.10.2
 
 ### ⚠️ Breaking
 
@@ -56,6 +56,14 @@ git log.
   poll failed, which is a common sequence right after a link changes.
 - Recovering from a router outage now always resumes fast polling, instead of
   potentially staying on the stretched idle interval through a flapping link.
+- **WAN Downtime** recorded nothing during the worst kind of outage — the one
+  where the router itself is unreachable — because the last known reading still
+  named a working connection. It now holds its count through unreachable polls
+  instead of treating them as a recovery.
+- Removing a device from the tracked-client list now removes its sensors, which
+  previously stayed behind permanently as unavailable entities.
+- The DNS proxy failed-request counter could stop updating if the router ever
+  reported an out-of-range value.
 
 ## 1.9.1
 

@@ -11,6 +11,7 @@ from homeassistant.const import EntityCategory
 from ..const import LINK_STATE_DOWN
 from ..coordinator import KeeneticCoordinator
 from ..entity import ControllerEntity
+from ..utils import coerce_int
 
 
 class KeeneticDnsProxyStatusSensor(ControllerEntity, SensorEntity):
@@ -90,7 +91,6 @@ class KeeneticDnsProxyFailedRequestsSensor(ControllerEntity, SensorEntity):
         value = dns_proxy.get("failed_requests")
         if value is None:
             return None
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
+        # coerce_int also catches OverflowError, which int(float("inf"))
+        # raises — every other counter here already goes through it.
+        return coerce_int(value, None)

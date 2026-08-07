@@ -668,6 +668,13 @@ class KeeneticWanDowntimeSensor(ControllerEntity, SensorEntity, RestoreEntity):
         return int(self._seconds)
 
     def _handle_coordinator_update(self) -> None:
+        if not self.coordinator.last_update_success:
+            # A failed tick leaves the PREVIOUS payload in place, which still
+            # names a working WAN. Reading that as "recovered" meant the worst
+            # outages — the router itself unreachable — recorded zero downtime.
+            # We genuinely do not know the WAN state here, so hold everything.
+            super()._handle_coordinator_update()
+            return
         now = self._now()
         down = not (self.coordinator.data or {}).get("active_wan")
         if down:

@@ -303,6 +303,24 @@ def _async_prune_client_entities(hass: HomeAssistant, entry: ConfigEntry) -> Non
             if entity_id is not None:
                 registry.async_remove(entity_id)
 
+    # The loop above is driven by the CURRENT config, so it never visits a MAC
+    # the user has removed from the tracked list — precisely the case that
+    # strands the most entities. Sweep the registry for client entities whose
+    # MAC is no longer tracked at all.
+    tracked = {mac for mac, _label, _ip in iter_tracked_clients(entry)}
+    prefix = f"{entry.entry_id}_client_"
+    entries_for = getattr(er, "async_entries_for_config_entry", None)
+    if entries_for is not None:
+        for registry_entry in list(entries_for(registry, entry.entry_id)):
+            unique_id = getattr(registry_entry, "unique_id", "") or ""
+            if not unique_id.startswith(prefix):
+                continue
+            # unique_id is "<entry>_client_<mac>_<suffix>" and a MAC contains
+            # colons, not underscores, so the MAC is the next segment.
+            mac = unique_id[len(prefix) :].split("_", 1)[0]
+            if mac and mac not in tracked:
+                registry.async_remove(registry_entry.entity_id)
+
     # The controller-level counts go the same way once the client tree is no
     # longer fetched at all, or they linger as orphans the user cannot delete.
     if not _needs_client_data(entry):

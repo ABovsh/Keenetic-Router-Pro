@@ -12,6 +12,8 @@ Three groups here:
 
 from __future__ import annotations
 
+import sys
+import types
 from types import SimpleNamespace
 from typing import Any
 
@@ -439,3 +441,109 @@ def test_failover_count_ignores_a_tick_that_failed() -> None:
     coordinator.last_update_success = False
     sensor._handle_coordinator_update()
     assert sensor.native_value == 1
+
+
+def test_untracking_a_client_removes_its_entities() -> None:
+    """The suffix sweep is driven by the CURRENT config, so a MAC removed from
+    the tracked list was never visited at all — its entities stayed registered
+    as unavailable forever, which is the exact thing this prune exists to stop.
+    """
+    from custom_components.keenetic_router_pro import _async_prune_client_entities
+
+    gone = "11:22:33:44:55:66"
+    kept = "aa:bb:cc:dd:ee:ff"
+
+    class _Entry(SimpleNamespace):
+        pass
+
+    entry = _Entry(
+        entry_id="e1",
+        data={"tracked_clients": [{"mac": kept, "name": "Kept"}]},
+        options={},
+    )
+
+    removed: list[str] = []
+
+    class _Registry:
+        def __init__(self) -> None:
+            self.entities = {
+                "sensor.gone_ip": f"e1_client_{gone}_ip",
+                "sensor.kept_ip": f"e1_client_{kept}_ip",
+                "sensor.other": "e1_cpu_load",
+            }
+
+        def async_get_entity_id(self, _domain, _platform, unique_id):
+            for eid, uid in self.entities.items():
+                if uid == unique_id:
+                    return eid
+            return None
+
+        def async_remove(self, entity_id):
+            removed.append(entity_id)
+
+    registry = _Registry()
+
+    entries = [
+        SimpleNamespace(entity_id=eid, unique_id=uid, domain="sensor")
+        for eid, uid in registry.entities.items()
+    ]
+    er_mod = types.ModuleType("homeassistant.helpers.entity_registry")
+    er_mod.async_get = lambda _hass: registry
+    er_mod.async_entries_for_config_entry = lambda _reg, _eid: entries
+    sys.modules["homeassistant.helpers.entity_registry"] = er_mod
+    try:
+        _async_prune_client_entities(None, entry)
+    finally:
+        sys.modules.pop("homeassistant.helpers.entity_registry", None)
+
+    assert "sensor.gone_ip" in removed
+    # A client that is still tracked, and unrelated entities, must survive.
+    assert "sensor.kept_ip" not in removed
+    assert "sensor.other" not in removed
+
+
+def test_dns_failed_requests_survives_a_non_finite_firmware_value() -> None:
+    """int(inf) raises OverflowError, which the local except tuple missed.
+
+    Every other counter in the codebase routes through coerce_int, which
+    already covers this; these two sensors hand-rolled it and diverged.
+    """
+    from custom_components.keenetic_router_pro.sensor.dns import (
+        KeeneticDnsProxyFailedRequestsSensor,
+    )
+
+    coordinator = _coordinator({"dns_proxy": {"failed_requests": float("inf")}})
+    sensor = KeeneticDnsProxyFailedRequestsSensor(coordinator, _entry())
+    assert sensor.native_value is None
+
+
+def test_downtime_does_not_close_an_outage_on_an_unreachable_router() -> None:
+    """A failed tick leaves the PREVIOUS payload in place.
+
+    That payload still names an active WAN, so the sensor read the router
+    going away as the WAN coming back and stopped accruing — the worst
+    outages, where the router itself is unreachable, recorded zero.
+    """
+    from custom_components.keenetic_router_pro.sensor.network import (
+        KeeneticWanDowntimeSensor,
+    )
+
+    coordinator = _coordinator({"active_wan": None})
+    sensor = KeeneticWanDowntimeSensor(coordinator, _entry())
+    sensor.async_write_ha_state = lambda: None
+
+    # The failed tick reads no clock at all — it holds state untouched.
+    clock = iter([100.0, 220.0])
+    sensor._now = lambda: next(clock)
+
+    sensor._handle_coordinator_update()  # t=100, outage begins
+
+    # Router drops off entirely: stale payload claims a working WAN.
+    coordinator.data["active_wan"] = "ISP"
+    coordinator.last_update_success = False
+    sensor._handle_coordinator_update()  # must not end the outage
+
+    coordinator.last_update_success = True
+    coordinator.data["active_wan"] = None
+    sensor._handle_coordinator_update()  # t=220, still down
+    assert sensor.native_value == 120

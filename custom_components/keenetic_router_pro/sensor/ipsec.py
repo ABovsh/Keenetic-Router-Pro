@@ -24,6 +24,7 @@ from homeassistant.const import EntityCategory
 
 from ..coordinator import KeeneticCoordinator
 from ..entity import ControllerEntity
+from ..utils import coerce_int
 
 
 class KeeneticIpsecViciOomTotalSensor(ControllerEntity, SensorEntity):
@@ -49,10 +50,7 @@ class KeeneticIpsecViciOomTotalSensor(ControllerEntity, SensorEntity):
         value = diag.get("oom_total")
         if value is None:
             return None
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return None
+        return coerce_int(value, None)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
