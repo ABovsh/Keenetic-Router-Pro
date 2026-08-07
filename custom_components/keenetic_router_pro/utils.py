@@ -66,8 +66,12 @@ def coerce_seconds(value: Any, default: int | None = 0) -> int | None:
         return default
 
 
-def coerce_int(value: Any, default: int = 0) -> int:
-    """Return an int from loosely typed Keenetic RCI values."""
+def coerce_int(value: Any, default: int | None = 0) -> int | None:
+    """Return an int from loosely typed Keenetic RCI values.
+
+    Callers that need "unavailable" rather than a fallback number pass
+    ``default=None`` — the sensors reading firmware counters do exactly that.
+    """
     try:
         return int(value)
     except (OverflowError, TypeError, ValueError):
