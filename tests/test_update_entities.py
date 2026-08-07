@@ -27,7 +27,11 @@ class _Coordinator:
         self.data = data
         self.client = SimpleNamespace(_host=TEST_HOST, _ssl=False)
         self.refreshes = 0
+        self.update_checks = 0
         self.on_refresh = None
+
+    def request_update_check(self) -> None:
+        self.update_checks += 1
 
     def async_add_listener(self, *_args: Any, **_kwargs: Any) -> Any:
         return lambda: None

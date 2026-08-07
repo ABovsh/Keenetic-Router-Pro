@@ -252,7 +252,11 @@ def test_dns_and_ipsec_diagnostic_sensors_pin_icons_and_bad_counts() -> None:
     dns = KeeneticDnsProxyStatusSensor(coordinator, entry)
     assert dns.native_value == "degraded"
     assert dns.icon == "mdi:dns-outline"
-    assert dns.extra_state_attributes["failed_requests"] == "7"
+    # failed_requests/requests_sent/active_dns_server_count/proxies were
+    # dropped from the status sensor attrs (they churned every poll, and
+    # failed_requests has its own dedicated sensor below).
+    assert "failed_requests" not in dns.extra_state_attributes
+    assert dns.extra_state_attributes["client_path_uses_doh"] is True
     assert KeeneticDnsProxyFailedRequestsSensor(coordinator, entry).native_value == 7
 
     data_with_total = dict(data)

@@ -173,23 +173,21 @@ class KeeneticWanConnectedSensor(WanEntity, BinarySensorEntity):
         #   - last check time
         pc = wan.get("ping_check")
         if pc:
-            targets = []
-            hosts = pc.get("check_hosts") or []
-            if hosts:
-                targets.extend(hosts)
-            addrs = pc.get("check_addresses") or []
-            if addrs:
-                targets.extend(addrs)
+            # Only the configured host NAMES — the router re-resolves them to
+            # rotating addresses on every poll, and a changing attribute makes
+            # HA write a recorder row on every tick even though the sensor
+            # state never moves.
+            targets = list(pc.get("check_hosts") or [])
             if targets:
-                attrs["check_targets"] = targets
+                attrs["check_hosts"] = targets
             if pc.get("check_port") is not None:
                 attrs["check_port"] = pc.get("check_port")
             if pc.get("check_mode"):
                 attrs["check_mode"] = pc.get("check_mode")
             if pc.get("profile"):
                 attrs["check_profile"] = pc.get("profile")
-            if pc.get("success_count") is not None:
-                attrs["success_count"] = pc.get("success_count")
+            # ``success_count`` is deliberately NOT published: it is a
+            # monotonic counter, so it would change every poll.
             if pc.get("fail_count") is not None:
                 attrs["fail_count"] = pc.get("fail_count")
             if pc.get("max_fails") is not None:
@@ -223,9 +221,6 @@ class KeeneticWanConnectedSensor(WanEntity, BinarySensorEntity):
         layers = wan.get("summary_layers") or {}
         if layers:
             attrs["summary_layers"] = layers
-        last_update = getattr(self.coordinator, "last_update_success_time", None)
-        if last_update is not None:
-            attrs["last_check"] = last_update.isoformat()
         return attrs
 
 
@@ -329,12 +324,11 @@ class KeeneticMeshNodeSensor(MeshEntity, BinarySensorEntity):
             "ip": node.get("ip"),
             "model": node.get("model"),
             "mode": node.get("mode"),
-            "uptime": node.get("uptime"),
-            "cpuload": node.get("cpuload"),
-            "memory": node.get("memory"),
+            # uptime / cpuload / memory / associations move every poll and each
+            # already has its own dedicated mesh sensor — publishing them here
+            # too forced a recorder row on every tick.
             "firmware": node.get("firmware"),
             "firmware_available": node.get("firmware_available"),
-            "associations": node.get("associations"),
             "rci_errors": node.get("rci_errors"),
         }
 
@@ -508,6 +502,6 @@ class KeeneticCryptoMapConnectedSensor(CryptoMapEntity, BinarySensorEntity):
             "remote_peer": cmap.get("remote_peer"),
             "local_endpoint": cmap.get("local_endpoint"),
             "remote_endpoint": cmap.get("remote_endpoint"),
-            "rx_bytes": cmap.get("rx_bytes"),
-            "tx_bytes": cmap.get("tx_bytes"),
+            # Byte counters live on the dedicated RX/TX Bytes sensors; as
+            # attributes they only forced a recorder row per poll.
         }

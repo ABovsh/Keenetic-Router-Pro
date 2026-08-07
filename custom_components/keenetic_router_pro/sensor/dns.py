@@ -54,10 +54,8 @@ class KeeneticDnsProxyStatusSensor(ControllerEntity, SensorEntity):
             "proxy_count": dns_proxy.get("proxy_count"),
             "doh_server_count": dns_proxy.get("doh_server_count"),
             "dns_server_count": dns_proxy.get("dns_server_count"),
-            "active_dns_server_count": dns_proxy.get("active_dns_server_count"),
-            "requests_sent": dns_proxy.get("requests_sent"),
-            "failed_requests": dns_proxy.get("failed_requests"),
-            "proxies": dns_proxy.get("proxies"),
+            # requests_sent / active_dns_server_count / the proxies payload
+            # move every poll; failed_requests has its own sensor.
         }
 
 

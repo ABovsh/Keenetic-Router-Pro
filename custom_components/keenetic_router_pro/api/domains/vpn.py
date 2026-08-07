@@ -239,6 +239,10 @@ class VpnMixin:
         timestamps so the coordinator can build a monotonic OOM counter
         with timestamp dedup.
         """
+        if self._ipsec_diagnostics_supported is False:
+            # Router has no log access — latched off after both read paths
+            # returned "endpoint missing" (mirrors the other capability caches).
+            return {}
         # Larger window than 200: at the post-1.7.45 cadence the router
         # generates ~1 OOM per 10 min, and we poll every 5 min — so a
         # 1000-line window comfortably covers two polling intervals
@@ -265,6 +269,8 @@ class VpnMixin:
             raise
         except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError) as err:
             _LOGGER.debug("Error getting IPsec diagnostics: %s", err)
+            if _is_endpoint_missing(err):
+                self._ipsec_diagnostics_supported = False
             return {}
 
     @classmethod

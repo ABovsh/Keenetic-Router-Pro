@@ -522,14 +522,11 @@ class _WanThroughputBase(_WanSensorBase):
         wan = self._wan
         if not wan:
             return None
-        return {
-            "rxbytes": wan.get("rx_bytes"),
-            "txbytes": wan.get("tx_bytes"),
-            "rxspeed": wan.get("rx_speed_raw"),
-            "txspeed": wan.get("tx_speed_raw"),
-            "stats_interface": wan.get("stats_interface"),
-            "stats_timestamp": wan.get("stats_timestamp"),
-        }
+        # Only the stable source-interface name. The byte counters have their
+        # own sensors, rx/tx speed duplicate this entity's own state, and the
+        # router stats timestamp moves every poll — as attributes they made HA
+        # write a recorder row on every tick even for an idle link.
+        return {"stats_interface": wan.get("stats_interface")}
 
 
 class KeeneticWanRxThroughputSensor(_WanThroughputBase):

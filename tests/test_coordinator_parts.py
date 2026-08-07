@@ -7,8 +7,6 @@ from datetime import datetime
 
 import pytest
 
-from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.keenetic_router_pro.api import (
     KeeneticApiError,
@@ -27,7 +25,6 @@ from custom_components.keenetic_router_pro.coordinator_parts.enrichment import (
 from custom_components.keenetic_router_pro.coordinator_parts.fetching import (
     CRITICAL_FETCH_GRACE_TICKS,
     FetchFailure,
-    critical_failures_to_exception,
     evaluate_critical_failures,
     next_backoff_interval,
     ok_or_default,
@@ -185,6 +182,7 @@ def test_refresh_plan_first_refresh_runs_all_tiers() -> None:
         slow_refresh=True,
         very_slow_refresh=True,
         ipsec_status_refresh=True,
+        update_check_refresh=True,
     )
 
 
@@ -215,16 +213,19 @@ def test_refresh_plan_runtime_efficiency_tiers(
 
 def test_build_batch_tree_includes_only_active_tier_paths() -> None:
     fast = build_batch_tree(
-        RefreshPlan(False, False, False, False, False)
+        RefreshPlan(False, False, False, False, False, False)
     )
     medium = build_batch_tree(
-        RefreshPlan(False, True, False, False, False)
+        RefreshPlan(False, True, False, False, False, False)
     )
     slow = build_batch_tree(
-        RefreshPlan(False, True, True, False, True)
+        RefreshPlan(False, True, True, False, True, False)
     )
     very_slow = build_batch_tree(
-        RefreshPlan(False, True, True, True, True)
+        RefreshPlan(False, True, True, True, True, False)
+    )
+    update_check = build_batch_tree(
+        RefreshPlan(False, True, True, True, True, True)
     )
 
     assert fast == {
@@ -240,11 +241,12 @@ def test_build_batch_tree_includes_only_active_tier_paths() -> None:
     assert "ipsec" not in medium["show"]
     assert "ipsec" in slow["show"]
     assert "components" not in slow
-    assert very_slow["components"] == {"check-update": {}}
+    assert "components" not in very_slow
     assert "ndns" in very_slow["show"]
     assert "dns-proxy" in very_slow["show"]
+    assert update_check["components"] == {"check-update": {}}
     # show/ip/hotspot is prefetched on every tick (fast, medium, slow, very-slow).
-    for tree in (fast, medium, slow, very_slow):
+    for tree in (fast, medium, slow, very_slow, update_check):
         assert "hotspot" in tree["show"]["ip"]
 
 
@@ -261,27 +263,6 @@ def test_ok_or_default_records_non_silent_fetch_failure() -> None:
 
     assert ok_or_default("clients", error, [], failed_fetches) == []
     assert failed_fetches == [FetchFailure("clients", error)]
-
-
-def test_critical_failures_map_auth_to_config_entry_auth_failed() -> None:
-    """Auth failures on critical fetches should start HA reauth."""
-    failures = [FetchFailure("system_info", KeeneticAuthError("bad auth"))]
-
-    with pytest.raises(ConfigEntryAuthFailed):
-        critical_failures_to_exception(failures)
-
-
-def test_critical_failures_map_non_auth_to_update_failed() -> None:
-    """Non-auth critical failures should mark the coordinator refresh failed."""
-    failures = [FetchFailure("interfaces", RuntimeError("boom"))]
-
-    with pytest.raises(UpdateFailed):
-        critical_failures_to_exception(failures)
-
-
-def test_non_critical_failures_do_not_raise() -> None:
-    """Optional endpoint failures remain fallback-only."""
-    critical_failures_to_exception([FetchFailure("dns_proxy", RuntimeError("boom"))])
 
 
 def test_evaluate_critical_failures_ok_resets_streak() -> None:

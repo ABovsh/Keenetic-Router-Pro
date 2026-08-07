@@ -426,7 +426,11 @@ async def test_coordinator_very_slow_tick_refreshes_diagnostics_and_update_data(
     await _updated_data(coordinator)
 
     assert client.calls.get("current_version", 0) == 1
-    assert client.calls.get("available_version", 0) == 1
+    # refresh_count=30 is a very-slow tick but not an update-check tick
+    # (that only fires on first refresh or every 2880 ticks), so the
+    # available-version lookup is reused from the previous tick instead
+    # of being re-fetched.
+    assert client.calls.get("available_version", 0) == 0
     assert client.calls.get("policies", 0) == 1
     assert client.calls.get("ndns", 0) == 1
     assert client.calls.get("dns_proxy", 0) == 1

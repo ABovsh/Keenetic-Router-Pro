@@ -77,30 +77,19 @@ class KeeneticMeshSystemStateSensor(ControllerEntity, SensorEntity):
                 "total_nodes": 0,
                 "connected_nodes": 0,
                 "disconnected_nodes": 0,
-                "nodes": [],
             }
 
         connected = 0
         disconnected = 0
-        nodes_detail = []
 
+        # No per-node payload here: every field it carried (ip, associations,
+        # firmware) has its own mesh entity, and the nested list changed on
+        # every poll, forcing a recorder row each tick.
         for node in valid_nodes:
-            is_connected = node.get(FIELD_CONNECTED, False)
-            if is_connected:
+            if node.get(FIELD_CONNECTED, False):
                 connected += 1
             else:
                 disconnected += 1
-
-            nodes_detail.append({
-                "name": node.get("name") or node.get("mac", "Unknown"),
-                "mac": node.get("mac"),
-                "ip": node.get("ip"),
-                "model": node.get("model"),
-                "mode": node.get("mode"),
-                "connected": is_connected,
-                "firmware": node.get("firmware"),
-                "associations": node.get("associations", 0),
-            })
 
         total = len(valid_nodes)
         health_percent = round((connected / total) * 100, 1) if total > 0 else 0
@@ -111,7 +100,6 @@ class KeeneticMeshSystemStateSensor(ControllerEntity, SensorEntity):
             "disconnected_nodes": disconnected,
             "health_percent": health_percent,
             "state": self.native_value,
-            "nodes": nodes_detail,
         }
 
 
@@ -311,7 +299,7 @@ class KeeneticMeshFirmwareVersionSensor(MeshEntity, SensorEntity):
         if node.get("model"):
             attrs["model"] = node["model"]
         return attrs if attrs else None
-    
+
 class KeeneticMeshPortSensor(MeshEntity, SensorEntity):
     """Individual mesh node port sensor."""
     _attr_has_entity_name = True

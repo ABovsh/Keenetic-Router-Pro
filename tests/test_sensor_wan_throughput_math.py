@@ -62,13 +62,11 @@ def test_wan_throughput_sensor_converts_byte_rate_to_bit_rate() -> None:
 def test_wan_throughput_sensor_exposes_counter_sample_attributes() -> None:
     sensor = KeeneticWanRxThroughputSensor(_coordinator(), _entry(), "PPPoE0")
 
+    # rxbytes/txbytes/rxspeed/txspeed/stats_timestamp are gone: they
+    # changed on every poll and defeated recorder dedup; the native_value
+    # already carries the computed throughput.
     assert sensor.extra_state_attributes == {
-        "rxbytes": "1000",
-        "txbytes": "2000",
-        "rxspeed": "1000",
-        "txspeed": "500",
         "stats_interface": "PPPoE0",
-        "stats_timestamp": 10.0,
     }
 
 
