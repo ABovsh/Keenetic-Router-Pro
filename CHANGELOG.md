@@ -10,19 +10,18 @@ git log.
 
 ## 1.10.2
 
+### ⚠️ Breaking
+
+- **The per-interface enable switches added in 1.10.0 have been removed.** They
+  duplicated the switches that already existed for everything worth toggling —
+  Wi-Fi networks, WAN interfaces, VPN tunnels and IPsec tunnels — and because a
+  device row is created even for a disabled entity, they filled the device list
+  with dozens of entries containing nothing you could see, one for every unused
+  Wi-Fi access-point slot and switch port. They are removed from the registry
+  automatically on startup. Nothing you could previously control is lost.
+
 ### 🐛 Fixed
 
-- **Empty devices in the device list.** 1.10.0 offered an enable switch for
-  every interface the router reports, and because a device row is created even
-  for a disabled entity, that added dozens of devices containing nothing you
-  could see — one for each unused Wi-Fi access-point slot, Wi-Fi station and
-  port. The switch is now offered only for physical Ethernet ports, and it
-  lives on the router device instead of creating one of its own. Wi-Fi networks
-  already had their own switches.
-- The switches 1.10.0 had already registered are cleaned up on startup too: the
-  ones that should never have existed are removed, and the port switches move
-  onto the router device. They are disabled entities, so nothing would have
-  touched them again on its own.
 - Devices left behind with no entities at all are now cleaned up on startup,
   and any that remain can be deleted from the UI. These accumulate when a
   phone rotates its MAC address, or from older versions that named mesh and

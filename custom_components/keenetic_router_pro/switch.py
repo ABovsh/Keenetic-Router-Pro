@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .api import KeeneticClient
@@ -62,50 +61,6 @@ def _add_vpn_enabled_switches(
         )
 
 
-def _add_interface_enabled_switches(
-    entities: list[SwitchEntity],
-    coordinator: KeeneticCoordinator,
-    entry: ConfigEntry,
-    client: KeeneticClient,
-    known_wan_ids: set[str],
-    known_vpn_ids: set[str],
-    known_iface_ids: set[str],
-) -> None:
-    """Append enable switches for physical/Wi-Fi interfaces not covered above.
-
-    Default-disabled: most people never want to shut a port down from Home
-    Assistant, and the ones who do can enable the entity deliberately.
-    Bridges and the management port are excluded outright — see
-    ``is_interface_switchable``.
-    """
-    interfaces = coordinator.data.get("interfaces", {}) or {}
-    if not isinstance(interfaces, dict):
-        return
-    for iface_id, iface in interfaces.items():
-        if not isinstance(iface, dict):
-            continue
-        iface_id = str(iface_id)
-        if (
-            iface_id in known_wan_ids
-            or iface_id in known_vpn_ids
-            or iface_id in known_iface_ids
-        ):
-            continue
-        if not is_interface_switchable(iface_id, iface.get("type")):
-            continue
-        known_iface_ids.add(iface_id)
-        entities.append(
-            KeeneticInterfaceEnabledSwitch(
-                coordinator=coordinator,
-                entry=entry,
-                client=client,
-                iface_id=iface_id,
-                label=iface.get("description") or iface.get("name") or iface_id,
-                iface_type=iface.get("type"),
-            )
-        )
-
-
 def _add_crypto_map_enabled_switches(
     entities: list[SwitchEntity],
     coordinator: KeeneticCoordinator,
@@ -144,7 +99,6 @@ async def async_setup_entry(
 
     tracker = DynamicEntityTracker()
     known_wifi_ids: set[str] = set()
-    _known_iface_ids: set[str] = set()
 
     def _add_wifi_switches(target: list[SwitchEntity]) -> None:
         # Wi-Fi networks can be added on the router after setup — discover
@@ -187,15 +141,6 @@ async def async_setup_entry(
             tracker.wan_ids,
             tracker.vpn_ids,
         )
-        _add_interface_enabled_switches(
-            dynamic_entities,
-            coordinator,
-            entry,
-            client,
-            tracker.wan_ids,
-            tracker.vpn_ids,
-            _known_iface_ids,
-        )
         _add_crypto_map_enabled_switches(
             dynamic_entities,
             coordinator,
@@ -217,27 +162,6 @@ async def async_setup_entry(
         _build_dynamic_switches,
         add_initial=False,
     )
-
-
-# Only physical Ethernet ports get an enable switch.
-#
-# The first cut of this offered one for every interface the router lists, which
-# was a mistake with a very visible cost: a default-disabled entity still
-# creates its device row, so it added 71 empty devices to the UI — one per
-# unused AccessPoint slot, per WifiStation, per port. Wi-Fi already has
-# KeeneticWifiSwitch built from the wifi payload, WAN and VPN interfaces have
-# their own switches, and bridges must never be switchable at all because they
-# carry the LAN the router is managed over.
-_SWITCHABLE_TYPES = frozenset({"gigabitethernet", "fastethernet", "ethernet"})
-# GigabitEthernet0 is the management port on every Keenetic model.
-_UNSWITCHABLE_IDS = frozenset({"GigabitEthernet0", "Home", "Bridge0"})
-
-
-def is_interface_switchable(iface_id: str, iface_type: str | None) -> bool:
-    """Return True when it is safe and useful to offer an enable switch."""
-    if iface_id in _UNSWITCHABLE_IDS:
-        return False
-    return str(iface_type or "").lower() in _SWITCHABLE_TYPES
 
 
 class BaseKeeneticSwitch(ControllerEntity, SwitchEntity):
@@ -464,64 +388,4 @@ class KeeneticCryptoMapEnabledSwitch(CryptoMapEntity, SwitchEntity):
         await self._client.async_set_crypto_map_enabled(
             self._cmap_name, False
         )
-        await self.coordinator.async_request_refresh()
-
-
-class KeeneticInterfaceEnabledSwitch(ControllerEntity, SwitchEntity):
-    """Enable / disable a physical or Wi-Fi interface.
-
-    Uses the same ``interface up/down`` command the WAN and VPN switches
-    already rely on, so there is no new firmware surface here — only a wider
-    set of interfaces it is offered for.
-    """
-
-    _attr_has_entity_name = True
-    _attr_icon = "mdi:ethernet-cable"
-    _attr_entity_category = EntityCategory.CONFIG
-    _attr_entity_registry_enabled_default = False
-
-    def __init__(
-        self,
-        coordinator: KeeneticCoordinator,
-        entry: ConfigEntry,
-        client: KeeneticClient,
-        iface_id: str,
-        label: str | None = None,
-        iface_type: str | None = None,
-    ) -> None:
-        # ControllerEntity: these belong to the router itself. Giving each
-        # port its own sub-device is what produced the empty-device flood.
-        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
-        self._iface_id = iface_id
-        self._label = label or iface_id
-        self._iface_type = iface_type
-        self._client = client
-        self._attr_name = f"Port {label or iface_id} enabled"
-
-    @property
-    def unique_id(self) -> str:
-        return f"{self._entry_id}_interface_{self._iface_id}_enabled"
-
-    def _iface(self) -> dict[str, Any]:
-        interfaces = self.coordinator.data.get("interfaces", {}) or {}
-        iface = interfaces.get(self._iface_id) if isinstance(interfaces, dict) else None
-        return iface if isinstance(iface, dict) else {}
-
-    @property
-    def available(self) -> bool:
-        return bool(getattr(super(), "available", True)) and bool(self._iface())
-
-    @property
-    def is_on(self) -> bool:
-        iface = self._iface()
-        if "enabled" in iface:
-            return bool(iface["enabled"])
-        return str(iface.get("state") or "").lower() == LINK_STATE_UP
-
-    async def async_turn_on(self, **_: Any) -> None:
-        await self._client.async_set_interface_enabled(self._iface_id, True)
-        await self.coordinator.async_request_refresh()
-
-    async def async_turn_off(self, **_: Any) -> None:
-        await self._client.async_set_interface_enabled(self._iface_id, False)
         await self.coordinator.async_request_refresh()

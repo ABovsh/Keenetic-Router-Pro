@@ -358,30 +358,6 @@ async def test_diagnostics_include_a_health_block() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_interface_enable_switch_reflects_link_state() -> None:
-    from custom_components.keenetic_router_pro.switch import (
-        KeeneticInterfaceEnabledSwitch,
-    )
-
-    iface = {"type": "GigabitEthernet", "state": "up"}
-    coordinator = _coordinator({"interfaces": {"GigabitEthernet1": iface}})
-    switch = KeeneticInterfaceEnabledSwitch(
-        coordinator=coordinator,
-        entry=_entry(),
-        client=SimpleNamespace(),
-        iface_id="GigabitEthernet1",
-    )
-
-    assert switch.is_on is True
-    iface["state"] = "down"
-    assert switch.is_on is False
-    # An explicit enabled flag wins over the derived link state.
-    iface["enabled"] = True
-    assert switch.is_on is True
-    # It must stay off by default: nobody expects HA to be able to kill a port.
-    assert switch._attr_entity_registry_enabled_default is False
-
-
 # --------------------------------------------------------------------------
 # Adversarial-review fixes
 # --------------------------------------------------------------------------
@@ -519,60 +495,6 @@ def test_downtime_does_not_close_an_outage_on_an_unreachable_router() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_interface_switch_lives_on_the_router_device_not_its_own() -> None:
-    """A disabled entity still creates its device row.
-
-    Shipping one switch per interface therefore added 71 empty devices to the
-    UI — one for every unused AccessPoint slot and WifiStation the router
-    lists — even though every switch was default-disabled and invisible.
-    """
-    from custom_components.keenetic_router_pro.entity import ControllerEntity
-    from custom_components.keenetic_router_pro.switch import (
-        KeeneticInterfaceEnabledSwitch,
-    )
-
-    assert issubclass(KeeneticInterfaceEnabledSwitch, ControllerEntity)
-
-    coordinator = _coordinator(
-        {"interfaces": {"GigabitEthernet1": {"type": "GigabitEthernet", "state": "up"}}}
-    )
-    switch = KeeneticInterfaceEnabledSwitch(
-        coordinator=coordinator,
-        entry=_entry(),
-        client=SimpleNamespace(),
-        iface_id="GigabitEthernet1",
-    )
-    # The router's own identifiers — not a per-interface sub-device.
-    assert switch.device_info["identifiers"] == {
-        ("keenetic_router_pro", "entry_123")
-    }
-
-
-@pytest.mark.parametrize(
-    ("iface_id", "iface_type", "eligible"),
-    [
-        ("GigabitEthernet1", "GigabitEthernet", True),
-        ("FastEthernet0/1", "FastEthernet", True),
-        # Wi-Fi already has its own switch built from the wifi payload; adding a
-        # second one per AccessPoint slot is what produced the device flood.
-        ("WifiMaster0/AccessPoint1", "AccessPoint", False),
-        ("WifiMaster0/AccessPoint5", "AccessPoint", False),
-        ("WifiMaster1/WifiStation0", "WifiStation", False),
-        ("Bridge0", "Bridge", False),
-        ("Home", "Bridge", False),
-        ("GigabitEthernet0", "GigabitEthernet", False),  # management port
-    ],
-)
-def test_only_physical_ports_get_an_enable_switch(
-    iface_id, iface_type, eligible
-) -> None:
-    from custom_components.keenetic_router_pro.switch import (
-        is_interface_switchable,
-    )
-
-    assert is_interface_switchable(iface_id, iface_type) is eligible
-
-
 def test_stale_devices_with_no_entities_are_removed() -> None:
     """Renaming an identifier scheme orphans the OLD device row.
 
@@ -654,74 +576,33 @@ def test_stale_device_sweep_counts_disabled_entities_as_alive() -> None:
     assert removed == []
 
 
-def test_obsolete_interface_switches_are_pruned_and_the_rest_re_pointed() -> None:
-    """Disabled entities are never re-added, so they never fix themselves.
+def test_interface_enable_switches_are_removed_from_the_registry() -> None:
+    """1.10.0 shipped one per interface, each on its own device.
 
-    1.10.0 registered one switch per interface, each on its own device. Those
-    entities are all disabled, which means the platform never touches them
-    again — the stale device link persists forever unless setup rewrites it.
+    They duplicated the Wi-Fi/WAN/VPN switches that already existed and left
+    dozens of empty-looking devices behind. Disabled entities are never added
+    to their platform again, so setup has to delete them explicitly.
     """
     from custom_components.keenetic_router_pro import _async_prune_interface_switches
 
     removed: list[str] = []
-    repointed: list[tuple] = []
-
     entries = [
         SimpleNamespace(
             entity_id="switch.ap5",
             unique_id="e1_interface_WifiMaster0/AccessPoint5_enabled",
-            domain="switch",
-            device_id="dev_ap5",
-            disabled_by="integration",
         ),
-        SimpleNamespace(
-            entity_id="switch.port1",
-            unique_id="e1_interface_GigabitEthernet1_enabled",
-            domain="switch",
-            device_id="dev_port1",
-            disabled_by="integration",
-        ),
-        SimpleNamespace(
-            entity_id="sensor.cpu",
-            unique_id="e1_cpu_load",
-            domain="sensor",
-            device_id="dev_router",
-            disabled_by=None,
-        ),
+        SimpleNamespace(entity_id="switch.port1", unique_id="e1_interface_1_enabled"),
+        SimpleNamespace(entity_id="sensor.cpu", unique_id="e1_cpu_load"),
+        SimpleNamespace(entity_id="switch.wifi", unique_id="e1_wifi_WifiMaster0"),
     ]
 
-    class _Registry:
-        def async_remove(self, entity_id):
-            removed.append(entity_id)
-
-        def async_update_entity(self, entity_id, **kwargs):
-            repointed.append((entity_id, kwargs.get("device_id")))
-
     er_mod = types.ModuleType("homeassistant.helpers.entity_registry")
-    er_mod.async_get = lambda _hass: _Registry()
+    er_mod.async_get = lambda _hass: SimpleNamespace(
+        async_remove=lambda entity_id: removed.append(entity_id)
+    )
     er_mod.async_entries_for_config_entry = lambda _reg, _eid: entries
-    dr_mod = types.ModuleType("homeassistant.helpers.device_registry")
-    dr_mod.async_get = lambda _hass: SimpleNamespace(
-        async_get_device=lambda identifiers: SimpleNamespace(id="dev_router")
-    )
 
-    coordinator = SimpleNamespace(
-        data={
-            "interfaces": {
-                "WifiMaster0/AccessPoint5": {"type": "AccessPoint"},
-                "GigabitEthernet1": {"type": "GigabitEthernet"},
-            }
-        }
-    )
-    entry = SimpleNamespace(entry_id="e1", data={}, options={})
+    with _patched_registries(**{"homeassistant.helpers.entity_registry": er_mod}):
+        _async_prune_interface_switches(None, SimpleNamespace(entry_id="e1"))
 
-    with _patched_registries(
-        **{
-            "homeassistant.helpers.entity_registry": er_mod,
-            "homeassistant.helpers.device_registry": dr_mod,
-        }
-    ):
-        _async_prune_interface_switches(None, entry, coordinator)
-
-    assert removed == ["switch.ap5"]
-    assert repointed == [("switch.port1", "dev_router")]
+    assert removed == ["switch.ap5", "switch.port1"]
