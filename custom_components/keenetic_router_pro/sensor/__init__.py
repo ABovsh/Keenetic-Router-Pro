@@ -7,6 +7,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from ..const import (
+    CLIENT_SENSORS_FULL,
+    CLIENT_SENSORS_OFF,
+    CONF_CLIENT_SENSORS,
+    DEFAULT_CLIENT_SENSORS,
+)
 from ..coordinator import KeeneticCoordinator
 from ..entity_setup import DynamicEntityTracker, register_dynamic_entities
 from ..utils import iter_new_items, iter_tracked_clients
@@ -189,18 +195,31 @@ async def async_setup_entry(
             dynamic_entities.extend(_crypto_map_sensor_set(cmap_name))
         return dynamic_entities
 
-    # Per-tracked-client sensors
-    for mac, label, initial_ip in iter_tracked_clients(entry):
-        entities.append(KeeneticClientIpSensor(coordinator, entry, mac, label, initial_ip))
-        entities.append(KeeneticClientUptimeSensor(coordinator, entry, mac, label))
-        entities.append(KeeneticClientLastSeenSensor(coordinator, entry, mac, label))
-        entities.append(KeeneticClientRxSensor(coordinator, entry, mac, label))
-        entities.append(KeeneticClientTxSensor(coordinator, entry, mac, label))
-        entities.append(KeeneticClientRssiSensor(coordinator, entry, mac, label))
-        entities.append(KeeneticClientTxRateSensor(coordinator, entry, mac, label))
-        entities.append(KeeneticClientConnectionTypeSensor(coordinator, entry, mac, label))
-        entities.append(KeeneticClientWifiBandSensor(coordinator, entry, mac, label))
-        entities.append(KeeneticClientWifiModeSensor(coordinator, entry, mac, label))
+    # Per-tracked-client sensors. On a large network this family alone is most
+    # of the entity count, so the user can scale it back to presence-adjacent
+    # facts ("basic") or drop it entirely ("off"). Existing entries have no
+    # option stored and get "full", exactly what they had before.
+    options = dict(getattr(entry, "options", None) or {})
+    client_sensors = options.get(CONF_CLIENT_SENSORS, DEFAULT_CLIENT_SENSORS)
+    if client_sensors != CLIENT_SENSORS_OFF:
+        full = client_sensors == CLIENT_SENSORS_FULL
+        for mac, label, initial_ip in iter_tracked_clients(entry):
+            entities.append(
+                KeeneticClientIpSensor(coordinator, entry, mac, label, initial_ip)
+            )
+            entities.append(KeeneticClientUptimeSensor(coordinator, entry, mac, label))
+            entities.append(KeeneticClientLastSeenSensor(coordinator, entry, mac, label))
+            entities.append(
+                KeeneticClientConnectionTypeSensor(coordinator, entry, mac, label)
+            )
+            if not full:
+                continue
+            entities.append(KeeneticClientRxSensor(coordinator, entry, mac, label))
+            entities.append(KeeneticClientTxSensor(coordinator, entry, mac, label))
+            entities.append(KeeneticClientRssiSensor(coordinator, entry, mac, label))
+            entities.append(KeeneticClientTxRateSensor(coordinator, entry, mac, label))
+            entities.append(KeeneticClientWifiBandSensor(coordinator, entry, mac, label))
+            entities.append(KeeneticClientWifiModeSensor(coordinator, entry, mac, label))
 
     # Per-WAN sensor set: one sub-device per uplink (Default + backups).
     # Covers provider name, priority role, underlying interface, public

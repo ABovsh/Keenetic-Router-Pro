@@ -177,3 +177,41 @@ def test_session_start_is_recomputed_after_the_client_drops_out() -> None:
 def test_high_churn_diagnostics_are_opt_in_for_new_installs(sensor_cls) -> None:
     """Existing installs keep whatever the registry already enabled."""
     assert sensor_cls._attr_entity_registry_enabled_default is False
+
+
+def test_rate_limit_zero_removes_the_shape_entry_instead_of_setting_zero() -> None:
+    """A rate of 0 would block the host; the cap is removed with `no ...`."""
+    import asyncio
+
+    from custom_components.keenetic_router_pro.api.domains.clients import (
+        ClientsMixin,
+    )
+
+    sent: list[str] = []
+
+    class _Api(ClientsMixin):
+        async def _rci_parse(self, cmd: str) -> None:
+            sent.append(cmd)
+
+    api = _Api()
+    asyncio.run(api.async_set_client_rate_limit("AA-BB-CC-DD-EE-FF", 2048))
+    assert sent[0] == "ip traffic-shape host aa:bb:cc:dd:ee:ff rate 2048"
+
+    sent.clear()
+    asyncio.run(api.async_set_client_rate_limit("AA:BB:CC:DD:EE:FF", 0))
+    assert sent[0] == "no ip traffic-shape host aa:bb:cc:dd:ee:ff"
+
+
+def test_rate_limit_rejects_a_negative_rate() -> None:
+    import asyncio
+
+    from custom_components.keenetic_router_pro.api.domains.clients import (
+        ClientsMixin,
+    )
+
+    class _Api(ClientsMixin):
+        async def _rci_parse(self, cmd: str) -> None:  # pragma: no cover - unused
+            raise AssertionError("must not reach the router")
+
+    with pytest.raises(ValueError):
+        asyncio.run(_Api().async_set_client_rate_limit("aa:bb:cc:dd:ee:ff", -1))

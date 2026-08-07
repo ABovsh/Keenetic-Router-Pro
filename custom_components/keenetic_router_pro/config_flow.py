@@ -43,6 +43,14 @@ from .const import (
     CONF_TRACKED_CLIENTS,
     CONF_USE_CHALLENGE_AUTH,
 )
+from .const import (
+    BASIC_CLIENT_SENSOR_KEYS,  # noqa: F401  (re-exported for platform gating)
+    CLIENT_SENSORS_BASIC,
+    CLIENT_SENSORS_FULL,
+    CLIENT_SENSORS_OFF,
+    CONF_CLIENT_SENSORS,
+    DEFAULT_CLIENT_SENSORS,
+)
 from .utils import iter_tracked_clients, mask_identifier, normalize_mac
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.config_flow")
@@ -776,7 +784,11 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
                 )
             return self.async_create_entry(
                 title="",
-                data={},
+                data={
+                    CONF_CLIENT_SENSORS: user_input.get(
+                        CONF_CLIENT_SENSORS, DEFAULT_CLIENT_SENSORS
+                    ),
+                },
             )
 
         # Get current tracked clients
@@ -844,12 +856,26 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
         )
         _LOGGER.debug("Prepared %d client options", len(client_options))
 
+        options = dict(getattr(self._config_entry, "options", None) or {})
+
         # Show form
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
                     vol.Optional("tracked_clients", default=list(current_macs)): cv.multi_select(client_options),
+                    vol.Optional(
+                        CONF_CLIENT_SENSORS,
+                        default=options.get(
+                            CONF_CLIENT_SENSORS, DEFAULT_CLIENT_SENSORS
+                        ),
+                    ): vol.In(
+                        [
+                            CLIENT_SENSORS_FULL,
+                            CLIENT_SENSORS_BASIC,
+                            CLIENT_SENSORS_OFF,
+                        ]
+                    ),
                 }
             ),
             description_placeholders={

@@ -52,6 +52,11 @@ EXPECTED_COORDINATOR_KEYS = {
     "dns_proxy",
     "ipsec_diagnostics",
     "new_clients",
+    "online_clients",
+    "connected_clients",
+    "disconnected_clients",
+    "active_wan",
+    "wan_failover",
 }
 
 FACADE_METHODS = (

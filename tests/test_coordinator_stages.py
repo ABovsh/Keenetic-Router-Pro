@@ -250,6 +250,11 @@ async def test_coordinator_pipeline_fixtures_publishes_expected_data_keys() -> N
         "dns_proxy",
         "ipsec_diagnostics",
         "new_clients",
+    "online_clients",
+    "connected_clients",
+    "disconnected_clients",
+    "active_wan",
+    "wan_failover",
     }
 
 

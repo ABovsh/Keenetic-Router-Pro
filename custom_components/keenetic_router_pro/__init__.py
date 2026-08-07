@@ -20,7 +20,10 @@ from .const import (
     DEFAULT_PORT,
     DEFAULT_SSL,
     CONF_USE_CHALLENGE_AUTH,
+    EVENT_CLIENT_CONNECTED,
+    EVENT_CLIENT_DISCONNECTED,
     EVENT_NEW_DEVICE,
+    EVENT_WAN_FAILOVER,
 )
 from .coordinator import KeeneticCoordinator
 from .utils import mask_identifier, mesh_unique_id, normalize_mac
@@ -45,6 +48,51 @@ KeeneticConfigEntry = ConfigEntry  # ConfigEntry[KeeneticRuntimeData] on HA 2024
 _LOGGER = logging.getLogger(__name__)
 
 ISSUE_INSECURE_HTTP = "insecure_http"
+ISSUE_UNSUPPORTED_FEATURES = "unsupported_features"
+
+# Capability latches the API layer flips off the first time the router answers
+# "no such endpoint". Each one silently removes a group of entities, which
+# otherwise looks to the user like the integration is broken.
+_CAPABILITY_LABELS: dict[str, str] = {
+    "_mws_member_supported": "Mesh (MWS) nodes",
+    "_crypto_map_supported": "IPsec site-to-site tunnels",
+    "_ipsec_diagnostics_supported": "IPsec diagnostics",
+    "_ping_check_supported": "WAN ping-check status",
+    "_dns_proxy_supported": "DNS proxy statistics",
+    "_ndns_supported": "KeenDNS name and certificate",
+}
+
+
+@callback
+def _async_update_unsupported_features_issue(
+    hass: HomeAssistant, entry: ConfigEntry, client: KeeneticClient
+) -> None:
+    """Tell the user which feature groups this router turned out not to have.
+
+    These are not errors — plenty of models simply lack the component — but
+    without this the missing entities are indistinguishable from a bug.
+    """
+    issue_id = f"{ISSUE_UNSUPPORTED_FEATURES}_{entry.entry_id}"
+    missing = [
+        label
+        for attr, label in _CAPABILITY_LABELS.items()
+        if getattr(client, attr, None) is False
+    ]
+    if not missing:
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
+        return
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        issue_id,
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=ISSUE_UNSUPPORTED_FEATURES,
+        translation_placeholders={
+            "title": entry.title,
+            "features": ", ".join(missing),
+        },
+    )
 
 
 def _mask_identifier(value: Any, *, keep: int = 5) -> str:
@@ -173,6 +221,7 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 PLATFORMS: list[str] = [
     "sensor",
+    "number",
     "switch",
     "device_tracker",
     "button",
@@ -250,8 +299,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     @callback
-    def _async_handle_new_device() -> None:
-        """Fire an event when a new device connects."""
+    def _async_handle_client_events() -> None:
+        """Fire new-device, join/leave and WAN-failover events for one tick."""
         # HA notifies listeners on the first failed refresh after a success
         # with ``data`` unchanged — re-firing would duplicate EVENT_NEW_DEVICE
         # for devices already reported one tick earlier.
@@ -298,11 +347,44 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     },
                 )
 
+        if not isinstance(clients_by_mac, dict):
+            clients_by_mac = {}
+
+        for event, key in (
+            (EVENT_CLIENT_CONNECTED, "connected_clients"),
+            (EVENT_CLIENT_DISCONNECTED, "disconnected_clients"),
+        ):
+            for mac in coordinator.data.get(key, set()) or ():
+                client_info = clients_by_mac.get(mac)
+                if not isinstance(client_info, dict):
+                    client_info = {}
+                hass.bus.async_fire(
+                    event,
+                    {
+                        "mac": mac,
+                        "name": client_info.get("name")
+                        or client_info.get("hostname")
+                        or mac.upper(),
+                        "ip": client_info.get("ip"),
+                        "interface": client_info.get("interface"),
+                        "ssid": client_info.get("ssid"),
+                    },
+                )
+
+        _async_update_unsupported_features_issue(hass, entry, client)
+
+        failover = coordinator.data.get("wan_failover")
+        if failover:
+            _LOGGER.info(
+                "WAN failover: %s -> %s", failover.get("from"), failover.get("to")
+            )
+            hass.bus.async_fire(EVENT_WAN_FAILOVER, dict(failover))
+
     # async_add_listener returns an unsubscribe callable. Without
     # registering it via entry.async_on_unload, every reload of the
     # integration leaks a listener bound to the previous coordinator
     # and the closure-captured hass/_LOGGER, slowly growing memory.
-    entry.async_on_unload(coordinator.async_add_listener(_async_handle_new_device))
+    entry.async_on_unload(coordinator.async_add_listener(_async_handle_client_events))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 

@@ -259,6 +259,28 @@ class ClientsMixin:
 
         await self._rci_parse("system configuration save")
 
+    async def async_set_client_rate_limit(self, mac: str, kbps: int) -> None:
+        """Cap a client's throughput, or lift the cap when ``kbps`` is 0.
+
+        The router's traffic-shape table is keyed by MAC, so removing the entry
+        is a separate command rather than a rate of zero — a zero rate would
+        block the host outright instead of leaving it unshaped.
+        """
+        mac_clean = _validate_cli_arg(
+            str(mac or "").lower().replace("-", ":"), "MAC address"
+        )
+        rate = int(kbps)
+        if rate < 0:
+            raise ValueError("Rate limit must not be negative")
+
+        if rate == 0:
+            await self._rci_parse(f"no ip traffic-shape host {mac_clean}")
+        else:
+            await self._rci_parse(
+                f"ip traffic-shape host {mac_clean} rate {rate}"
+            )
+        await self._rci_parse("system configuration save")
+
     async def async_block_client(self, mac: str) -> None:
         """Block a client's internet access."""
         await self.async_set_client_policy(mac, "deny")

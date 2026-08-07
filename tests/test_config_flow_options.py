@@ -131,7 +131,13 @@ async def test_options_flow_adds_and_removes_tracked_clients() -> None:
         }
     )
 
-    assert result == {"type": "create_entry", "title": "", "data": {}}
+    # Entity-family choices are stored as entry options; unset means the
+    # existing-install defaults, so nothing disappears on upgrade.
+    assert result == {
+        "type": "create_entry",
+        "title": "",
+        "data": {"client_sensors": "full"},
+    }
     assert config_entries.updated == [
         {
             CONF_HOST: TEST_HOST,

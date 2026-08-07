@@ -12,6 +12,12 @@ CONF_CONNECTION_MODE = "connection_mode"
 CONNECTION_MODE_DIRECT = "direct"
 CONNECTION_MODE_KEENDNS_PROTECTED = "keendns_protected"
 EVENT_NEW_DEVICE = f"{DOMAIN}_new_device"
+# Fired for every client that joins or leaves, not only the first time a MAC is
+# ever seen. Automations can trigger on these directly instead of watching an
+# entity's state and working out what changed.
+EVENT_CLIENT_CONNECTED = f"{DOMAIN}_client_connected"
+EVENT_CLIENT_DISCONNECTED = f"{DOMAIN}_client_disconnected"
+EVENT_WAN_FAILOVER = f"{DOMAIN}_wan_failover"
 
 # WAN-status strings produced by ``KeeneticClient.async_get_wan_status`` and
 # consumed by sensors. ``CONNECTED`` means link is up *and* an IP is leased;
@@ -41,3 +47,16 @@ UPLINK_ROLE_TOKENS = ("inet", "internet", "wan")
 # RCI endpoint paths used in more than one place.
 RCI_SHOW_VERSION = "show/version"
 RCI_HOTSPOT_HOST_PATHS = ("show/ip/hotspot/host", "ip/hotspot/host")
+
+# ---- Entity-family options (options flow) ----
+# A large network can produce several hundred entities. These let the user pick
+# how much of the per-client and per-interface detail is actually created,
+# instead of trimming rows off entities they never wanted.
+CONF_CLIENT_SENSORS = "client_sensors"
+CLIENT_SENSORS_FULL = "full"
+CLIENT_SENSORS_BASIC = "basic"
+CLIENT_SENSORS_OFF = "off"
+# Existing entries default to "full" so nothing disappears on upgrade.
+DEFAULT_CLIENT_SENSORS = CLIENT_SENSORS_FULL
+# The sensors a "basic" install keeps: presence-adjacent facts, no counters.
+BASIC_CLIENT_SENSOR_KEYS = frozenset({"ip", "uptime", "last_seen", "connection_type"})

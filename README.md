@@ -1,7 +1,7 @@
 # Keenetic Router Pro
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge)](https://github.com/custom-components/hacs)
-![Version](https://img.shields.io/badge/version-1.8.0-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-1.9.0-blue?style=for-the-badge)
 ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.5%2B-41BDF5?style=for-the-badge&logo=home-assistant)
 
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ABovsh_Keenetic-Router-Pro)
@@ -31,6 +31,11 @@ An actively maintained, hardened fork of the original Keenetic Router Pro integr
 - **More reliable authentication.** Direct connections support Basic Auth and
   NDW2 challenge auth with session-cookie reuse, one-shot reauth after expired
   cookies, and automatic mesh-node cookie refresh after 401 responses.
+- **Scales to a busy network.** Options let you create the per-client sensor
+  family in full, cut back to presence-adjacent facts, or skip it entirely —
+  so a sixty-client network does not have to become four hundred entities.
+  Connect, disconnect and WAN-failover fire as Home Assistant events, so
+  automations trigger directly instead of watching entity state.
 - **KeenDNS protected web app support.** You can connect through a protected
   KeenDNS hostname over HTTPS/443 when Home Assistant cannot reach the router
   directly over LAN or VPN.
@@ -83,13 +88,14 @@ An actively maintained, hardened fork of the original Keenetic Router Pro integr
 
 ### Upstream features not carried over
 
-- **Per-client bandwidth limit** (upstream 1.3.8) — the `number` entity that
-  writes `ip traffic-shape host <mac> rate` to the router is not implemented
-  here. Open an issue if you want it.
+_Nothing outstanding._ The per-client bandwidth limit (upstream 1.3.8) is
+implemented here as of 1.9.0 — see **Bandwidth Limit** under Entities.
 
 ## Features
 
 - Local polling through the Keenetic RCI API.
+- Per-client bandwidth limit (`number`) writing the router's traffic shaper.
+- Events for client connect/disconnect and WAN failover.
 - Basic Auth and NDW2 challenge authentication.
 - Config flow, reauthentication, and reconfigure support.
 - Main router sensors for CPU, memory, uptime, firmware, WAN state, IP, PPPoE uptime, active connections, ports, Wi-Fi radio temperature, and traffic.
@@ -178,12 +184,44 @@ headers in logs can be decoded.
 
 ## Polling
 
-- Main coordinator: every `10s`.
-- Slow data: every `60s` after startup.
-- Very slow data: every `300s` after startup.
+- Fast tier: every `30s` — link state, clients, WAN status.
+- Medium tier: every `90s` — CPU, memory, connection counts, throughput.
+- Slow tier: every `180s`.
+- Very slow tier: every `900s`.
+- Firmware update check: once every `24h`.
 - Ping presence tracking: default `5s`, configurable from `5` to `300s`.
 
-Slow and very slow data is cached between refreshes to reduce router load.
+Every tier above the fast one is cached between refreshes, so a slower tier
+costs the router nothing on the ticks it is skipped.
+
+## Recorder load
+
+This integration is deliberately quiet in your Home Assistant database.
+Home Assistant writes a history row whenever an entity's state **or any of its
+attributes** changes, so an attribute that moves every poll costs a row every
+poll even when the entity itself has not changed. Nothing here publishes one:
+counters that only ever go up live on their own sensors, gauges are rounded and
+published on a slower tier than they are polled, and the Wi-Fi session sensor
+reports when the session started rather than counting seconds.
+
+If you want to cut it further:
+
+- Set **Per-client sensors** to `basic` or `off` in the integration options.
+  On a large network this family is most of the entity count.
+- Leave the per-client RX / TX / Link Speed entities disabled — new
+  installations already ship them that way.
+- Or exclude the diagnostics wholesale:
+
+```yaml
+recorder:
+  exclude:
+    entity_globs:
+      - sensor.*_rx_throughput
+      - sensor.*_tx_throughput
+      - sensor.*_cpu_load
+      - sensor.*_memory_usage
+      - sensor.*_active_connections
+```
 
 ## Security Notes
 

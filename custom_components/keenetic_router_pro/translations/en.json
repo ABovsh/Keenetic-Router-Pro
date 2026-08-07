@@ -83,7 +83,11 @@
         "title": "Configure Tracked Clients",
         "description": "Select which clients to track for presence detection. Found {client_count} clients.",
         "data": {
-          "tracked_clients": "Clients to track"
+          "tracked_clients": "Clients to track",
+          "client_sensors": "Per-client sensors"
+        },
+        "data_description": {
+          "client_sensors": "How much detail to create for each tracked client. 'full' is every sensor (the existing behaviour), 'basic' keeps IP, session, last seen and connection type, 'off' creates none. Presence tracking and the block/policy controls are unaffected."
         }
       }
     },
@@ -151,6 +155,10 @@
     }
   },
   "issues": {
+    "unsupported_features": {
+      "title": "Some Keenetic features are not available on this router",
+      "description": "The router behind {title} does not provide these endpoints, so the matching entities were not created: {features}.\n\nThis is normal on models or firmware builds without those components — it is not an integration fault. If you expected one of them, check System → Components in the router web UI and install the component, then reload the integration.\n\nThis notice clears itself once the router starts answering, or when you dismiss it."
+    },
     "insecure_http": {
       "title": "Keenetic API is using plaintext HTTP",
       "description": "The Keenetic Router Pro integration ({title}) is connecting to {host} over plain HTTP. Your router username, password (NDW2 hash), and session cookie traverse the LAN unencrypted on every poll, so anyone on the same network — including untrusted Wi-Fi guests, IoT devices, or a compromised LAN host — can capture credentials and impersonate you to the router.\n\nMitigation:\n1. In the router web UI, enable HTTPS for the web admin (System → Components → ensure SSL/TLS support is installed; Management → Web Admin → enable HTTPS).\n2. Open the integration entry in Settings → Devices & services → Keenetic Router Pro → Reconfigure, switch SSL on, and update the port (typically 443).\n3. After confirming HTTPS works, rotate the router admin password — anyone who sniffed the LAN since the integration was set up may already have it.\n\nThis warning is suppressed for loopback addresses."

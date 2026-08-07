@@ -15,6 +15,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import KeeneticClient
 from .const import DOMAIN, FAST_SCAN_INTERVAL
+from .utils import is_client_online
 from .coordinator_parts.derived import (
     build_clients_by_mac,
     counter_rate_bytes_per_second,
@@ -783,6 +784,41 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 previous_macs.discard("")
             new_macs = current_macs - previous_macs
 
+            # ---------- Connect / disconnect / failover events ----------
+            # Automations otherwise have to trigger on entity state and poll
+            # their way to "who just left". These diffs cost one set operation
+            # a tick and nothing at all while the network is quiet.
+            online_macs = {
+                mac
+                for mac, client in clients_by_mac.items()
+                if isinstance(client, dict) and is_client_online(client)
+            }
+            previous_online = (
+                self.data.get("online_clients", set()) if self.data else set()
+            )
+            if not isinstance(previous_online, set):
+                previous_online = set()
+            # On the very first tick every client looks like an arrival; the
+            # integration has simply never seen this network before.
+            first_tick = not self.data
+            connected_macs = set() if first_tick else online_macs - previous_online
+            disconnected_macs = set() if first_tick else previous_online - online_macs
+
+            active_wan = next(
+                (
+                    wan_id
+                    for wan_id, wan in wan_by_id.items()
+                    if isinstance(wan, dict) and wan.get("defaultgw")
+                ),
+                None,
+            )
+            previous_wan = self.data.get("active_wan") if self.data else None
+            wan_failover = (
+                {"from": previous_wan, "to": active_wan}
+                if not first_tick and active_wan != previous_wan
+                else None
+            )
+
             # A tick that reaches this point did not raise UpdateFailed, so
             # any backoff stretch applied during a prior outage is over —
             # restore the normal fast poll cadence.
@@ -839,6 +875,11 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "dns_proxy": dns_proxy,
                 "ipsec_diagnostics": ipsec_diagnostics,
                 "new_clients": new_macs,
+                "online_clients": online_macs,
+                "connected_clients": connected_macs,
+                "disconnected_clients": disconnected_macs,
+                "active_wan": active_wan,
+                "wan_failover": wan_failover,
             }
         finally:
             self.client.clear_tick_cache()
