@@ -54,34 +54,15 @@ def test_mesh_system_state_mixed_fallback_nodes_reports_problem_summary() -> Non
         _entry(),
     )
 
+    # No per-node "nodes" payload: each field it carried (ip, associations,
+    # firmware) has its own dedicated mesh entity, and the nested list
+    # changed on every poll, forcing a recorder row each tick.
     assert sensor.extra_state_attributes == {
         "total_nodes": 2,
         "connected_nodes": 1,
         "disconnected_nodes": 1,
         "health_percent": 50.0,
         "state": "problem",
-        "nodes": [
-            {
-                "name": "Kitchen Extender",
-                "mac": "AA:BB:CC:00:00:01",
-                "ip": "192.0.2.20",
-                "model": "Buddy",
-                "mode": "extender",
-                "connected": True,
-                "firmware": "4.2.0",
-                "associations": "2",
-            },
-            {
-                "name": "Bedroom Extender",
-                "mac": "AA:BB:CC:00:00:02",
-                "ip": "192.0.2.20",
-                "model": None,
-                "mode": "extender",
-                "connected": False,
-                "firmware": "4.2.0",
-                "associations": 0,
-            },
-        ],
     }
 
 
@@ -96,7 +77,6 @@ def test_mesh_system_state_empty_nodes_reports_no_nodes() -> None:
             "total_nodes": 0,
             "connected_nodes": 0,
             "disconnected_nodes": 0,
-            "nodes": [],
         },
     )
 

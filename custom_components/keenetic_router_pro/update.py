@@ -307,7 +307,10 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
             self._update_progress = None
             self.async_write_ha_state()
 
-        # Refresh coordinator to pick up new version
+        # Refresh coordinator to pick up new version, including one fresh
+        # firmware check (the routine daily cadence would otherwise keep
+        # advertising the version we just installed as available).
+        self.coordinator.request_update_check()
         await self.coordinator.async_request_refresh()
 
 
@@ -486,4 +489,5 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
                 f"{type(err).__name__}"
             ) from err
 
+        self.coordinator.request_update_check()
         await self.coordinator.async_request_refresh()

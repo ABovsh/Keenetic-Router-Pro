@@ -70,6 +70,9 @@ class KeeneticMemoryUsageSensor(ControllerEntity, SensorEntity):
         memtotal = sys.get("memtotal")
         memfree = sys.get("memfree")
 
+        # Whole percent only (``parse_memory_fraction`` rounds): the 0.1 %
+        # decimal jittered on every poll and made this one of the integration's
+        # top recorder writers, while telling a user nothing about router RAM.
         parsed_fraction = parse_memory_fraction(mem)
         if parsed_fraction is not None:
             return parsed_fraction
@@ -82,15 +85,17 @@ class KeeneticMemoryUsageSensor(ControllerEntity, SensorEntity):
             # memtotal in transient firmware payloads the raw division
             # produces a negative percentage that breaks HA statistics.
             pct = max(0.0, min(100.0, used * 100.0 / total))
-            return round(pct, 1)
+            return round(pct)
 
         for key in ("mem_used_percent", "memory_usage", "memusage"):
             if key in sys:
                 value = coerce_float(sys[key])
                 if value is not None:
                     # Clamp to [0, 100] — a fallback percentage field is still
-                    # a percentage and must not publish an out-of-range value.
-                    return max(0.0, min(100.0, value))
+                    # a percentage and must not publish an out-of-range value —
+                    # and round like the paths above, or this firmware shape
+                    # keeps the per-poll decimal jitter.
+                    return round(max(0.0, min(100.0, value)))
 
         return None
 

@@ -15,6 +15,15 @@ class RefreshPlan:
     slow_refresh: bool
     very_slow_refresh: bool
     ipsec_status_refresh: bool
+    update_check_refresh: bool
+
+
+# One firmware check per day. ``components/check-update`` asks Keenetic's
+# update service, so running it on the very-slow tier meant 96 external checks
+# per router per day — and the endpoint is stateful, returning a different
+# shape on back-to-back calls, which made the reported channel/available
+# version flap between real values and None.
+_UPDATE_CHECK_EVERY = 2880  # ticks (24 h at FAST_SCAN_INTERVAL = 30 s)
 
 
 def refresh_plan(*, first_refresh: bool, refresh_count: int) -> RefreshPlan:
@@ -28,6 +37,7 @@ def refresh_plan(*, first_refresh: bool, refresh_count: int) -> RefreshPlan:
         slow_refresh=slow_refresh,
         very_slow_refresh=very_slow_refresh,
         ipsec_status_refresh=slow_refresh,
+        update_check_refresh=first_refresh or refresh_count % _UPDATE_CHECK_EVERY == 0,
     )
 
 
@@ -52,7 +62,8 @@ def build_batch_tree(plan: RefreshPlan) -> dict[str, Any]:
         add("show/ipsec")
     if plan.very_slow_refresh:
         add("show/version")
-        add("components/check-update")
         add("show/ndns")
         add("show/dns-proxy")
+    if plan.update_check_refresh:
+        add("components/check-update")
     return batch_tree

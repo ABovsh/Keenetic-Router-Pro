@@ -281,7 +281,10 @@ def parse_memory_fraction(value: Any) -> float | None:
     # Clamp to [0, 100] — inconsistent firmware values must not produce
     # negative or above-100% sensor readings that confuse HA statistics.
     pct = max(0.0, min(100.0, pct))
-    return round(pct, 1)
+    # Whole percent: the 0.1 decimal jittered on every poll for both the
+    # controller and every mesh node, making these sensors top recorder
+    # writers while telling a user nothing extra about a router's RAM.
+    return round(pct)
 
 
 def sanitize_mesh_id(value: Any) -> str:

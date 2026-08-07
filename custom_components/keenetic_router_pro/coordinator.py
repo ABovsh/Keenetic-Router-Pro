@@ -51,6 +51,21 @@ _mesh_associations = mesh_associations
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.coordinator")
 
+# ``show/system`` fields behind the CPU-load, RAM and active-connection
+# sensors. Republished on the medium tier only (see _async_update_data_unlocked).
+_GAUGE_KEYS = (
+    "cpu_load",
+    "cpuload",
+    "cpu",
+    "cpu-utilization",
+    "memory",
+    "mem",
+    "memtotal",
+    "memfree",
+    "conntotal",
+    "connfree",
+)
+
 _VERSION_CACHE_KEYS = (
     "title",
     "release",
@@ -98,6 +113,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # min). Uses the same pending/token pair as the host-policies request.
         self._full_refresh_pending = False
         self._full_refresh_token = 0
+        # One-shot firmware update check (post-install only) — see
+        # ``request_update_check``. Same pending/token pair as above.
+        self._update_check_pending = False
+        self._update_check_token = 0
         # Consecutive transient critical-fetch failures tolerated so far. A
         # one-off ``system_info`` / ``interfaces`` timeout keeps the last-known
         # snapshot instead of flipping every entity unavailable; reset on the
@@ -129,6 +148,17 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Force a live host_policies fetch on the next refresh tick."""
         self._host_policies_refresh_pending = True
         self._host_policies_refresh_token += 1
+
+    def request_update_check(self) -> None:
+        """Force one firmware update check on the next tick.
+
+        Only the update entities call this, right after installing firmware —
+        the generic write-confirming refresh must NOT, or a mesh-node install
+        (which polls for a refresh every ~10s) would re-run the stateful
+        ``components/check-update`` endpoint dozens of times per install.
+        """
+        self._update_check_pending = True
+        self._update_check_token += 1
 
     def request_full_refresh(self) -> None:
         """Force every fetch tier to run on the next refresh tick."""
@@ -261,10 +291,14 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # these dicts every time. On a non-slow tick the previous
         # version info is reused verbatim; on a slow tick these are
         # discarded and the live RCI fetch result is used instead.
+        pending_update_check = getattr(self, "_update_check_pending", False)
+        pending_update_check_token = getattr(self, "_update_check_token", 0)
+        update_check_refresh = plan.update_check_refresh or pending_update_check
         if not very_slow_refresh:
             _cached_version = {
                 k: _prev_sys.get(k) for k in _VERSION_CACHE_KEYS if k in _prev_sys
             }
+        if not update_check_refresh:
             _cached_version_available = {
                 "title": _prev_sys.get("release-available"),
                 "sandbox": _prev_sys.get("fw-update-sandbox"),
@@ -317,7 +351,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ) = await asyncio.gather(
                 _bounded(self.client.async_get_system_info()),
                 _bounded(self.client.async_get_current_version_info()) if very_slow_refresh else _resolve(_cached_version),
-                _bounded(self.client.async_get_available_version_info()) if very_slow_refresh else _resolve(_cached_version_available),
+                _bounded(self.client.async_get_available_version_info()) if update_check_refresh else _resolve(_cached_version_available),
                 _bounded(self.client.async_get_interfaces()),
                 _bounded(self.client.async_get_clients()),
                 _bounded(self.client.async_get_ip_neighbours()),
@@ -531,6 +565,16 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             client_stats = self.client.summarize_client_stats(clients)
 
             merged_system = {**system, **version}
+            # Router gauges (CPU load, RAM, NAT table) jitter on every fast
+            # tick and were the integration's top recorder writers. They ride
+            # along in the fast ``show/system`` payload, so there is nothing to
+            # save on the wire — publish them on the medium cadence instead.
+            if not medium_refresh and _prev_sys:
+                for gauge_key in _GAUGE_KEYS:
+                    if gauge_key in _prev_sys:
+                        merged_system[gauge_key] = _prev_sys[gauge_key]
+                    else:
+                        merged_system.pop(gauge_key, None)
             merged_system["release-available"] = (
                 version_available.get("title") or version_available.get("release")
             )
@@ -759,6 +803,12 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 and self._full_refresh_token == pending_full_refresh_token
             ):
                 self._full_refresh_pending = False
+
+            if (
+                pending_update_check
+                and self._update_check_token == pending_update_check_token
+            ):
+                self._update_check_pending = False
 
             self._refresh_count += 1
             return {

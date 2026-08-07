@@ -8,6 +8,47 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.7.78
+
+### ⚠️ Breaking
+
+- Several entity attributes that changed on every poll have been removed. Each
+  one either duplicated a sensor you already have or was diagnostic noise, and
+  because Home Assistant only skips a database write when the state *and* all
+  attributes are unchanged, they were forcing a history row for every entity on
+  every refresh — even for a WAN that had been up, untouched, for ten days.
+  If you use one of these in a template or dashboard, switch to the entity
+  named beside it:
+  - WAN "Connected": `success_count` (removed), `last_check` (removed, it was
+    never populated), and `check_targets` → `check_hosts`, which now lists only
+    the host names you configured instead of the addresses the router
+    re-resolves every poll.
+  - WAN RX/TX Throughput: `rxbytes`, `txbytes` → the RX/TX Bytes sensors;
+    `rxspeed`, `txspeed` (the sensor's own value) and `stats_timestamp` removed.
+  - Mesh node "Connected": `uptime`, `cpuload`, `memory`, `associations` → the
+    node's own Uptime, CPU Load, Memory and Clients sensors.
+  - IPsec tunnel "Connected": `rx_bytes`, `tx_bytes` → the tunnel's RX/TX Bytes
+    sensors.
+  - DNS Proxy Status: `requests_sent`, `active_dns_server_count`, `proxies`
+    removed; `failed_requests` → the Failed Requests sensor.
+  - Mesh System State: the per-node `nodes` list removed; the node counts,
+    health percentage and state remain.
+- CPU load, memory usage and active connections now refresh every 90 seconds
+  instead of every 30. Memory usage is reported as a whole percent, on the
+  router and on mesh nodes, instead of jittering by a tenth of a percent
+  between polls.
+
+### Fixed
+
+- The router no longer asks Keenetic's update service for a new firmware
+  version every 15 minutes. It checks once a day, and immediately after you
+  install an update. This also fixes the firmware channel and available-version
+  attributes flickering between a real value and blank, which happened because
+  back-to-back calls to that endpoint return different answers.
+- On routers without log access, the IPsec diagnostics lookup is now remembered
+  as unavailable after the first refusal instead of being retried on every slow
+  poll.
+
 ## 1.7.77
 
 ### Fixed

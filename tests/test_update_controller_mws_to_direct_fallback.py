@@ -29,6 +29,10 @@ class _Coordinator:
     def __init__(self) -> None:
         self.data = {"mesh_nodes": [dict(FALLBACK_MESH_NODE)]}
         self.refreshes = 0
+        self.update_checks = 0
+
+    def request_update_check(self) -> None:
+        self.update_checks += 1
 
     async def async_request_refresh(self) -> None:
         self.refreshes += 1
@@ -169,6 +173,7 @@ def test_controller_update_progress_endpoint_writes_reported_percent(
     coordinator = SimpleNamespace(
         data={"system": {"title": "4.2.0", "fw-available": "4.3.0"}},
         async_request_refresh=refresh,
+        request_update_check=lambda: None,
     )
     entity = KeeneticFirmwareUpdate(
         coordinator,
@@ -206,7 +211,7 @@ def test_controller_update_progress_failure_marks_rebooting(
 
     monkeypatch.setattr(update_module.asyncio, "sleep", _no_sleep)
     entity = KeeneticFirmwareUpdate(
-        SimpleNamespace(data={"system": {}}, async_request_refresh=refresh),
+        SimpleNamespace(request_update_check=lambda: None, data={"system": {}}, async_request_refresh=refresh),
         SimpleNamespace(entry_id="entry_123", title="Router"),
         Client(),
     )
@@ -237,7 +242,7 @@ def test_controller_update_progress_cancel_is_propagated(
 
     monkeypatch.setattr(update_module.asyncio, "sleep", _no_sleep)
     entity = KeeneticFirmwareUpdate(
-        SimpleNamespace(data={"system": {}}, async_request_refresh=lambda: None),
+        SimpleNamespace(request_update_check=lambda: None, data={"system": {}}, async_request_refresh=lambda: None),
         SimpleNamespace(entry_id="entry_123", title="Router"),
         Client(),
     )
@@ -264,7 +269,7 @@ def test_controller_update_reboot_wait_cancel_is_propagated(
 
     monkeypatch.setattr(update_module.asyncio, "sleep", _no_sleep)
     entity = KeeneticFirmwareUpdate(
-        SimpleNamespace(data={"system": {}}, async_request_refresh=lambda: None),
+        SimpleNamespace(request_update_check=lambda: None, data={"system": {}}, async_request_refresh=lambda: None),
         SimpleNamespace(entry_id="entry_123", title="Router"),
         Client(),
     )
@@ -281,7 +286,7 @@ def test_controller_update_client_error_is_home_assistant_error() -> None:
         async def async_start_firmware_update(self) -> bool:
             raise RuntimeError("boom")
 
-    coordinator = SimpleNamespace(data={"system": {}}, async_request_refresh=lambda: None)
+    coordinator = SimpleNamespace(request_update_check=lambda: None, data={"system": {}}, async_request_refresh=lambda: None)
     entity = KeeneticFirmwareUpdate(
         coordinator,
         SimpleNamespace(entry_id="entry_123", title="Router"),
@@ -361,6 +366,9 @@ def test_mesh_update_refresh_failure_is_ignored_during_direct_fallback(
             self.data = {"mesh_nodes": [dict(FALLBACK_MESH_NODE)]}
             self.calls = 0
 
+        def request_update_check(self) -> None:
+            pass
+
         async def async_request_refresh(self) -> None:
             self.calls += 1
             if self.calls == 1:
@@ -392,6 +400,9 @@ def test_mesh_update_cancel_during_refresh_is_propagated(
 
     class Coordinator:
         data = {"mesh_nodes": [FALLBACK_MESH_NODE]}
+
+        def request_update_check(self) -> None:
+            pass
 
         async def async_request_refresh(self) -> None:
             raise asyncio.CancelledError

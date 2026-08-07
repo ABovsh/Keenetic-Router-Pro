@@ -65,8 +65,6 @@ def test_crypto_map_connected_sensor_exposes_phase_attributes() -> None:
         "remote_peer": "198.51.100.1",
         "local_endpoint": "192.0.2.10",
         "remote_endpoint": "198.51.100.1",
-        "rx_bytes": 100,
-        "tx_bytes": 200,
     }
 
 
@@ -160,22 +158,23 @@ def test_wan_connected_sensor_exposes_full_ping_check_attributes() -> None:
         "public_ip": "198.51.100.10",
         "underlying": "GigabitEthernet0",
         "source": "ping_check",
-        "check_targets": ["captive.keenetic.net", "1.1.1.1"],
+        # Only the configured host NAMES are published (never the
+        # resolved check_addresses) so the attribute doesn't churn on
+        # every poll as the router rotates resolved IPs.
+        "check_hosts": ["captive.keenetic.net"],
         "check_port": 443,
         "check_mode": "icmp",
         "check_profile": "default",
-        "success_count": 1,
         "fail_count": 3,
         "max_fails": 3,
         "update_interval": 10,
         "ping_check_status": "fail",
         "failure_reason": (
             "ping check failing (3/3 consecutive failures to "
-            "captive.keenetic.net, 1.1.1.1)"
+            "captive.keenetic.net)"
         ),
         "all_ping_check_profiles": ["default", "backup"],
         "summary_layers": {"conf": "running", "link": "up"},
-        "last_check": "2026-05-20T00:00:00+00:00",
     }
 
 
@@ -249,12 +248,8 @@ def test_mesh_binary_sensors_read_fallback_node_payload() -> None:
             "ip": "192.0.2.20",
             "model": "Buddy 6",
             "mode": "extender",
-            "uptime": 120,
-            "cpuload": 12,
-            "memory": {"total": 100, "free": 50},
             "firmware": "4.2.0",
             "firmware_available": "4.3.0",
-            "associations": 3,
             "rci_errors": 0,
         },
         "update_name": "Update Available",
