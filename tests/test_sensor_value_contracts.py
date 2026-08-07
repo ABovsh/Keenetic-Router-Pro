@@ -228,8 +228,7 @@ def test_traffic_sensor_positive_value_attrs_and_sanitized_unique_id() -> None:
                     "interface_type": "Wireguard",
                     "link": "up",
                     "state": "up",
-                    "rxpackets": "42",
-                    "rxerrors": "1",
+                                "rxerrors": "1",
                     "rxdropped": "0",
                 }
             }
@@ -249,7 +248,6 @@ def test_traffic_sensor_positive_value_attrs_and_sanitized_unique_id() -> None:
         "type": "Wireguard",
         "link": "up",
         "state": "up",
-        "rxpackets": "42",
         "rxerrors": "1",
         "rxdropped": "0",
     }

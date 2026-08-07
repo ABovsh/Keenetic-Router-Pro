@@ -52,11 +52,17 @@ def test_counter_rate_bytes_per_second_uses_sample_window() -> None:
 
 
 def test_wan_throughput_sensor_converts_byte_rate_to_bit_rate() -> None:
+    """125 B/s and 62.5 B/s are background noise and quantize away to 0.
+
+    The rate is snapped to the nearest 10 kbit/s so an idle link reports a flat
+    0 instead of jittering every poll. See the Mbit/s case below for the
+    conversion itself.
+    """
     coordinator = _coordinator()
     entry = _entry()
 
-    assert KeeneticWanRxThroughputSensor(coordinator, entry, "PPPoE0").native_value == pytest.approx(1000.0)
-    assert KeeneticWanTxThroughputSensor(coordinator, entry, "PPPoE0").native_value == pytest.approx(500.0)
+    assert KeeneticWanRxThroughputSensor(coordinator, entry, "PPPoE0").native_value == 0.0
+    assert KeeneticWanTxThroughputSensor(coordinator, entry, "PPPoE0").native_value == 0.0
 
 
 def test_wan_throughput_sensor_exposes_counter_sample_attributes() -> None:

@@ -15,7 +15,7 @@ from homeassistant.const import UnitOfTime, UnitOfInformation, UnitOfDataRate, E
 from ..const import LINK_STATE_DOWN, LINK_STATE_UP, WAN_STATUS_CONNECTED, WAN_STATUS_LINK_UP
 from ..coordinator import KeeneticCoordinator
 from ..entity import ControllerEntity, WanEntity
-from ..utils import coerce_byte_count, coerce_seconds
+from ..utils import coerce_byte_count, coerce_seconds, quantize_data_rate
 
 _ICON_ETHERNET = "mdi:ethernet"
 _ICON_IP_NETWORK = "mdi:ip-network"
@@ -513,7 +513,7 @@ class _WanThroughputBase(_WanSensorBase):
         if v is None or isinstance(v, bool):
             return None
         try:
-            return float(v) * 8  # bytes/s → bit/s
+            return quantize_data_rate(float(v) * 8)  # bytes/s → bit/s
         except (TypeError, ValueError):
             return None
 

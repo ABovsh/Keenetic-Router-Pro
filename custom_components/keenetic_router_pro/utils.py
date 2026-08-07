@@ -261,6 +261,26 @@ def is_client_online(client: dict[str, Any] | None) -> bool:
     return coerce_bool(client.get("active"))
 
 
+def quantize_data_rate(bits_per_second: float) -> float:
+    """Snap a bit/s rate to the nearest 10 kbit/s.
+
+    A link that carries nothing still shows a few hundred byte/s of ARP and
+    keepalive noise, which jitters on every poll and costs a recorder row each
+    time. Quantizing sends that background to a flat 0 while leaving real
+    traffic at a granularity no dashboard can perceive.
+    """
+    return float(round(bits_per_second, -4))
+
+
+def quantize_link_speed(mbps: int) -> int:
+    """Snap a Wi-Fi PHY rate to the nearest 6 Mbit/s (roughly one MCS step).
+
+    The negotiated rate is renegotiated constantly; nobody automates on it at
+    single-Mbit resolution, and the raw value writes a row every poll.
+    """
+    return round(mbps / 6) * 6
+
+
 def parse_memory_fraction(value: Any) -> float | None:
     """Parse Keenetic ``"used/total"`` memory string into a 0–100 percentage."""
     if not isinstance(value, str) or "/" not in value:

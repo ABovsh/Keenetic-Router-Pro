@@ -12,11 +12,16 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfInformation, UnitOfTime, EntityCategory
+from homeassistant.const import UnitOfInformation, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
 from ..entity import ClientEntity
-from ..utils import bytes_to_gib, coerce_seconds, is_client_online
+from ..utils import (
+    bytes_to_gib,
+    coerce_seconds,
+    is_client_online,
+    quantize_link_speed,
+)
 
 ZERO_COUNTER_VALUES = (None, "", 0, "0")
 _BAND_2_4 = "2.4 GHz"
@@ -131,19 +136,27 @@ class KeeneticClientIpSensor(ClientEntity, SensorEntity):
         return self.ip_address
 
 
+# A recomputed session start drifts by a second or two between polls because the
+# router's uptime counter and our clock are not locked together. Anything inside
+# this window is the same session start, and re-publishing it would cost a
+# recorder row on every tick.
+_SESSION_START_TOLERANCE = timedelta(seconds=90)
+
+
 class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
-    """Uptime sensor for client."""
+    """When the client's current Wi-Fi session began.
+
+    The router reports an elapsed-seconds counter, which as a sensor state is a
+    clock: it advances by the poll interval forever and writes a recorder row
+    every tick. Publishing the session *start* instead is the same information
+    in HA's native form — constant for the whole session, so one row per
+    connection — and the frontend still renders it as "3 hours ago".
+    """
+
     _attr_has_entity_name = True
     _attr_icon = "mdi:timer-outline"
-    _attr_device_class = SensorDeviceClass.DURATION
-    # A client session resets to a non-zero value on every roam/reconnect, so it
-    # is an instantaneous gauge — not a monotonic lifetime total. TOTAL_INCREASING
-    # here logs "state is not strictly increasing" recorder warnings and produces
-    # nonsense long-term sums (same reason KeeneticActiveConnectionsSensor uses
-    # MEASUREMENT). Infra uptimes that reset cleanly to ~0 on reboot stay TOTAL.
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_suggested_display_precision = 0
     # Uptime must stay IN the fingerprint or this sensor freezes for idle
     # clients; only last-seen remains noise here.
     _FINGERPRINT_IGNORE = frozenset({"last-seen"})
@@ -156,6 +169,8 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
         label: str,
     ) -> None:
         ClientEntity.__init__(self, coordinator, entry.entry_id, entry.title, mac, label)
+        self._session_start: datetime | None = None
+        self._last_uptime: int | None = None
 
     @property
     def unique_id(self) -> str:
@@ -170,15 +185,26 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
         return super().available and _client_has_live_session(self._client)
 
     @property
-    def native_unit_of_measurement(self) -> str:
-        return UnitOfTime.SECONDS
-
-    @property
-    def native_value(self) -> int:
+    def native_value(self) -> datetime | None:
         client = self._client
-        if not client:
-            return 0
-        return coerce_seconds(client.get("uptime"), default=0) or 0
+        seconds = (
+            coerce_seconds(client.get("uptime"), default=None) if client else None
+        )
+        if seconds is None or seconds <= 0:
+            self._session_start = None
+            self._last_uptime = None
+            return None
+
+        computed = datetime.now().astimezone() - timedelta(seconds=seconds)
+        reconnected = self._last_uptime is not None and seconds < self._last_uptime
+        if (
+            self._session_start is None
+            or reconnected
+            or abs(computed - self._session_start) > _SESSION_START_TOLERANCE
+        ):
+            self._session_start = computed
+        self._last_uptime = seconds
+        return self._session_start
 
 
 class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
@@ -239,6 +265,8 @@ class KeeneticClientRxSensor(ClientEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.DATA_SIZE
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Per-client counters move constantly; new installs opt in.
+    _attr_entity_registry_enabled_default = False
 
     def __init__(
         self,
@@ -280,6 +308,8 @@ class KeeneticClientTxSensor(ClientEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.DATA_SIZE
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Per-client counters move constantly; new installs opt in.
+    _attr_entity_registry_enabled_default = False
 
     def __init__(
         self,
@@ -361,6 +391,8 @@ class KeeneticClientTxRateSensor(ClientEntity, SensorEntity):
     _attr_icon = "mdi:speedometer"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Per-client counters move constantly; new installs opt in.
+    _attr_entity_registry_enabled_default = False
 
     def __init__(
         self,
@@ -390,9 +422,10 @@ class KeeneticClientTxRateSensor(ClientEntity, SensorEntity):
     @property
     def native_value(self) -> int | None:
         client = self._client
-        if client:
-            return _coerce_optional_int(client.get("txrate"))
-        return None
+        if not client:
+            return None
+        rate = _coerce_optional_int(client.get("txrate"))
+        return None if rate is None else quantize_link_speed(rate)
 
 
 class KeeneticClientConnectionTypeSensor(ClientEntity, SensorEntity):

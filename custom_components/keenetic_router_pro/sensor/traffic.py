@@ -69,12 +69,15 @@ class _TrafficSensorBase(ControllerEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         stats = self._stats
+        # The packet counter is deliberately absent: it advances on every poll,
+        # so publishing it made HA write a recorder row each tick even while the
+        # GiB state (rounded to 2 dp) was unchanged. Errors/dropped stay — they
+        # sit still on a healthy link, so a row means something actually broke.
         return {
             "interface": self._iface_name,
             "type": stats.get("interface_type"),
             "link": stats.get("link"),
             "state": stats.get("state"),
-            f"{self._direction}packets": stats.get(f"{self._direction}packets"),
             f"{self._direction}errors": stats.get(f"{self._direction}errors"),
             f"{self._direction}dropped": stats.get(f"{self._direction}dropped"),
         }
@@ -85,6 +88,8 @@ class KeeneticInterfaceRxSensor(_TrafficSensorBase):
 
     _attr_icon = _ICON_DOWNLOAD
     _direction = "rx"
+    # One pair per discovered interface floods a fresh install; opt in.
+    _attr_entity_registry_enabled_default = False
 
 
 class KeeneticInterfaceTxSensor(_TrafficSensorBase):
@@ -92,6 +97,8 @@ class KeeneticInterfaceTxSensor(_TrafficSensorBase):
 
     _attr_icon = _ICON_UPLOAD
     _direction = "tx"
+    # One pair per discovered interface floods a fresh install; opt in.
+    _attr_entity_registry_enabled_default = False
 
 
 class _FixedTrafficSensor(_TrafficSensorBase):

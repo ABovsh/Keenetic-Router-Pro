@@ -191,7 +191,12 @@ def test_uptime_sensor_is_presented_as_wifi_session() -> None:
     )
 
     assert entity.name == "Wi-Fi Session"
-    assert entity.native_value == 165
+    # The state is the session START, not the elapsed seconds — a constant per
+    # connection instead of a clock that writes a recorder row every poll.
+    started = entity.native_value
+    assert started is not None
+    elapsed = (datetime.now().astimezone() - started).total_seconds()
+    assert 160 <= elapsed <= 170
     assert entity.available is True
 
 
@@ -211,7 +216,7 @@ def test_uptime_sensor_is_unavailable_without_live_session() -> None:
         "phone",
     )
 
-    assert entity.native_value == 0
+    assert entity.native_value is None
     assert entity.available is False
 
 
@@ -233,7 +238,8 @@ def test_txrate_sensor_is_presented_as_link_speed() -> None:
 
     assert entity.name == "Link Speed"
     assert entity.native_unit_of_measurement == "Mbps"
-    assert entity.native_value == 87
+    # Quantized to the nearest 6 Mbit/s (one MCS step).
+    assert entity.native_value == 84
     assert entity.available is True
 
 

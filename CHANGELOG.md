@@ -8,6 +8,39 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.9.0
+
+### ⚠️ Breaking
+
+- **Wi-Fi Session** now reports *when* the session started instead of how many
+  seconds it has lasted. The old state was a clock: it advanced by the poll
+  interval forever, so Home Assistant stored a history row for every connected
+  client on every refresh — around 2,880 rows a day, per client. The start time
+  is the same information in Home Assistant's native form, it stays constant
+  for the whole session, and the dashboard still shows "3 hours ago".
+  In templates, replace `states('sensor.…_wi_fi_session')` with
+  `as_timestamp(now()) - as_timestamp(states('sensor.…_wi_fi_session'))` to get
+  the duration back in seconds.
+- Interface RX/TX sensors no longer publish the `rxpackets` / `txpackets`
+  attribute. It advanced on every poll, which forced a history row even when the
+  sensor's own value had not moved. `rxerrors`/`txerrors` and
+  `rxdropped`/`txdropped` remain — those sit still on a healthy link, so a
+  change there is worth recording.
+- WAN RX/TX Throughput is rounded to the nearest 10 kbit/s. An idle link still
+  carries a few hundred bytes per second of ARP and keepalive traffic, which
+  jittered on every poll; it now reads a flat 0. Real traffic is unaffected at
+  any resolution a dashboard can show.
+- Wi-Fi **Link Speed** is rounded to the nearest 6 Mbit/s, roughly one rate step.
+  The negotiated rate renegotiates constantly and was recording a row each time.
+
+### 🔧 Changed
+
+- New installations no longer create these entities enabled by default: per-client
+  RX, TX and Link Speed, and the per-interface RX/TX pair for each discovered
+  interface. They are still there — enable the ones you want from the device
+  page. Existing installations are unaffected; whatever you have enabled stays
+  enabled.
+
 ## 1.8.0
 
 ### ⚠️ Breaking

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from conftest import (
     TEST_BASE_URL_ALT,
     TEST_HOST,
@@ -404,12 +406,13 @@ def test_client_detail_sensors_pin_online_offline_and_counter_edges() -> None:
     coordinator = _coordinator({"clients_by_mac": {mac: online}})
 
     assert KeeneticClientIpSensor(coordinator, entry, mac, "Laptop").native_value == "192.0.2.50"
-    assert KeeneticClientUptimeSensor(coordinator, entry, mac, "Laptop").native_value == 60
+    started = KeeneticClientUptimeSensor(coordinator, entry, mac, "Laptop").native_value
+    assert 55 <= (datetime.now().astimezone() - started).total_seconds() <= 65
     assert KeeneticClientLastSeenSensor(coordinator, entry, mac, "Laptop").available is False
     assert KeeneticClientRxSensor(coordinator, entry, mac, "Laptop").native_value == pytest.approx(1.0)
     assert KeeneticClientTxSensor(coordinator, entry, mac, "Laptop").native_value == pytest.approx(2.0)
     assert KeeneticClientRssiSensor(coordinator, entry, mac, "Laptop").native_value == -55
-    assert KeeneticClientTxRateSensor(coordinator, entry, mac, "Laptop").native_value == 300
+    assert KeeneticClientTxRateSensor(coordinator, entry, mac, "Laptop").native_value == 300  # already a 6 Mbit/s multiple
     mode = KeeneticClientWifiModeSensor(coordinator, entry, mac, "Laptop")
     assert mode.native_value == "11AC"
     assert mode.icon == "mdi:wifi-strength-3"
@@ -423,7 +426,7 @@ def test_client_detail_sensors_pin_online_offline_and_counter_edges() -> None:
     assert KeeneticClientLastSeenSensor(coordinator, entry, mac, "Laptop").native_value is not None
 
     missing = _coordinator({})
-    assert KeeneticClientUptimeSensor(missing, entry, mac, "Laptop").native_value == 0
+    assert KeeneticClientUptimeSensor(missing, entry, mac, "Laptop").native_value is None
     assert KeeneticClientRssiSensor(missing, entry, mac, "Laptop").native_value is None
     assert KeeneticClientConnectionTypeSensor(missing, entry, mac, "Laptop").native_value == "unknown"
     assert KeeneticClientWifiModeSensor(missing, entry, mac, "Laptop").native_value is None
@@ -623,7 +626,6 @@ def test_client_sensor_metadata_and_remaining_connection_branches() -> None:
         "WiFi Band",
         "WiFi Mode",
     ]
-    assert sensors[1].native_unit_of_measurement == "seconds"
     assert sensors[3].native_unit_of_measurement == "gigabytes"
     assert sensors[5].native_unit_of_measurement == "dBm"
     assert sensors[6].native_unit_of_measurement == "Mbps"
