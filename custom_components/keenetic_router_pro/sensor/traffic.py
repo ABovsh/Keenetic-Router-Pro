@@ -69,17 +69,18 @@ class _TrafficSensorBase(ControllerEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         stats = self._stats
-        # The packet counter is deliberately absent: it advances on every poll,
-        # so publishing it made HA write a recorder row each tick even while the
-        # GiB state (rounded to 2 dp) was unchanged. Errors/dropped stay — they
-        # sit still on a healthy link, so a row means something actually broke.
+        # Only the errors counter survives here. Packets and dropped both
+        # advance on every poll on a normal WAN — measured on live hardware,
+        # rxdropped moved 364021 -> 364038 -> 364056 across three ticks while
+        # the sensor's own GiB value never changed — so publishing either one
+        # forced a recorder row per tick. Errors sit at 0 on a healthy link, so
+        # when it does move a row is exactly what you want.
         return {
             "interface": self._iface_name,
             "type": stats.get("interface_type"),
             "link": stats.get("link"),
             "state": stats.get("state"),
             f"{self._direction}errors": stats.get(f"{self._direction}errors"),
-            f"{self._direction}dropped": stats.get(f"{self._direction}dropped"),
         }
 
 

@@ -24,11 +24,12 @@ git log.
   long-term statistics behind it, the new one is a separate entity: the old
   `..._wi_fi_session` entity is removed automatically on upgrade and a fresh one
   appears. Its history does not carry over.
-- Interface RX/TX sensors no longer publish the `rxpackets` / `txpackets`
-  attribute. It advanced on every poll, which forced a history row even when the
-  sensor's own value had not moved. `rxerrors`/`txerrors` and
-  `rxdropped`/`txdropped` remain — those sit still on a healthy link, so a
-  change there is worth recording.
+- Interface RX/TX sensors no longer publish the `rxpackets` / `txpackets` or
+  `rxdropped` / `txdropped` attributes. All four advance on every poll — even a
+  perfectly healthy WAN drops broadcast traffic continuously — which forced a
+  history row even when the sensor's own value had not moved.
+  `rxerrors`/`txerrors` remain: they sit at 0 until something is actually
+  wrong, so a change there is worth recording.
 - WAN RX/TX Throughput is rounded to the nearest 10 kbit/s. An idle link still
   carries a few hundred bytes per second of ARP and keepalive traffic, which
   jittered on every poll; it now reads a flat 0. Real traffic is unaffected at

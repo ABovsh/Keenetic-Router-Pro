@@ -229,7 +229,6 @@ def test_traffic_sensor_positive_value_attrs_and_sanitized_unique_id() -> None:
                     "link": "up",
                     "state": "up",
                                 "rxerrors": "1",
-                    "rxdropped": "0",
                 }
             }
         }
@@ -249,5 +248,4 @@ def test_traffic_sensor_positive_value_attrs_and_sanitized_unique_id() -> None:
         "link": "up",
         "state": "up",
         "rxerrors": "1",
-        "rxdropped": "0",
     }

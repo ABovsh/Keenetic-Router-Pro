@@ -50,13 +50,14 @@ def _client_coordinator(uptime: int) -> SimpleNamespace:
     )
 
 
-def test_traffic_sensor_omits_the_per_poll_packet_counter() -> None:
-    """rxpackets/txpackets advance every poll and forced a row each tick.
+def test_traffic_sensor_omits_every_per_poll_counter() -> None:
+    """Packets AND dropped advance every poll and forced a row each tick.
 
     The GiB state is rounded to 2 dp, so on most interfaces it is unchanged
     between polls — but HA only dedups when state AND every attribute match, so
-    the moving packet counter defeated it. Errors and dropped stay: they sit
-    still on a healthy link.
+    either moving counter defeated it. Measured on live hardware: rxdropped
+    moved on every tick of a perfectly healthy WAN. Errors stay, because it
+    sits at 0 until something is actually wrong.
     """
     stats = {
         "GigabitEthernet1": {
@@ -80,8 +81,8 @@ def test_traffic_sensor_omits_the_per_poll_packet_counter() -> None:
             coordinator, _entry(), "GigabitEthernet1", "WAN"
         ).extra_state_attributes
         assert f"{direction}packets" not in attrs
+        assert f"{direction}dropped" not in attrs
         assert attrs[f"{direction}errors"] == 0
-        assert attrs[f"{direction}dropped"] == (7 if direction == "rx" else 8)
 
 
 @pytest.mark.parametrize(
