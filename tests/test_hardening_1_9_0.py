@@ -146,7 +146,8 @@ def test_session_start_moves_when_the_client_reconnects() -> None:
     coordinator.data["clients_by_mac"][MAC]["uptime"] = 30
     new_start = sensor.native_value
 
-    assert new_start is not None and old_start is not None
+    assert new_start is not None
+    assert old_start is not None
     assert new_start > old_start
     assert (datetime.now().astimezone() - new_start) < timedelta(seconds=60)
 
