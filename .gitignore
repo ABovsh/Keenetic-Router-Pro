@@ -19,3 +19,6 @@ AUDIT_FINDINGS*.md
 *_PLAN.md
 *.local.md
 .codex
+
+# Local-only planning docs (pre-push hook blocks docs/internal/ anyway)
+docs/internal/
