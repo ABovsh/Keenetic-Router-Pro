@@ -215,3 +215,56 @@ def test_rate_limit_rejects_a_negative_rate() -> None:
 
     with pytest.raises(ValueError):
         asyncio.run(_Api().async_set_client_rate_limit("aa:bb:cc:dd:ee:ff", -1))
+
+
+def test_session_sensor_uses_a_new_unique_id_not_the_seconds_counter_one() -> None:
+    """Reusing `_uptime` would fork the statistic_id of an existing numeric series.
+
+    The old sensor was MEASUREMENT/seconds and has long-term statistics behind
+    it on every install that has been running a while. A timestamp under the
+    same id makes those graphs unreadable with no migration path, so this is a
+    new entity — and `_async_prune_client_entities` removes the old one.
+    """
+    coordinator = _client_coordinator(100)
+    sensor = KeeneticClientUptimeSensor(coordinator, _entry(), MAC, "Laptop")
+    assert sensor.unique_id.endswith("_session_start")
+    assert not sensor.unique_id.endswith("_uptime")
+
+
+def test_prune_removes_retired_and_deselected_client_entities() -> None:
+    """Dialling `client_sensors` back must not leave unavailable orphans."""
+    import sys
+
+    from custom_components.keenetic_router_pro import (
+        _async_prune_client_entities,
+    )
+
+    removed: list[str] = []
+
+    class _Registry:
+        def async_get_entity_id(self, platform, domain, unique_id):
+            return f"sensor.{unique_id}"
+
+        def async_remove(self, entity_id):
+            removed.append(entity_id)
+
+    module = type(sys)("homeassistant.helpers.entity_registry")
+    module.async_get = lambda _hass: _Registry()
+    sys.modules["homeassistant.helpers.entity_registry"] = module
+
+    entry = SimpleNamespace(
+        entry_id="entry_123",
+        title="Router",
+        data={"tracked_clients": [{"mac": MAC, "name": "Laptop"}]},
+        options={"client_sensors": "basic"},
+    )
+    _async_prune_client_entities(object(), entry)
+
+    suffixes = {name.rsplit("_client_", 1)[1] for name in removed}
+    # The retired seconds counter, plus everything "basic" does not create.
+    assert f"{MAC}_uptime" in suffixes
+    assert f"{MAC}_rx" in suffixes
+    assert f"{MAC}_txrate" in suffixes
+    # …but never the sensors "basic" still creates.
+    assert f"{MAC}_ip" not in suffixes
+    assert f"{MAC}_session_start" not in suffixes

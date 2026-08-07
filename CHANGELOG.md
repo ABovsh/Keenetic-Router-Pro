@@ -20,7 +20,10 @@ git log.
   for the whole session, and the dashboard still shows "3 hours ago".
   In templates, replace `states('sensor.…_wi_fi_session')` with
   `as_timestamp(now()) - as_timestamp(states('sensor.…_wi_fi_session'))` to get
-  the duration back in seconds.
+  the duration back in seconds. Because the old sensor was numeric and had
+  long-term statistics behind it, the new one is a separate entity: the old
+  `..._wi_fi_session` entity is removed automatically on upgrade and a fresh one
+  appears. Its history does not carry over.
 - Interface RX/TX sensors no longer publish the `rxpackets` / `txpackets`
   attribute. It advanced on every poll, which forced a history row even when the
   sensor's own value had not moved. `rxerrors`/`txerrors` and
@@ -32,6 +35,24 @@ git log.
   any resolution a dashboard can show.
 - Wi-Fi **Link Speed** is rounded to the nearest 6 Mbit/s, roughly one rate step.
   The negotiated rate renegotiates constantly and was recording a row each time.
+
+### ✨ Added
+
+- **Bandwidth Limit** — a per-client control that writes the router's traffic
+  shaper (`ip traffic-shape host`). Set it to 0 to remove the cap. Disabled by
+  default; enable it on the client's device page.
+- **Events** for automations to trigger on directly, instead of watching entity
+  state: `keenetic_router_pro_client_connected`,
+  `keenetic_router_pro_client_disconnected` and
+  `keenetic_router_pro_wan_failover`. Each client event carries the MAC, name,
+  IP, interface and SSID; the failover event carries the old and new WAN.
+- **Per-client sensors** option (Settings → Devices & services → Configure):
+  `full` (unchanged, the default), `basic` (IP, session, last seen, connection
+  type) or `off`. On a large network this family is most of the entity count.
+  Entities the new choice no longer creates are removed rather than left behind
+  as unavailable.
+- A repair notice listing the feature groups your router turned out not to
+  support, so missing entities are no longer indistinguishable from a fault.
 
 ### 🔧 Changed
 

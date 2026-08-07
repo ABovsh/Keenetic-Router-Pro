@@ -20,13 +20,22 @@ from .const import (
     DEFAULT_PORT,
     DEFAULT_SSL,
     CONF_USE_CHALLENGE_AUTH,
+    CLIENT_SENSORS_FULL,
+    CLIENT_SENSORS_OFF,
+    CONF_CLIENT_SENSORS,
+    DEFAULT_CLIENT_SENSORS,
     EVENT_CLIENT_CONNECTED,
     EVENT_CLIENT_DISCONNECTED,
     EVENT_NEW_DEVICE,
     EVENT_WAN_FAILOVER,
 )
 from .coordinator import KeeneticCoordinator
-from .utils import mask_identifier, mesh_unique_id, normalize_mac
+from .utils import (
+    iter_tracked_clients,
+    mask_identifier,
+    mesh_unique_id,
+    normalize_mac,
+)
 
 
 @dataclass
@@ -214,6 +223,47 @@ def _async_migrate_mesh_unique_ids(
             mesh_unique_id(entry.entry_id, node_id, "firmware_update_v2"),
         )
 
+# Per-client sensor unique-id suffixes, split by the ``client_sensors`` option.
+# "basic" keeps the presence-adjacent facts; "full" adds the counters.
+_BASIC_CLIENT_SUFFIXES = ("ip", "session_start", "last_seen", "connection_type")
+_FULL_CLIENT_SUFFIXES = ("rx", "tx", "rssi", "txrate", "wifi_band", "wifi_mode")
+# Retired ids that must never be left behind: the seconds-counter session sensor
+# was replaced by a timestamp under a new unique_id (1.9.0).
+_RETIRED_CLIENT_SUFFIXES = ("uptime",)
+
+
+@callback
+def _async_prune_client_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove per-client entities this configuration no longer creates.
+
+    Without this, retiring an id or dialling ``client_sensors`` back leaves the
+    old entities registered forever as ``unavailable`` — the user has no way to
+    clean them up short of deleting each one by hand.
+    """
+    try:
+        er = importlib.import_module("homeassistant.helpers.entity_registry")
+    except ImportError:
+        return
+
+    options = dict(getattr(entry, "options", None) or {})
+    client_sensors = options.get(CONF_CLIENT_SENSORS, DEFAULT_CLIENT_SENSORS)
+
+    stale = list(_RETIRED_CLIENT_SUFFIXES)
+    if client_sensors != CLIENT_SENSORS_FULL:
+        stale.extend(_FULL_CLIENT_SUFFIXES)
+    if client_sensors == CLIENT_SENSORS_OFF:
+        stale.extend(_BASIC_CLIENT_SUFFIXES)
+
+    registry = er.async_get(hass)
+    for mac, _label, _ip in iter_tracked_clients(entry):
+        for suffix in stale:
+            entity_id = registry.async_get_entity_id(
+                "sensor", DOMAIN, f"{entry.entry_id}_client_{mac}_{suffix}"
+            )
+            if entity_id is not None:
+                registry.async_remove(entity_id)
+
+
 # Hassfest requires every integration that defines async_setup to declare
 # a CONFIG_SCHEMA. We only configure via the UI (config_flow), so the
 # canonical helper for "no YAML support" is exactly what we want here.
@@ -287,6 +337,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry,
         coordinator.data.get("mesh_nodes", []) if coordinator.data else [],
     )
+
+    _async_prune_client_entities(hass, entry)
 
     _async_update_insecure_http_issue(hass, entry, host, use_ssl)
 

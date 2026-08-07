@@ -174,7 +174,11 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        return f"{self._entry_id}_client_{self._mac}_uptime"
+        # NOT ..._uptime: that id belonged to a numeric seconds sensor with
+        # long-term statistics behind it. Reusing it for a timestamp would fork
+        # the statistic_id and quietly break every existing history graph, so
+        # this is a new entity and the old one is pruned at setup.
+        return f"{self._entry_id}_client_{self._mac}_session_start"
 
     @property
     def name(self) -> str:
