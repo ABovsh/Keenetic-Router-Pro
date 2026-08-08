@@ -517,8 +517,12 @@ def test_crypto_map_sensors_pin_state_counters_and_missing_tunnel() -> None:
     assert KeeneticCryptoMapIkeStateSensor(coordinator, entry, "Office").native_value == "ESTABLISHED"
     assert KeeneticCryptoMapRxBytesSensor(coordinator, entry, "Office").native_value == 100
     assert KeeneticCryptoMapTxBytesSensor(coordinator, entry, "Office").native_value == 200
-    assert KeeneticCryptoMapRxThroughputSensor(coordinator, entry, "Office").native_value == pytest.approx(28.0)
-    assert KeeneticCryptoMapTxThroughputSensor(coordinator, entry, "Office").native_value == pytest.approx(32.0)
+    # 28 and 32 bit/s is tunnel keepalive chatter. Crypto-map throughput now
+    # shares the WAN quantization (nearest 10 kbit/s), which flattens that
+    # background to a steady 0 instead of writing a recorder row per poll.
+    # See tests/test_hardening_1_10_1.py for the deadband/quantization contract.
+    assert KeeneticCryptoMapRxThroughputSensor(coordinator, entry, "Office").native_value == pytest.approx(0.0)
+    assert KeeneticCryptoMapTxThroughputSensor(coordinator, entry, "Office").native_value == pytest.approx(0.0)
 
     missing = _coordinator({"crypto_maps": {}})
     assert KeeneticCryptoMapStateSensor(missing, entry, "Office").native_value is None

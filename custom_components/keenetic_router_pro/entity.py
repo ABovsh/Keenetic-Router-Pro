@@ -8,6 +8,8 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from .coordinator import KeeneticCoordinator
 from .utils import (
     apply_deadband,
+    apply_relative_deadband,
+    quantize_data_rate,
     find_client_by_mac,
     find_mesh_node,
     get_main_device_info,
@@ -57,6 +59,39 @@ class DeadbandMixin:
         )
         self._deadband_published = published
         return published
+
+
+class ThroughputDeadbandMixin:
+    """Quantize a byte/s counter to bit/s and hold it until it really moves.
+
+    Throughput spans six orders of magnitude, so a fixed step cannot serve it:
+    the 10 kbit/s quantization that flattens idle noise still let a gigabit
+    link write a row per poll. A 2 % band is finer than any graph can render,
+    with the quantization step kept as the near-zero floor.
+
+    This lived in the WAN sensor module until the site-to-site tunnel sensors
+    turned out to need it too and had gone without — the same "the next
+    instance gets missed" failure as the ping-check counters. It belongs here
+    so a throughput sensor is damped by default.
+    """
+
+    _THROUGHPUT_DEADBAND = 0.02
+    _THROUGHPUT_FLOOR = 10_000.0
+
+    def _publish_throughput(self, bytes_per_second: Any) -> float | None:
+        if bytes_per_second is None or isinstance(bytes_per_second, bool):
+            return None
+        try:
+            rate = quantize_data_rate(float(bytes_per_second) * 8)
+        except (TypeError, ValueError):
+            return None
+        self._published_rate = apply_relative_deadband(
+            rate,
+            getattr(self, "_published_rate", None),
+            self._THROUGHPUT_DEADBAND,
+            floor=self._THROUGHPUT_FLOOR,
+        )
+        return self._published_rate
 
 
 class _FingerprintedCoordinatorEntity(CoordinatorEntity):

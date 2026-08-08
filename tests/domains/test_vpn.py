@@ -214,3 +214,53 @@ async def test_vpn_error_paths_return_empty(exc: Exception) -> None:
 
     assert await client.async_get_crypto_maps() == {}
     assert await client.async_get_ipsec_diagnostics() == {}
+
+
+async def test_ipsec_status_falls_back_to_config_when_show_ipsec_fails() -> None:
+    """A failed status read must still leave a disabled tunnel available/off.
+
+    If this path returned nothing, every crypto-map entity would go
+    ``unavailable`` on a transient timeout and strand recovery automations
+    that guard on the switch reading ``"on"``.
+    """
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    client._rci_get = AsyncMock(side_effect=asyncio.TimeoutError())
+    client.async_get_crypto_map_config = AsyncMock(
+        return_value={"Office": {"enabled": False, "remote_endpoint": "198.51.100.1"}}
+    )
+
+    result = await client.async_get_ipsec_status()
+
+    assert "Office" in result
+    assert result["Office"]["enabled"] is False
+
+
+async def test_ipsec_status_uses_status_alone_when_crypto_map_config_fails() -> None:
+    """A failed config read must not discard an established tunnel's status."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    client._rci_get = AsyncMock(
+        return_value={
+            "ipsec_statusall": (
+                "Security Associations (1 up, 0 connecting):\n"
+                "        Office[1]: ESTABLISHED 10 seconds ago, "
+                "192.0.2.1[192.0.2.1]...198.51.100.1[198.51.100.1]\n"
+            )
+        }
+    )
+    client.async_get_crypto_map_config = AsyncMock(
+        side_effect=KeeneticApiError("crypto/map unavailable")
+    )
+
+    result = await client.async_get_ipsec_status()
+
+    assert "Office" in result
+
+
+async def test_ipsec_status_propagates_cancellation_from_either_read() -> None:
+    """Cancellation must never be swallowed into a degraded result."""
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    client._rci_get = AsyncMock(side_effect=asyncio.CancelledError())
+    client.async_get_crypto_map_config = AsyncMock(return_value={})
+
+    with pytest.raises(asyncio.CancelledError):
+        await client.async_get_ipsec_status()

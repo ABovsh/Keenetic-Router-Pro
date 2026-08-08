@@ -20,10 +20,15 @@ from custom_components.keenetic_router_pro.const import CONF_TRACKED_CLIENTS
 class ConfigEntries:
     def __init__(self) -> None:
         self.updated = []
+        self.updated_options = []
 
-    def async_update_entry(self, entry, *, data=None):
+    def async_update_entry(self, entry, *, data=None, options=None):
         self.updated.append(data)
-        entry.data = data
+        self.updated_options.append(options)
+        if data is not None:
+            entry.data = data
+        if options is not None:
+            entry.options = options
 
 
 def _entry(runtime_client=None) -> SimpleNamespace:
@@ -157,6 +162,9 @@ async def test_options_flow_adds_and_removes_tracked_clients() -> None:
             ],
         }
     ]
+    # Options ride along in the SAME write, so Home Assistant's own post-flow
+    # options write is a no-op and the update listener reloads once, not twice.
+    assert config_entries.updated_options == [{"client_sensors": "full"}]
 
 
 async def test_options_flow_creates_temporary_client_without_runtime_client(

@@ -769,27 +769,37 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
                 _tracked_client_lookup(self._available_clients, current_tracked),
             )
 
+            new_options = {
+                CONF_CLIENT_SENSORS: user_input.get(
+                    CONF_CLIENT_SENSORS, DEFAULT_CLIENT_SENSORS
+                ),
+            }
+
             # Update configuration only when the selection actually changed —
             # an unchanged save should not trigger a reload of the integration.
+            #
+            # Write data AND options in the SAME call. Home Assistant writes
+            # ``options`` itself once this flow returns, and the update
+            # listener reloads the entry on any change: two separate writes
+            # therefore reloaded the integration twice for one save, tearing
+            # down and rebuilding every entity a second time. Setting options
+            # here makes HA's own write a no-op, so the listener fires once.
             new_data = dict(self._config_entry.data)
-            if new_data.get(CONF_TRACKED_CLIENTS) != tracked_clients:
+            if (
+                new_data.get(CONF_TRACKED_CLIENTS) != tracked_clients
+                or self._config_entry.options != new_options
+            ):
                 new_data[CONF_TRACKED_CLIENTS] = tracked_clients
                 self.hass.config_entries.async_update_entry(
                     self._config_entry,
                     data=new_data,
+                    options=new_options,
                 )
                 _LOGGER.debug(
                     "Updated configuration with %d tracked clients",
                     len(tracked_clients),
                 )
-            return self.async_create_entry(
-                title="",
-                data={
-                    CONF_CLIENT_SENSORS: user_input.get(
-                        CONF_CLIENT_SENSORS, DEFAULT_CLIENT_SENSORS
-                    ),
-                },
-            )
+            return self.async_create_entry(title="", data=new_options)
 
         # Get current tracked clients
         current_tracked = self._config_entry.data.get(CONF_TRACKED_CLIENTS, [])

@@ -93,6 +93,18 @@ _MAC_KEYED_INDEXES = (
     "mesh_nodes_by_cid",
 )
 
+# Coordinator fields that are a bare set of MAC strings rather than a dict
+# keyed by one. ``async_redact_data`` only scrubs dict VALUES by key, so every
+# one of these leaks its MACs (and a set is not JSON-native either). All four
+# are published together by ``KeeneticCoordinator._async_update_data``; keep
+# this tuple in step with it.
+_MAC_SET_FIELDS = (
+    "new_clients",
+    "online_clients",
+    "connected_clients",
+    "disconnected_clients",
+)
+
 
 def _strip_mac_keyed_indexes(data: Any) -> Any:
     if not isinstance(data, dict):
@@ -107,11 +119,10 @@ def _strip_mac_keyed_indexes(data: Any) -> Any:
             **mesh_assoc,
             "by_node": {"<redacted-mac-keys>": len(mesh_assoc["by_node"])},
         }
-    # ``new_clients`` is a set of MAC strings — async_redact_data only scrubs
-    # dict VALUES by key, so the MACs would leak (and a set isn't JSON-native).
-    new_clients = stripped.get("new_clients")
-    if isinstance(new_clients, (set, frozenset, list, tuple)):
-        stripped["new_clients"] = {"<redacted-mac-set>": len(new_clients)}
+    for field in _MAC_SET_FIELDS:
+        macs = stripped.get(field)
+        if isinstance(macs, (set, frozenset, list, tuple)):
+            stripped[field] = {"<redacted-mac-set>": len(macs)}
     # Mesh node ``id``/``cid`` fall back to the node MAC on routers without
     # MWS member data; redact those identifiers (the ``mac`` key is already
     # redacted, but ``id``/``cid`` are not in TO_REDACT).

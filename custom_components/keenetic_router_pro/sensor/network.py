@@ -16,12 +16,10 @@ from homeassistant.const import UnitOfTime, UnitOfInformation, UnitOfDataRate, E
 
 from ..const import LINK_STATE_DOWN, LINK_STATE_UP, WAN_STATUS_CONNECTED, WAN_STATUS_LINK_UP
 from ..coordinator import KeeneticCoordinator
-from ..entity import ControllerEntity, WanEntity
+from ..entity import ControllerEntity, ThroughputDeadbandMixin, WanEntity
 from ..utils import (
-    apply_relative_deadband,
     coerce_byte_count,
     coerce_seconds,
-    quantize_data_rate,
 )
 
 _ICON_ETHERNET = "mdi:ethernet"
@@ -502,15 +500,9 @@ class KeeneticWanTxBytesSensor(_WanBytesBase):
         return "TX Bytes"
 
 
-class _WanThroughputBase(_WanSensorBase):
+class _WanThroughputBase(ThroughputDeadbandMixin, _WanSensorBase):
     _attr_device_class = SensorDeviceClass.DATA_RATE
     _attr_state_class = SensorStateClass.MEASUREMENT
-    # Throughput spans six orders of magnitude, so a fixed step cannot serve
-    # it: the 10 kbit/s quantization that flattens idle noise still let a
-    # gigabit link write a row per poll. A 2 % band is finer than any graph
-    # can render, with the old step kept as the near-zero floor.
-    _THROUGHPUT_DEADBAND = 0.02
-    _THROUGHPUT_FLOOR = 10_000.0
     # See _WanBytesBase: throughput fields are also in the base ignore set.
     _FINGERPRINT_IGNORE = frozenset()
     _attr_native_unit_of_measurement = UnitOfDataRate.BITS_PER_SECOND
@@ -522,20 +514,7 @@ class _WanThroughputBase(_WanSensorBase):
         wan = self._wan
         if not wan:
             return None
-        v = wan.get(self._field)
-        if v is None or isinstance(v, bool):
-            return None
-        try:
-            rate = quantize_data_rate(float(v) * 8)  # bytes/s → bit/s
-        except (TypeError, ValueError):
-            return None
-        self._published_rate = apply_relative_deadband(
-            rate,
-            getattr(self, "_published_rate", None),
-            self._THROUGHPUT_DEADBAND,
-            floor=self._THROUGHPUT_FLOOR,
-        )
-        return self._published_rate
+        return self._publish_throughput(wan.get(self._field))  # bytes/s → bit/s
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:

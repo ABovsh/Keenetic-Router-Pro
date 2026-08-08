@@ -30,7 +30,7 @@ from homeassistant.const import (
 )
 
 from ..coordinator import KeeneticCoordinator
-from ..entity import CryptoMapEntity
+from ..entity import CryptoMapEntity, ThroughputDeadbandMixin
 from ..utils import coerce_byte_count
 
 
@@ -176,7 +176,7 @@ class KeeneticCryptoMapTxBytesSensor(_CryptoMapBytesBase):
         return "TX Bytes"
 
 
-class _CryptoMapThroughputBase(_CryptoMapSensorBase):
+class _CryptoMapThroughputBase(ThroughputDeadbandMixin, _CryptoMapSensorBase):
     """Shared RX/TX throughput base.
 
     Throughput is computed in the coordinator as a delta against the
@@ -197,13 +197,7 @@ class _CryptoMapThroughputBase(_CryptoMapSensorBase):
         cmap = self._cmap
         if cmap is None:
             return None
-        v = cmap.get(self._field)
-        if v is None or isinstance(v, bool):
-            return None
-        try:
-            return float(v) * 8  # bytes/s → bit/s
-        except (TypeError, ValueError):
-            return None
+        return self._publish_throughput(cmap.get(self._field))  # bytes/s → bit/s
 
 
 class KeeneticCryptoMapRxThroughputSensor(_CryptoMapThroughputBase):

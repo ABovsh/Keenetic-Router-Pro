@@ -500,11 +500,17 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     }
                 store = getattr(self, "_oom_store", None)
                 stored = None
+                # A failed load must NOT mark the state loaded: the counter
+                # would stay at 0 for the whole session and the next OOM event
+                # would save that 0 over the real persisted total. Retry on the
+                # next tick instead — a busy .storage/ at boot is transient.
+                loaded = store is None
                 if store is not None:
                     try:
                         stored = await store.async_load()
+                        loaded = True
                     except (OSError, ValueError, TypeError) as err:
-                        _LOGGER.debug("OOM Store load failed: %s — starting from 0", err)
+                        _LOGGER.debug("OOM Store load failed: %s — retrying next tick", err)
                 if isinstance(stored, dict):
                     self._oom_state = {
                         "last_seen_iso": stored.get("last_seen_iso"),
@@ -513,14 +519,17 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         ),
                         "total": coerce_int(stored.get("total"), 0),
                     }
-                self._oom_state_loaded = True
+                self._oom_state_loaded = loaded
 
             events = (
                 ipsec_diagnostics.get("events")
                 if very_slow_refresh and ipsec_diagnostics
                 else None
             )
-            if events:
+            # Advancing on an unloaded state would count up from 0 and then
+            # persist that over the real total. Skip the tick; the events are
+            # still in the router log when the load succeeds.
+            if events and self._oom_state_loaded:
                 next_oom_state = advance_oom_state(self._oom_state, events)
                 if next_oom_state != self._oom_state:
                     self._oom_state = next_oom_state
