@@ -71,7 +71,6 @@
       "already_configured": "Device is already configured",
       "already_in_progress": "Configuration flow is already in progress",
       "no_host": "No host found in discovery data",
-      "no_clients": "No clients found on the network",
       "reauth_successful": "Reauthentication was successful",
       "reconfigure_successful": "Reconfiguration was successful",
       "unknown": "Unexpected error — the router's config entry no longer exists or could not be loaded."
@@ -90,9 +89,6 @@
           "client_sensors": "How much detail to create for each tracked client. 'full' is every sensor (the existing behaviour), 'basic' keeps IP, session, last seen and connection type, 'off' creates none. Presence tracking and the block/policy controls are unaffected."
         }
       }
-    },
-    "abort": {
-      "no_clients": "No clients found on the network"
     }
   },
   "entity": {

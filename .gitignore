@@ -22,3 +22,6 @@ AUDIT_FINDINGS*.md
 
 # Local-only planning docs (pre-push hook blocks docs/internal/ anyway)
 docs/internal/
+
+# Local agent instructions — machine-local, never published.
+AGENTS.md

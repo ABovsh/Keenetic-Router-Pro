@@ -57,6 +57,11 @@ KeeneticConfigEntry = ConfigEntry  # ConfigEntry[KeeneticRuntimeData] on HA 2024
 
 _LOGGER = logging.getLogger(__name__)
 
+# Imported lazily so the tests' stub HA package can omit them; naming the
+# modules once keeps the seven call sites from drifting apart.
+_ENTITY_REGISTRY = "homeassistant.helpers.entity_registry"
+_DEVICE_REGISTRY = "homeassistant.helpers.device_registry"
+
 ISSUE_INSECURE_HTTP = "insecure_http"
 ISSUE_UNSUPPORTED_FEATURES = "unsupported_features"
 
@@ -136,7 +141,7 @@ def _async_prune_interface_switches(hass: HomeAssistant, entry: ConfigEntry) -> 
     nothing removes them on its own; setup has to.
     """
     try:
-        er = importlib.import_module("homeassistant.helpers.entity_registry")
+        er = importlib.import_module(_ENTITY_REGISTRY)
     except ImportError:
         return
     entries_for = getattr(er, "async_entries_for_config_entry", None)
@@ -167,8 +172,8 @@ def _async_remove_stale_devices(hass: HomeAssistant, entry: ConfigEntry) -> None
     off is wanted, and deleting it would silently discard that decision.
     """
     try:
-        dr = importlib.import_module("homeassistant.helpers.device_registry")
-        er = importlib.import_module("homeassistant.helpers.entity_registry")
+        dr = importlib.import_module(_DEVICE_REGISTRY)
+        er = importlib.import_module(_ENTITY_REGISTRY)
     except ImportError:
         return
 
@@ -197,7 +202,7 @@ async def async_remove_config_entry_device(
     orphaned mesh nodes and rotated-MAC clients could not be cleared by hand.
     """
     try:
-        er = importlib.import_module("homeassistant.helpers.entity_registry")
+        er = importlib.import_module(_ENTITY_REGISTRY)
     except ImportError:
         return False
     entities_for = getattr(er, "async_entries_for_device", None)
@@ -217,7 +222,7 @@ def _router_device_id(hass: HomeAssistant, entry: ConfigEntry) -> str | None:
     tick (before the device exists) is fine — nothing can be listening yet.
     """
     try:
-        dr = importlib.import_module("homeassistant.helpers.device_registry")
+        dr = importlib.import_module(_DEVICE_REGISTRY)
         device = dr.async_get(hass).async_get_device(
             identifiers={(DOMAIN, entry.entry_id)}
         )
@@ -268,7 +273,7 @@ def _async_migrate_mesh_unique_ids(
 ) -> None:
     """Migrate old truncated mesh unique IDs to entry-scoped full IDs."""
     try:
-        er = importlib.import_module("homeassistant.helpers.entity_registry")
+        er = importlib.import_module(_ENTITY_REGISTRY)
     except ImportError:
         return
 
@@ -366,7 +371,7 @@ def _async_prune_client_entities(hass: HomeAssistant, entry: ConfigEntry) -> Non
     clean them up short of deleting each one by hand.
     """
     try:
-        er = importlib.import_module("homeassistant.helpers.entity_registry")
+        er = importlib.import_module(_ENTITY_REGISTRY)
     except ImportError:
         return
 

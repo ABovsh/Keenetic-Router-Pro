@@ -8,6 +8,27 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.10.1
+
+### 🔒 Security
+
+- Diagnostics downloads no longer contain client MAC addresses. The file
+  already redacted the list of newly-seen clients, but the online, connected
+  and disconnected client lists were written out in full — and a diagnostics
+  file is exactly what you are asked to attach to a bug report.
+
+### 🐛 Fixed
+
+- Site-to-site IPsec tunnel throughput sensors now hold their reading until it
+  actually moves, the same way the WAN throughput sensors have since 1.10.0.
+  They were writing a history row on every poll for the life of the tunnel. A
+  side effect is that tunnel keepalive traffic now reads a steady 0 instead of
+  a few dozen bit/s.
+- Saving the options no longer reloads the integration twice, which briefly
+  made every entity unavailable a second time for no reason.
+- The IPsec out-of-memory counter could restart from zero and overwrite its
+  stored total if Home Assistant hit a storage read error while starting up.
+
 ## 1.10.0
 
 ### ⚠️ Breaking
