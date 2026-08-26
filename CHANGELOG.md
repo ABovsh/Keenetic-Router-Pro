@@ -8,6 +8,17 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.15.0
+
+### ✨ Improvements
+
+- Traffic counters update on every 100 MB instead of every 250 MB. The wider
+  step introduced in 1.14.0 cut history writes hardest, but on a quiet link it
+  left whole hours without a single reading, which made hourly traffic graphs
+  lump one hour's usage into the next. The finer step keeps at least one
+  reading per hour while still writing roughly half as much history as before
+  1.14.0.
+
 ## 1.14.0
 
 ### 🐛 Fixed

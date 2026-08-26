@@ -10,13 +10,17 @@ FAST_SCAN_INTERVAL = 60
 # integration's largest recorder cost: on a live link they move on every poll,
 # so undamped they cost a row per poll forever.
 #
-# 250 MB against counters that read in the tens of GB is under one percent, and
-# it is what the numbers asked for. Measured over 183 restart-free minutes of
-# live traffic, the 32 data-size counters wrote 8 424 rows/day; the same values
-# replayed through a 250 MB step give 801. The earlier 50 MB step left them
-# sampling-capped rather than resolution-capped — it bound only just, so a
-# faster poll simply produced more rows.
-COUNTER_DEADBAND_BYTES = 250_000_000
+# The step is bounded from both sides. Too narrow (50 MB) and the counters stay
+# sampling-capped rather than resolution-capped — that step bound only just, so
+# the faster 1.13.0 poll simply produced more rows. Too wide (250 MB, measured
+# live) and a quiet 3.7 GB/day link publishes 0.6 points an hour: whole hours
+# hold no row, and the hourly traffic statistics lump their delta into the next
+# hour.
+#
+# 100 MB sits between them — at least one point an hour on that quiet link,
+# and, replayed over 183 restart-free minutes of live traffic, it takes the 32
+# data-size counters from 8 424 rows/day to 1 519.
+COUNTER_DEADBAND_BYTES = 100_000_000
 CONF_TRACKED_CLIENTS = "tracked_clients"
 FIELD_CONNECTED = "connected"
 INTERFACE_CONF_DISABLED = "disabled"

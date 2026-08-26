@@ -54,7 +54,7 @@ def test_interface_counter_holds_below_the_step() -> None:
     assert sensor.native_value == 43.7
 
     # +20 MB: a real move, but far under anything a graph can render.
-    coordinator.data["interface_stats"]["GigabitEthernet0"]["rxbytes"] += 100_000_000
+    coordinator.data["interface_stats"]["GigabitEthernet0"]["rxbytes"] += 50_000_000
     assert sensor.native_value == 43.7
 
 
@@ -88,7 +88,7 @@ def test_wan_bytes_holds_below_the_step() -> None:
     sensor = KeeneticWanRxBytesSensor(coordinator, _entry(), "PPPoE0")
     assert sensor.native_value == 39_000_000_000
 
-    coordinator.data["wan_by_id"]["PPPoE0"]["rx_bytes"] = 39_100_000_000
+    coordinator.data["wan_by_id"]["PPPoE0"]["rx_bytes"] = 39_050_000_000
     assert sensor.native_value == 39_000_000_000
 
 

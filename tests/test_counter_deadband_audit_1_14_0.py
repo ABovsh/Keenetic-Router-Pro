@@ -75,9 +75,19 @@ def test_every_data_size_sensor_declares_a_deadband() -> None:
     )
 
 
-def test_the_counter_step_is_one_shared_number() -> None:
-    """Stated once in bytes; each base converts it into its own unit."""
-    assert COUNTER_DEADBAND_BYTES == 250_000_000
+def test_the_counter_step_keeps_hourly_resolution() -> None:
+    """Stated once in bytes; each base converts it into its own unit.
+
+    250 MB (1.14.0) cut writes hardest but left a quiet link publishing only
+    0.6 points per hour, so whole hours held no row at all and the hourly
+    traffic statistics lumped their delta into the next hour. 100 MB keeps at
+    least one point an hour on a 3.7 GB/day link, which is the resolution the
+    graphs are actually read at.
+    """
+    assert COUNTER_DEADBAND_BYTES == 100_000_000
+
+    quiet_link_bytes_per_hour = 3.7e9 / 24
+    assert quiet_link_bytes_per_hour / COUNTER_DEADBAND_BYTES >= 1.0
 
 
 # --- 2. The four bases that were missed ---
@@ -89,7 +99,7 @@ def test_crypto_map_bytes_holds_below_the_step() -> None:
     sensor = KeeneticCryptoMapRxBytesSensor(coordinator, _entry(), "OfficeVPN")
     assert sensor.native_value == 5_000_000_000
 
-    data["crypto_maps"]["OfficeVPN"]["rx_bytes"] = 5_100_000_000
+    data["crypto_maps"]["OfficeVPN"]["rx_bytes"] = 5_050_000_000
     assert sensor.native_value == 5_000_000_000
 
     data["crypto_maps"]["OfficeVPN"]["rx_bytes"] = 5_300_000_000
@@ -104,7 +114,7 @@ def test_wireguard_counter_holds_below_the_step() -> None:
     first = sensor.native_value
     assert first == round(10 * GIB / MIB, 2)
 
-    profiles["Wireguard0"]["rxbytes"] = 10 * GIB + 100_000_000
+    profiles["Wireguard0"]["rxbytes"] = 10 * GIB + 50_000_000
     assert sensor.native_value == first
 
     profiles["Wireguard0"]["rxbytes"] = 10 * GIB + 300_000_000
@@ -118,7 +128,7 @@ def test_wifi_counter_holds_below_the_step() -> None:
     first = sensor.native_value
     assert first == 20.0
 
-    stats["WifiMaster0"]["rxbytes"] = 20 * GIB + 100_000_000
+    stats["WifiMaster0"]["rxbytes"] = 20 * GIB + 50_000_000
     assert sensor.native_value == first
 
     stats["WifiMaster0"]["rxbytes"] = 20 * GIB + 300_000_000
