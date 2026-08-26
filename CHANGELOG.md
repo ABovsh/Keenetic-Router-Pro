@@ -8,6 +8,31 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.14.0
+
+### 🐛 Fixed
+
+- The active-connections sensor wrote history rows that carried nothing. Its
+  `free` and `used_percent` attributes were read from the router's raw counters
+  instead of the value the sensor actually published, so once 1.12.0 started
+  holding the state steady the attributes kept moving underneath it and Home
+  Assistant recorded a row anyway.
+
+### ✨ Improvements
+
+- All traffic counters are now damped, not just some. 1.12.0 covered the
+  interface and per-WAN counters; the site-to-site tunnel, WireGuard, Wi-Fi and
+  per-client counters were left writing a row on every poll. They now share one
+  step, expressed once and converted into each sensor's unit.
+- The step itself is wider — 250 MB on counters that read in the tens of
+  gigabytes, and throughput now has to move 10 % (at least 500 kbit/s). The
+  earlier values were narrow enough that a busy link crossed them on nearly
+  every poll, which is why the first attempt did not reduce anything. Across a
+  three-router setup this takes the counters from 8 400 history rows a day to
+  around 800; long-term statistics and graphs are unaffected.
+- The connection-count gauge holds until it moves by 50 connections, matching
+  how far it actually swings between polls.
+
 ## 1.13.0
 
 ### ✨ Improvements

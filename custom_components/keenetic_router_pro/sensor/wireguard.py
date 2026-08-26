@@ -13,7 +13,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfInformation, UnitOfTime, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
-from ..entity import ControllerEntity
+from ..const import COUNTER_DEADBAND_BYTES
+from ..entity import ControllerEntity, DeadbandMixin
 from ..utils import bytes_to_mib, coerce_seconds
 
 
@@ -81,7 +82,7 @@ class KeeneticWgUptimeSensor(_BaseWgSensor):
         return 0
 
 
-class KeeneticWgRxSensor(_BaseWgSensor):
+class KeeneticWgRxSensor(DeadbandMixin, _BaseWgSensor):
     """WireGuard RX (received traffic) sensor."""
     _attr_has_entity_name = True
     # RX bytes is a cumulative counter that resets when the tunnel restarts —
@@ -90,6 +91,8 @@ class KeeneticWgRxSensor(_BaseWgSensor):
     # absolute counter.
     _attr_device_class = SensorDeviceClass.DATA_SIZE
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    # Shared byte step expressed in this sensor's own unit (MiB).
+    _DEADBAND = COUNTER_DEADBAND_BYTES / 1024**2
 
     @property
     def unique_id(self) -> str:
@@ -108,16 +111,18 @@ class KeeneticWgRxSensor(_BaseWgSensor):
         for key in ("rxbytes", "rx", "received"):
             mib = bytes_to_mib(self._wg.get(key))
             if mib is not None:
-                return mib
-        return None
+                return self._apply_deadband(mib)
+        return self._apply_deadband(None)
 
 
-class KeeneticWgTxSensor(_BaseWgSensor):
+class KeeneticWgTxSensor(DeadbandMixin, _BaseWgSensor):
     """WireGuard TX (sent traffic) sensor."""
     _attr_has_entity_name = True
     # See KeeneticWgRxSensor: cumulative counter → TOTAL_INCREASING.
     _attr_device_class = SensorDeviceClass.DATA_SIZE
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    # Shared byte step expressed in this sensor's own unit (MiB).
+    _DEADBAND = COUNTER_DEADBAND_BYTES / 1024**2
 
     @property
     def unique_id(self) -> str:
@@ -136,5 +141,5 @@ class KeeneticWgTxSensor(_BaseWgSensor):
         for key in ("txbytes", "tx", "sent"):
             mib = bytes_to_mib(self._wg.get(key))
             if mib is not None:
-                return mib
-        return None
+                return self._apply_deadband(mib)
+        return self._apply_deadband(None)

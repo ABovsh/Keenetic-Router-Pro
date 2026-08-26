@@ -13,6 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, UnitOfInformation
 
 from ..coordinator import KeeneticCoordinator
+from ..const import COUNTER_DEADBAND_BYTES
 from ..entity import ControllerEntity, DeadbandMixin
 from ..utils import bytes_to_gib
 
@@ -28,12 +29,7 @@ class _TrafficSensorBase(DeadbandMixin, ControllerEntity, SensorEntity):
     _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    # 0.05 GiB (~54 MB). ``bytes_to_gib`` rounds to 0.01 GiB, so every ~10.7 MB
-    # of traffic wrote a recorder row — 3 065 rows/day across the interface
-    # counters, measured live. A counter that reads in the tens of GiB does not
-    # need 10 MB resolution; the coarser step is invisible on a graph and keeps
-    # the value monotonic for TOTAL_INCREASING statistics.
-    _DEADBAND = 0.05
+    _DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
     _direction = "rx"
 
     def __init__(

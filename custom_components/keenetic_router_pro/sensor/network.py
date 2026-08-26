@@ -15,6 +15,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.const import UnitOfTime, UnitOfInformation, UnitOfDataRate, EntityCategory
 
 from ..const import LINK_STATE_DOWN, LINK_STATE_UP, WAN_STATUS_CONNECTED, WAN_STATUS_LINK_UP
+from ..const import COUNTER_DEADBAND_BYTES
 from ..coordinator import KeeneticCoordinator
 from ..entity import (
     ControllerEntity,
@@ -155,11 +156,11 @@ class KeeneticActiveConnectionsSensor(DeadbandMixin, ControllerEntity, SensorEnt
     # MEASUREMENT keeps HA statistics from treating it as a monotonic sum.
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 0
-    # A dithering gauge: measured live it walks 269/296/300/320/387/400 on
-    # consecutive polls of an otherwise quiet router, 993 rows/day across three
-    # routers for a number nobody reads below "a few hundred". Against a 63 488
-    # entry conntrack table a 25-connection band is 0.04 % of capacity.
-    _DEADBAND = 25
+    # A dithering gauge: measured live it walks +31/+70/-97/+54 between
+    # adjacent polls of an otherwise quiet router. 25 was too narrow to catch
+    # that — the gauge stepped straight over it — so 50, still only 0.08 % of
+    # the 63 488-entry conntrack table.
+    _DEADBAND = 50
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -182,22 +183,23 @@ class KeeneticActiveConnectionsSensor(DeadbandMixin, ControllerEntity, SensorEnt
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
+        # Derive from the DEADBANDED value, never the raw one. Both of these
+        # restate the state, so reading the raw counters here meant that on
+        # every tick the deadband held the state the attributes moved anyway
+        # and HA wrote a row carrying nothing — 116 such rows in three hours,
+        # measured after 1.12.0 shipped the deadband without this.
         sys = self.coordinator.data.get("system", {}) or {}
         try:
             conntotal = int(sys.get("conntotal", 0))
-            connfree = int(sys.get("connfree", 0))
         except (TypeError, ValueError, OverflowError):
             conntotal = 0
-            connfree = 0
-        used_percent = (
-            round(max(0, conntotal - connfree) * 100.0 / conntotal, 1)
-            if conntotal > 0
-            else 0
-        )
+        used = self.native_value
         return {
             "total_capacity": conntotal,
-            "free": connfree,
-            "used_percent": used_percent,
+            "free": max(0, conntotal - used),
+            "used_percent": (
+                round(used * 100.0 / conntotal, 1) if conntotal > 0 else 0
+            ),
         }
 
 
@@ -470,11 +472,9 @@ class _WanBytesBase(DeadbandMixin, _WanSensorBase):
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_native_unit_of_measurement = UnitOfInformation.BYTES
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    # Undamped, this was 2 686 rows/day: a byte counter on a live WAN moves on
-    # every single poll. 50 MB against a counter that reads in the tens of GB
-    # is under a tenth of a percent, and a counter reset (router reboot) is a
-    # move far larger than the band, so TOTAL_INCREASING still sees it at once.
-    _DEADBAND = 50_000_000
+    # A counter reset (router reboot) is a move far larger than the band, so
+    # TOTAL_INCREASING still sees it at once.
+    _DEADBAND = COUNTER_DEADBAND_BYTES
     _field = "rx_bytes"
     # native_value reads rx_bytes/tx_bytes — fields the WanEntity base
     # ignores for change-detection. Opt out so counters actually update.

@@ -15,7 +15,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfInformation, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
-from ..entity import ClientEntity
+from ..const import COUNTER_DEADBAND_BYTES
+from ..entity import ClientEntity, DeadbandMixin
 from ..utils import (
     bytes_to_gib,
     coerce_seconds,
@@ -277,13 +278,15 @@ class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
         return self._seen_at.strftime("%d.%m.%Y %H:%M:%S")
 
 
-class KeeneticClientRxSensor(ClientEntity, SensorEntity):
+class KeeneticClientRxSensor(DeadbandMixin, ClientEntity, SensorEntity):
     """Received traffic sensor."""
     _attr_has_entity_name = True
     _attr_icon = "mdi:download-network"
     _attr_device_class = SensorDeviceClass.DATA_SIZE
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Shared byte step expressed in this sensor's own unit (GiB).
+    _DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
     # Per-client counters move constantly; new installs opt in.
     _attr_entity_registry_enabled_default = False
 
@@ -316,17 +319,19 @@ class KeeneticClientRxSensor(ClientEntity, SensorEntity):
     def native_value(self) -> float | None:
         client = self._client
         if not _client_counter_available(client, "rxbytes"):
-            return None
-        return _bytes_to_gb(client.get("rxbytes"))
+            return self._apply_deadband(None)
+        return self._apply_deadband(_bytes_to_gb(client.get("rxbytes")))
 
 
-class KeeneticClientTxSensor(ClientEntity, SensorEntity):
+class KeeneticClientTxSensor(DeadbandMixin, ClientEntity, SensorEntity):
     """Sent traffic sensor."""
     _attr_has_entity_name = True
     _attr_icon = "mdi:upload-network"
     _attr_device_class = SensorDeviceClass.DATA_SIZE
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Shared byte step expressed in this sensor's own unit (GiB).
+    _DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
     # Per-client counters move constantly; new installs opt in.
     _attr_entity_registry_enabled_default = False
 
@@ -359,8 +364,8 @@ class KeeneticClientTxSensor(ClientEntity, SensorEntity):
     def native_value(self) -> float | None:
         client = self._client
         if not _client_counter_available(client, "txbytes"):
-            return None
-        return _bytes_to_gb(client.get("txbytes"))
+            return self._apply_deadband(None)
+        return self._apply_deadband(_bytes_to_gb(client.get("txbytes")))
 
 
 class KeeneticClientRssiSensor(ClientEntity, SensorEntity):

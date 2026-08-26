@@ -74,15 +74,15 @@ class ThroughputDeadbandMixin:
     instance gets missed" failure as the ping-check counters. It belongs here
     so a throughput sensor is damped by default.
 
-    Widened from 2 %/10 kbit to 5 %/100 kbit in 1.12.0: measured on the live
-    recorder DB, the throughput sensors still wrote 2 223 rows/day, because
-    10 kbit/s is a band a 100 Mbit link crosses on background chatter alone.
-    100 kbit/s is 0.1 % of that link — below what any dashboard renders — and
-    cuts the rate by ~59 %.
+Widened twice on measured data: 2 %/10 kbit to 5 %/100 kbit in 1.12.0,
+    then to 10 %/500 kbit in 1.14.0 after 100 kbit turned out to still be
+    crossed on almost every poll (live deltas between adjacent samples ran
+    100-300 kbit). 500 kbit/s is 0.5 % of a 100 Mbit link — finer than a graph
+    renders — and takes the throughput sensors from 2 942 to 1 642 rows/day.
     """
 
-    _THROUGHPUT_DEADBAND = 0.05
-    _THROUGHPUT_FLOOR = 100_000.0
+    _THROUGHPUT_DEADBAND = 0.10
+    _THROUGHPUT_FLOOR = 500_000.0
 
     def _publish_throughput(self, bytes_per_second: Any) -> float | None:
         if bytes_per_second is None or isinstance(bytes_per_second, bool):

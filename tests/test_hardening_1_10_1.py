@@ -101,8 +101,9 @@ def test_crypto_map_throughput_publishes_a_real_move(
 
     assert sensor.native_value == 8_000_000
 
-    data["crypto_maps"]["OfficeVPN"]["rx_throughput"] = 1_100_000
-    assert sensor.native_value == 8_800_000
+    # 10 % of 8 Mbit/s is 800 kbit/s (1.14.0 band), so clear it properly.
+    data["crypto_maps"]["OfficeVPN"]["rx_throughput"] = 1_200_000
+    assert sensor.native_value == 9_600_000
 
 
 # --- 3. A failed OOM Store load must be retried, not latched ---

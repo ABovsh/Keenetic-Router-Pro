@@ -20,7 +20,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from custom_components.keenetic_router_pro.entity import ThroughputDeadbandMixin
 from custom_components.keenetic_router_pro.sensor.network import (
     KeeneticActiveConnectionsSensor,
     KeeneticWanRxBytesSensor,
@@ -55,7 +54,7 @@ def test_interface_counter_holds_below_the_step() -> None:
     assert sensor.native_value == 43.7
 
     # +20 MB: a real move, but far under anything a graph can render.
-    coordinator.data["interface_stats"]["GigabitEthernet0"]["rxbytes"] += 20_000_000
+    coordinator.data["interface_stats"]["GigabitEthernet0"]["rxbytes"] += 100_000_000
     assert sensor.native_value == 43.7
 
 
@@ -64,8 +63,8 @@ def test_interface_counter_publishes_a_real_move() -> None:
     sensor = KeeneticLanRxSensor(coordinator, _entry())
     assert sensor.native_value == 43.7
 
-    coordinator.data["interface_stats"]["GigabitEthernet0"]["rxbytes"] += 100_000_000
-    assert sensor.native_value == 43.79
+    coordinator.data["interface_stats"]["GigabitEthernet0"]["rxbytes"] += 300_000_000
+    assert sensor.native_value == 43.98
 
 
 def test_interface_counter_gap_clears_the_latch() -> None:
@@ -89,7 +88,7 @@ def test_wan_bytes_holds_below_the_step() -> None:
     sensor = KeeneticWanRxBytesSensor(coordinator, _entry(), "PPPoE0")
     assert sensor.native_value == 39_000_000_000
 
-    coordinator.data["wan_by_id"]["PPPoE0"]["rx_bytes"] = 39_010_000_000
+    coordinator.data["wan_by_id"]["PPPoE0"]["rx_bytes"] = 39_100_000_000
     assert sensor.native_value == 39_000_000_000
 
 
@@ -98,8 +97,8 @@ def test_wan_bytes_publishes_a_real_move() -> None:
     sensor = KeeneticWanRxBytesSensor(coordinator, _entry(), "PPPoE0")
     assert sensor.native_value == 39_000_000_000
 
-    coordinator.data["wan_by_id"]["PPPoE0"]["rx_bytes"] = 39_060_000_000
-    assert sensor.native_value == 39_060_000_000
+    coordinator.data["wan_by_id"]["PPPoE0"]["rx_bytes"] = 39_300_000_000
+    assert sensor.native_value == 39_300_000_000
 
 
 def test_wan_bytes_publishes_a_counter_reset_immediately() -> None:
@@ -137,9 +136,8 @@ def test_active_connections_publishes_a_real_move() -> None:
 # --- 4. Throughput: 5 % band over a 100 kbit/s floor ---
 
 
-def test_throughput_floor_is_one_hundred_kbit() -> None:
-    assert ThroughputDeadbandMixin._THROUGHPUT_FLOOR == 100_000.0
-    assert ThroughputDeadbandMixin._THROUGHPUT_DEADBAND == 0.05
+# The exact band moved again in 1.14.0; it is pinned in
+# tests/test_counter_deadband_audit_1_14_0.py rather than duplicated here.
 
 
 def test_wan_throughput_holds_below_the_floor() -> None:
@@ -147,7 +145,7 @@ def test_wan_throughput_holds_below_the_floor() -> None:
     sensor = KeeneticWanRxThroughputSensor(coordinator, _entry(), "PPPoE0")
     assert sensor.native_value == 80_000.0
 
-    coordinator.data["wan_by_id"]["PPPoE0"]["rx_throughput"] = 17_500.0  # 140 kbit/s
+    coordinator.data["wan_by_id"]["PPPoE0"]["rx_throughput"] = 50_000.0  # 400 kbit/s
     assert sensor.native_value == 80_000.0
 
 
@@ -156,8 +154,8 @@ def test_wan_throughput_publishes_a_move_past_the_floor() -> None:
     sensor = KeeneticWanRxThroughputSensor(coordinator, _entry(), "PPPoE0")
     assert sensor.native_value == 80_000.0
 
-    coordinator.data["wan_by_id"]["PPPoE0"]["rx_throughput"] = 30_000.0  # 240 kbit/s
-    assert sensor.native_value == 240_000.0
+    coordinator.data["wan_by_id"]["PPPoE0"]["rx_throughput"] = 100_000.0  # 800 kbit/s
+    assert sensor.native_value == 800_000.0
 
 
 def test_wan_throughput_still_publishes_a_link_going_quiet() -> None:

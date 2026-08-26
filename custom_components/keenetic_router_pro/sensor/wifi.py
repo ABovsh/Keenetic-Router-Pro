@@ -7,6 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfInformation, UnitOfTemperature, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
+from ..const import COUNTER_DEADBAND_BYTES
 from ..entity import ControllerEntity, DeadbandMixin
 from ..utils import bytes_to_gib, coerce_float
 
@@ -90,7 +91,7 @@ class KeeneticWifi5TemperatureSensor(DeadbandMixin, ControllerEntity, SensorEnti
         return bool(getattr(super(), "available", True)) and self.native_value is not None
 
 
-class KeeneticWifi24RxSensor(ControllerEntity, SensorEntity):
+class KeeneticWifi24RxSensor(DeadbandMixin, ControllerEntity, SensorEntity):
     """WiFi 2.4GHz RX sensor."""
     _attr_has_entity_name = True
     _attr_icon = "mdi:download-network"
@@ -98,6 +99,8 @@ class KeeneticWifi24RxSensor(ControllerEntity, SensorEntity):
     _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Shared byte step expressed in this sensor's own unit (GiB).
+    _DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -116,10 +119,10 @@ class KeeneticWifi24RxSensor(ControllerEntity, SensorEntity):
     def native_value(self) -> float | None:
         stats = self.coordinator.data.get("interface_stats", {})
         iface_stats = stats.get(self._iface_name, {})
-        return bytes_to_gib(iface_stats.get("rxbytes"))
+        return self._apply_deadband(bytes_to_gib(iface_stats.get("rxbytes")))
 
 
-class KeeneticWifi24TxSensor(ControllerEntity, SensorEntity):
+class KeeneticWifi24TxSensor(DeadbandMixin, ControllerEntity, SensorEntity):
     """WiFi 2.4GHz TX sensor."""
     _attr_has_entity_name = True
     _attr_icon = "mdi:upload-network"
@@ -127,6 +130,8 @@ class KeeneticWifi24TxSensor(ControllerEntity, SensorEntity):
     _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Shared byte step expressed in this sensor's own unit (GiB).
+    _DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -145,10 +150,10 @@ class KeeneticWifi24TxSensor(ControllerEntity, SensorEntity):
     def native_value(self) -> float | None:
         stats = self.coordinator.data.get("interface_stats", {})
         iface_stats = stats.get(self._iface_name, {})
-        return bytes_to_gib(iface_stats.get("txbytes"))
+        return self._apply_deadband(bytes_to_gib(iface_stats.get("txbytes")))
 
 
-class KeeneticWifi5RxSensor(ControllerEntity, SensorEntity):
+class KeeneticWifi5RxSensor(DeadbandMixin, ControllerEntity, SensorEntity):
     """WiFi 5GHz RX sensor."""
     _attr_has_entity_name = True
     _attr_icon = "mdi:download-network"
@@ -156,6 +161,8 @@ class KeeneticWifi5RxSensor(ControllerEntity, SensorEntity):
     _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Shared byte step expressed in this sensor's own unit (GiB).
+    _DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -174,10 +181,10 @@ class KeeneticWifi5RxSensor(ControllerEntity, SensorEntity):
     def native_value(self) -> float | None:
         stats = self.coordinator.data.get("interface_stats", {})
         iface_stats = stats.get(self._iface_name, {})
-        return bytes_to_gib(iface_stats.get("rxbytes"))
+        return self._apply_deadband(bytes_to_gib(iface_stats.get("rxbytes")))
 
 
-class KeeneticWifi5TxSensor(ControllerEntity, SensorEntity):
+class KeeneticWifi5TxSensor(DeadbandMixin, ControllerEntity, SensorEntity):
     """WiFi 5GHz TX sensor."""
     _attr_has_entity_name = True
     _attr_icon = "mdi:upload-network"
@@ -185,6 +192,8 @@ class KeeneticWifi5TxSensor(ControllerEntity, SensorEntity):
     _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Shared byte step expressed in this sensor's own unit (GiB).
+    _DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -203,4 +212,4 @@ class KeeneticWifi5TxSensor(ControllerEntity, SensorEntity):
     def native_value(self) -> float | None:
         stats = self.coordinator.data.get("interface_stats", {})
         iface_stats = stats.get(self._iface_name, {})
-        return bytes_to_gib(iface_stats.get("txbytes"))
+        return self._apply_deadband(bytes_to_gib(iface_stats.get("txbytes")))

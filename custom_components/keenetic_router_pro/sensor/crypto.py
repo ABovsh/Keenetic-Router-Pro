@@ -30,7 +30,8 @@ from homeassistant.const import (
 )
 
 from ..coordinator import KeeneticCoordinator
-from ..entity import CryptoMapEntity, ThroughputDeadbandMixin
+from ..const import COUNTER_DEADBAND_BYTES
+from ..entity import CryptoMapEntity, DeadbandMixin, ThroughputDeadbandMixin
 from ..utils import coerce_byte_count
 
 
@@ -122,7 +123,7 @@ class KeeneticCryptoMapIkeStateSensor(_CryptoMapSensorBase):
 # ---------- Traffic counters & throughput ----------
 
 
-class _CryptoMapBytesBase(_CryptoMapSensorBase):
+class _CryptoMapBytesBase(DeadbandMixin, _CryptoMapSensorBase):
     """Shared RX/TX byte counter base.
 
     The counters are a sum across all phase-2 SAs of the tunnel. A
@@ -135,6 +136,7 @@ class _CryptoMapBytesBase(_CryptoMapSensorBase):
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_native_unit_of_measurement = UnitOfInformation.BYTES
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _DEADBAND = COUNTER_DEADBAND_BYTES
     _field = "rx_bytes"
     # native_value reads rx_bytes/tx_bytes — fields the CryptoMapEntity base
     # ignores for dedup. Opt out so counter sensors actually update.
@@ -147,7 +149,9 @@ class _CryptoMapBytesBase(_CryptoMapSensorBase):
             return None
         # Reject negative/non-finite counters so a malformed SA byte field
         # does not corrupt the TOTAL_INCREASING long-term statistics.
-        return coerce_byte_count(cmap.get(self._field))
+        count = coerce_byte_count(cmap.get(self._field))
+        held = self._apply_deadband(count)
+        return None if held is None else int(held)
 
 
 class KeeneticCryptoMapRxBytesSensor(_CryptoMapBytesBase):
