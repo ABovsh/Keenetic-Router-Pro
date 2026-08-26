@@ -96,38 +96,58 @@ class _AuthMixin:
         except aiohttp.ClientError as err:
             raise KeeneticApiError(f"Challenge GET failed: {type(err).__name__}") from err
 
-        async with asyncio.timeout(self._request_timeout), get_resp:
-            _LOGGER.debug(
-                "NDW2 challenge GET response: status=%s has_challenge=%s has_cookie=%s",
-                get_resp.status,
-                bool(get_resp.headers.get("X-NDM-Challenge")),
-                bool(get_resp.headers.get("Set-Cookie")),
-            )
-
-            if get_resp.status not in (200, 401):
-                # 5xx / odd statuses here mean a sick or rebooting router,
-                # not bad credentials — keep it a connectivity error.
-                text = await get_resp.text()
-                raise KeeneticApiError(
-                    f"Unexpected status during challenge GET ({get_resp.status}): "
-                    f"{_response_summary(text)}"
+        # Same contract as the POST leg below: a router that sends headers and
+        # then stalls on the body must surface as a retryable connection
+        # error, not a raw asyncio.TimeoutError that escapes setup's error
+        # handling. KeeneticAuthError/KeeneticApiError are neither
+        # TimeoutError nor ClientError, so they propagate unchanged.
+        try:
+            async with asyncio.timeout(self._request_timeout), get_resp:
+                _LOGGER.debug(
+                    "NDW2 challenge GET response: status=%s has_challenge=%s has_cookie=%s",
+                    get_resp.status,
+                    bool(get_resp.headers.get("X-NDM-Challenge")),
+                    bool(get_resp.headers.get("Set-Cookie")),
                 )
 
-            challenge = get_resp.headers.get("X-NDM-Challenge")
-            realm = get_resp.headers.get("X-NDM-Realm", "")
+                if get_resp.status == 403:
+                    # This GET carries no credentials, so a refusal cannot be
+                    # a wrong password — the host simply has no /auth
+                    # endpoint. Auth-class so the caller falls back to Basic.
+                    raise KeeneticAuthError(
+                        "Router refused the challenge-auth endpoint (403); "
+                        "it does not support Challenge Auth"
+                    )
+                if get_resp.status not in (200, 401):
+                    # 5xx / odd statuses here mean a sick or rebooting router,
+                    # not bad credentials — keep it a connectivity error.
+                    text = await get_resp.text()
+                    raise KeeneticApiError(
+                        f"Unexpected status during challenge GET ({get_resp.status}): "
+                        f"{_response_summary(text)}"
+                    )
 
-            if not challenge:
-                raise KeeneticAuthError(
-                    "Router did not return X-NDM-Challenge header. "
-                    "This model may not support Challenge Auth — "
-                    "try disabling 'Challenge Auth' and use Basic Auth instead."
-                )
+                challenge = get_resp.headers.get("X-NDM-Challenge")
+                realm = get_resp.headers.get("X-NDM-Realm", "")
 
-            _LOGGER.debug("NDW2 challenge received for realm=%s", realm)
+                if not challenge:
+                    raise KeeneticAuthError(
+                        "Router did not return X-NDM-Challenge header. "
+                        "This model may not support Challenge Auth — "
+                        "try disabling 'Challenge Auth' and use Basic Auth instead."
+                    )
 
-            # Extract session cookie manually — HA's shared CookieJar(unsafe=False)
-            # silently ignores cookies from bare IP addresses.
-            session_cookie = _cookie_header_from_response(get_resp)
+                _LOGGER.debug("NDW2 challenge received for realm=%s", realm)
+
+                # Extract session cookie manually — HA's shared CookieJar(unsafe=False)
+                # silently ignores cookies from bare IP addresses.
+                session_cookie = _cookie_header_from_response(get_resp)
+        except asyncio.TimeoutError as err:
+            raise KeeneticApiError("Challenge GET response read timed out") from err
+        except aiohttp.ClientError as err:
+            raise KeeneticApiError(
+                f"Challenge GET response read failed: {type(err).__name__}"
+            ) from err
 
         # --- Step 2: Compute NDW2 hashes ---
         # ha1      = md5(username:realm:password)   [hex digest]
@@ -226,7 +246,27 @@ class _AuthMixin:
         async with self._auth_lock:
             if self._authenticated:
                 return
-            if self._use_challenge_auth:
-                await self._async_authenticate_challenge()
-            else:
-                await self._async_authenticate()
+            try:
+                await self._async_authenticate_configured()
+            except KeeneticAuthError:
+                # KeeneticOS 5.2 (NDM-4515) reworked the HTTP auth suite: the
+                # router's own web port now rejects Basic outright and offers
+                # x-ndw2/x-ndw4 challenge auth instead, while the KeenDNS
+                # `rci.` alias still speaks only Basic. Which scheme a host
+                # wants is not knowable from the config entry — an entry that
+                # worked on 5.1 can carry the wrong flag after the update — so
+                # try the other one once and latch it for the session rather
+                # than raising a spurious "re-enter password" reauth.
+                self._use_challenge_auth = not self._use_challenge_auth
+                try:
+                    await self._async_authenticate_configured()
+                except KeeneticAuthError:
+                    self._use_challenge_auth = not self._use_challenge_auth
+                    raise
+
+    async def _async_authenticate_configured(self) -> None:
+        """Authenticate using the scheme currently selected for this session."""
+        if self._use_challenge_auth:
+            await self._async_authenticate_challenge()
+        else:
+            await self._async_authenticate()

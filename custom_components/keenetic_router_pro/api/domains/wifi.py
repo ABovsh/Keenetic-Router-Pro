@@ -179,15 +179,21 @@ class WifiMixin:
                     vis_name = f"{logical_name} {band_label}"
 
                 net: Dict[str, Any] = {
-                    "id": raw_id,          
-                    "name": vis_name,      
+                    "id": raw_id,
+                    "name": vis_name,
                     "ssid": logical_name,
                     "band": band_label,
                     "enabled": enabled,
                     "state": ap.get("state"),
                     "group": group or None,
                     "channel": ap.get("channel"),
-                    "tx_power": ap.get("tx-power") or ap.get("tx_power"),
+                    # `or` would discard a legitimate 0 (minimum/auto power)
+                    # in favour of the underscore spelling firmware never uses.
+                    "tx_power": (
+                        power
+                        if (power := ap.get("tx-power")) is not None
+                        else ap.get("tx_power")
+                    ),
                 }
 
                 for k in list(net.keys()):

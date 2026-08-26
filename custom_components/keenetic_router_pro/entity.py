@@ -241,17 +241,14 @@ class ControllerEntity(CoordinatorEntity):
 class MeshEntity(_FingerprintedCoordinatorEntity):
     """Base class for Mesh node entities."""
 
-    _FINGERPRINT_IGNORE = frozenset(
-        {
-            "uptime",
-            "cpuload",
-            "mem-free",
-            "mem-cached",
-            "last-seen",
-            "rx-bytes",
-            "tx-bytes",
-        }
-    )
+    # These are the keys `api/domains/mesh.py` actually emits per node that
+    # move on every poll. The set used to name hyphenated fields (`mem-free`,
+    # `rx-bytes`, `last-seen`) that no mesh payload has ever carried, so the
+    # one field that really does tick — `memory`, raw used/total bytes —
+    # defeated the dedup and every mesh entity wrote state on every tick.
+    # Sensors whose own value comes from one of these opt out with
+    # `_FINGERPRINT_IGNORE = frozenset()`.
+    _FINGERPRINT_IGNORE = frozenset({"uptime", "cpuload", "memory"})
 
     def __init__(
         self,

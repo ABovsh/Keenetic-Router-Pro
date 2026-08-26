@@ -8,6 +8,37 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.11.0
+
+### ✨ Improvements
+
+- The integration now picks the login method the router actually offers. If the
+  configured method is rejected it tries the other one and keeps using it for
+  the session, so the Challenge Auth switch no longer has to be set correctly
+  by hand. This keeps existing setups working on KeeneticOS 5.2, which changed
+  the authentication used by the router's web interface: the router's own
+  address now refuses Basic authentication and requires challenge auth, while
+  a KeenDNS `rci.` address still accepts only Basic.
+
+### 🐛 Fixed
+
+- Mesh and extender entities no longer write a history row on every poll. The
+  filter that is supposed to ignore the node's constantly-moving memory and
+  CPU figures was checking for field names the router never sends, so nothing
+  was ever filtered and every mesh sensor recorded a row per poll for the life
+  of the node.
+- A brief failure to read the router's client table no longer produces false
+  "client connected" / "client disconnected" events. The integration was
+  comparing last poll's client list against this poll's ARP data and reporting
+  the difference as real comings and goings — an automation could fire an
+  "everyone left" notification over a single dropped request. Client entities
+  and the device trackers already ignored such a poll; the events now do too.
+- If the router accepts the login request and then stops responding midway
+  through it, Home Assistant now retries the setup instead of failing the
+  integration with an unhandled error. Affects routers using Challenge Auth.
+- The Wi-Fi network transmit-power attribute now shows a real `0` (minimum or
+  automatic power) instead of blank.
+
 ## 1.10.1
 
 ### 🔒 Security

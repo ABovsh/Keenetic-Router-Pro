@@ -827,8 +827,19 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # On the very first tick every client looks like an arrival; the
             # integration has simply never seen this network before.
             first_tick = not self.data
-            connected_macs = set() if first_tick else online_macs - previous_online
-            disconnected_macs = set() if first_tick else previous_online - online_macs
+            if clients_stale:
+                # The hotspot table is the PREVIOUS tick's snapshot, re-merged
+                # with this tick's neighbour data — diffing that invents
+                # arrivals and departures the router never reported.
+                # ClientEntity.available and the device tracker already refuse
+                # to trust a stale tick. Keeping the previous online set also
+                # stops the next healthy tick from firing a phantom reconnect.
+                online_macs = set(previous_online)
+                connected_macs: set[str] = set()
+                disconnected_macs: set[str] = set()
+            else:
+                connected_macs = set() if first_tick else online_macs - previous_online
+                disconnected_macs = set() if first_tick else previous_online - online_macs
 
             active_wan = next(
                 (

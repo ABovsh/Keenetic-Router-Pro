@@ -139,10 +139,10 @@ class _Transport:
     async def async_start(self, session: aiohttp.ClientSession) -> None:
         """Attach an aiohttp session and authenticate."""
         self._session = session
-        if self._use_challenge_auth:
-            await self._async_authenticate_challenge()
-        else:
-            await self._async_authenticate()
+        self._authenticated = False
+        # Via _ensure_auth so setup and the config flow get the same
+        # Basic <-> challenge fallback the RCI call path has.
+        await self._ensure_auth()
 
     async def _request(
         self,

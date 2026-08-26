@@ -97,11 +97,7 @@ def test_mesh_counter_only_tick_skips_state_write() -> None:
                     "role_label": "Kitchen",
                     "uptime": 100,
                     "cpuload": 5,
-                    "mem-free": 1000,
-                    "mem-cached": 200,
-                    "last-seen": 10,
-                    "rx-bytes": 300,
-                    "tx-bytes": 400,
+                    "memory": "51380224/268435456",
                 }
             }
         }
@@ -114,11 +110,7 @@ def test_mesh_counter_only_tick_skips_state_write() -> None:
         **coordinator.data["mesh_nodes_by_cid"]["node-1"],
         "uptime": 200,
         "cpuload": 10,
-        "mem-free": 900,
-        "mem-cached": 250,
-        "last-seen": 20,
-        "rx-bytes": 600,
-        "tx-bytes": 700,
+        "memory": "51396608/268435456",
     }
     entity._handle_coordinator_update()
 
