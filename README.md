@@ -1,7 +1,7 @@
 # Keenetic Router Pro
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge)](https://github.com/custom-components/hacs)
-![Version](https://img.shields.io/badge/version-1.12.0-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-1.13.0-blue?style=for-the-badge)
 ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.5%2B-41BDF5?style=for-the-badge&logo=home-assistant)
 
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ABovsh_Keenetic-Router-Pro)
@@ -184,15 +184,17 @@ headers in logs can be decoded.
 
 ## Polling
 
-- Fast tier: every `30s` — link state, clients, WAN status.
-- Medium tier: every `90s` — CPU, memory, connection counts, throughput.
-- Slow tier: every `180s`.
-- Very slow tier: every `900s`.
+- Fast tier: every `60s` — link state, client presence, IP neighbours.
+- Medium tier: every `120s` — Wi-Fi, WireGuard, VPN tunnels, WAN status and
+  throughput, interface counters, CPU, memory, connection counts.
+- Slow tier: every `180s` — mesh nodes, IPsec tunnels, per-client policies.
+- Very slow tier: every `900s` — firmware version, KeenDNS, DNS proxy.
 - Firmware update check: once every `24h`.
 - Ping presence tracking: default `5s`, configurable from `5` to `300s`.
 
 Every tier above the fast one is cached between refreshes, so a slower tier
-costs the router nothing on the ticks it is skipped.
+costs the router nothing on the ticks it is skipped. The intervals are fixed:
+there is no adaptive backoff that quietly stretches them on a quiet router.
 
 ## Recorder load
 
@@ -202,7 +204,10 @@ attributes** changes, so an attribute that moves every poll costs a row every
 poll even when the entity itself has not changed. Nothing here publishes one:
 counters that only ever go up live on their own sensors, gauges are rounded and
 published on a slower tier than they are polled, and the Wi-Fi session sensor
-reports when the session started rather than counting seconds.
+reports when the session started rather than counting seconds. Traffic
+counters, throughput and the connection-count gauge each hold their last
+published value until it moves by a meaningful amount, so a busy link does not
+write a row per poll for a change no graph can render.
 
 If you want to cut it further:
 

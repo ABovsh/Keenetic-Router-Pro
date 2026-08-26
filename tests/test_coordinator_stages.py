@@ -364,7 +364,7 @@ async def test_coordinator_medium_tick_refreshes_interface_derived_calls_only() 
     coordinator = _coordinator(client)
     previous = await _updated_data(coordinator)
     coordinator.data = previous
-    coordinator._refresh_count = 3
+    coordinator._refresh_count = 2
     client.calls.clear()
 
     await _updated_data(coordinator)
@@ -505,7 +505,7 @@ async def test_coordinator_interface_stats_failure_preserves_prior_wan_samples()
     coordinator = _coordinator(client)
     previous = await _updated_data(coordinator)
     coordinator.data = previous
-    coordinator._refresh_count = 3
+    coordinator._refresh_count = 2
 
     async def fail_interface_stats(**kwargs: Any) -> dict[str, Any]:
         raise RuntimeError("interface stats unavailable")
@@ -676,7 +676,7 @@ async def test_coordinator_skips_wan_fetch_when_interfaces_fingerprint_unchanged
 
     await _updated_data(coordinator)  # priming tick — wan fetched
     coordinator.data = await _updated_data(coordinator)  # build prior fingerprint
-    coordinator._refresh_count = 2
+    coordinator._refresh_count = 5  # non-medium tick (5 % 2 != 0)
 
     call_count = 0
     original = client.async_get_wan_interfaces
@@ -702,7 +702,7 @@ async def test_coordinator_refetches_wan_when_interface_state_changes() -> None:
     coordinator = _coordinator(client)
     await _updated_data(coordinator)
     coordinator.data = await _updated_data(coordinator)
-    coordinator._refresh_count = 3
+    coordinator._refresh_count = 2
 
     # Mutate one interface's link state to invalidate the fingerprint.
     first_key = next(iter(client.interfaces))
@@ -905,13 +905,13 @@ async def test_coordinator_prefetches_hotspot_root_regardless_of_subpath_winner(
     assert tree["show"]["ip"]["hotspot"] == {}
 
 
-async def test_coordinator_outage_recovery_resets_the_idle_streak() -> None:
-    """A router that goes down and comes back must resume fast polling.
+async def test_coordinator_outage_recovery_restores_the_flat_poll_interval() -> None:
+    """A router that goes down and comes back must resume the normal cadence.
 
-    The idle backoff keys on a topology/traffic fingerprint, and an outage is
-    not part of that fingerprint. Without an explicit reset, a router that
-    returns to exactly the state it left would stay on the stretched interval
-    right through a flapping link — the opposite of what you want.
+    Until 1.13.0 the restore came for free from the idle ladder recomputing the
+    interval on every successful tick. With the ladder gone, the recovery
+    branch has to put the interval back itself, or a router stays stretched at
+    the outage backoff for the rest of the session.
     """
     client = StageFixtureClient()
     state = {"fail": False}
@@ -924,20 +924,22 @@ async def test_coordinator_outage_recovery_resets_the_idle_streak() -> None:
 
     client.async_get_system_info = flaky_system_info  # type: ignore[method-assign]
     coordinator = _coordinator(client)
+    coordinator.update_interval = timedelta(seconds=FAST_SCAN_INTERVAL)
 
-    # Two identical quiet ticks build up an idle streak.
     await _updated_data(coordinator)
     await _updated_data(coordinator)
-    coordinator._idle_streak = 100  # as if quiet for a long while
 
     # The router drops out, then returns to exactly the state it left.
     state["fail"] = True
-    with pytest.raises(UpdateFailed):
-        await _updated_data(coordinator)
+    # Two failed ticks: the first backoff rung is 60 s, which at the 1.13.0
+    # flat tick is the normal interval, so only the second rung stretches.
+    for _ in range(2):
+        with pytest.raises(UpdateFailed):
+            await _updated_data(coordinator)
+    assert coordinator.update_interval == timedelta(seconds=120)
+
     state["fail"] = False
     await _updated_data(coordinator)
-
-    assert coordinator._idle_streak == 0
     assert coordinator.update_interval == timedelta(seconds=FAST_SCAN_INTERVAL)
 
 

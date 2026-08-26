@@ -297,7 +297,7 @@ def test_memory_usage_sensor_returns_whole_percent() -> None:
 def test_refresh_plan_update_check_tier_flags() -> None:
     assert refresh_plan(first_refresh=True, refresh_count=0).update_check_refresh is True
     assert (
-        refresh_plan(first_refresh=False, refresh_count=2880).update_check_refresh
+        refresh_plan(first_refresh=False, refresh_count=1440).update_check_refresh
         is True
     )
     assert (
@@ -318,7 +318,7 @@ def test_build_batch_tree_gates_check_update_on_update_check_tier() -> None:
     assert "ndns" in tree.get("show", {})
     assert "dns-proxy" in tree.get("show", {})
 
-    update_check_tick = refresh_plan(first_refresh=False, refresh_count=2880)
+    update_check_tick = refresh_plan(first_refresh=False, refresh_count=1440)
     tree2 = build_batch_tree(update_check_tick)
     assert "check-update" in tree2.get("components", {})
 
@@ -548,7 +548,7 @@ def test_system_gauges_only_refresh_on_medium_ticks() -> None:
     first_gauges = {k: first["system"].get(k) for k in _GAUGE_KEYS}
 
     # refresh_count is now 1 after the first tick's increment. Tick with
-    # refresh_count=1 is a fast (non-medium) tick: 1 % 3 != 0.
+    # refresh_count=1 is a fast (non-medium) tick: 1 % 2 != 0.
     coordinator.data = first
     second = asyncio.run(coordinator._async_update_data())
     second_gauges = {k: second["system"].get(k) for k in _GAUGE_KEYS}
@@ -558,9 +558,9 @@ def test_system_gauges_only_refresh_on_medium_ticks() -> None:
         "the freshly fetched ones"
     )
 
-    # Force the next tick onto the medium cadence (refresh_count=3).
+    # Force the next tick onto the medium cadence (refresh_count=2).
     coordinator.data = second
-    coordinator._refresh_count = 3
+    coordinator._refresh_count = 2
     third = asyncio.run(coordinator._async_update_data())
     third_gauges = {k: third["system"].get(k) for k in _GAUGE_KEYS}
 

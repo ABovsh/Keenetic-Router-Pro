@@ -132,14 +132,14 @@ def test_request_full_refresh_forces_tier_gated_fetches_on_next_tick() -> None:
 
     # Baseline: a plain fast tick keeps the cached medium/slow snapshots.
     coordinator.data = {**first, "wifi": [{"stale": True}], "mesh_nodes": ["stale"]}
-    coordinator._refresh_count = 1  # 1 % 3 and 1 % 6 are both non-zero
+    coordinator._refresh_count = 1  # 1 % 2 and 1 % 3 are both non-zero
     second = asyncio.run(coordinator._async_update_data())
     assert second["wifi"] == [{"stale": True}]
     assert second["mesh_nodes"] == ["stale"]
 
     # With the one-shot request armed, the same fast tick refetches them.
     coordinator.data = {**second, "wifi": [{"stale": True}], "mesh_nodes": ["stale"]}
-    coordinator._refresh_count = 2
+    coordinator._refresh_count = 5
     coordinator.request_full_refresh()
     third = asyncio.run(coordinator._async_update_data())
     assert third["wifi"] == [{"id": "WifiMaster0/AccessPoint0", "ssid": "Main"}]
@@ -147,7 +147,7 @@ def test_request_full_refresh_forces_tier_gated_fetches_on_next_tick() -> None:
 
     # One-shot: the next fast tick caches again.
     coordinator.data = {**third, "wifi": [{"stale": True}]}
-    coordinator._refresh_count = 4
+    coordinator._refresh_count = 7
     fourth = asyncio.run(coordinator._async_update_data())
     assert fourth["wifi"] == [{"stale": True}]
 

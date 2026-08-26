@@ -190,9 +190,11 @@ def test_refresh_plan_first_refresh_runs_all_tiers() -> None:
     ("refresh_count", "medium", "slow", "very_slow"),
     [
         (1, False, False, False),
-        (2, False, False, False),
-        (3, True, False, False),
+        (2, True, False, False),
+        (3, False, True, False),
+        (5, False, False, False),
         (6, True, True, False),
+        (15, False, True, True),
         (30, True, True, True),
     ],
 )

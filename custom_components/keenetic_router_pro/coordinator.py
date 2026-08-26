@@ -40,7 +40,6 @@ from .coordinator_parts.payloads import (
 )
 from .coordinator_parts.refresh import (
     build_batch_tree,
-    idle_poll_interval,
     refresh_plan,
 )
 from .utils import coerce_int, normalize_mac
@@ -100,15 +99,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.client = client
         self._refresh_count = 0
-        # Consecutive ticks on which nothing moved. Drives the idle poll
-        # backoff; reset to 0 by any change, so a stretched interval can
-        # never delay a real event by more than one tick.
-        self._idle_streak = 0
         # Set from the config entry by __init__/async_update_listener. When a
         # user wants no client data at all, ``show/ip/hotspot`` — the largest
         # payload of the tick by a wide margin — is not worth fetching.
         self.needs_client_data = True
-        self._idle_fingerprint: tuple[Any, ...] | None = None
         # One-shot request to fetch host policies on the next tick even if
         # the slow tier is skipped. Set by write-entities (policy select)
         # right after a router-side change so the UI doesn't wait up to a
@@ -861,42 +855,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # restore the normal fast poll cadence.
             if getattr(self, "_critical_fail_backoff_count", 0):
                 self._critical_fail_backoff_count = 0
-                # An outage is not part of the idle fingerprint, so a router
-                # that returns to exactly the state it left would otherwise
-                # stay stretched right through a flapping link. Recovery
-                # always earns at least one fast tick.
-                self._idle_streak = 0
-                self._idle_fingerprint = None
-
-            # A tick counts as idle only when the topology is unchanged AND
-            # every WAN is quantized to zero throughput, so an unattended
-            # router that is still moving traffic keeps full-resolution
-            # graphs. Any change resets the streak, so the fast interval is
-            # never more than one tick away.
-            fingerprint = (
-                active_wan,
-                tuple(sorted(online_macs)),
-                tuple(
-                    sorted(
-                        (str(w.get("id")), str(w.get("state")), str(w.get("link")))
-                        for w in (wan_interfaces or [])
-                        if isinstance(w, dict)
-                    )
-                ),
-                any(
-                    (w.get("rx_throughput") or 0) or (w.get("tx_throughput") or 0)
-                    for w in (wan_interfaces or [])
-                    if isinstance(w, dict)
-                ),
-            )
-            if fingerprint == getattr(self, "_idle_fingerprint", None):
-                self._idle_streak = getattr(self, "_idle_streak", 0) + 1
-            else:
-                self._idle_streak = 0
-                self._idle_fingerprint = fingerprint
-            self.update_interval = timedelta(
-                seconds=idle_poll_interval(self._idle_streak)
-            )
+                self.update_interval = timedelta(seconds=FAST_SCAN_INTERVAL)
 
             if (
                 pending_host_policies

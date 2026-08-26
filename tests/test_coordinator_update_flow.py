@@ -256,7 +256,7 @@ def test_coordinator_refreshes_wan_uptime_when_iface_set_unchanged() -> None:
     assert first["wan_by_id"]["PPPoE0"]["uptime"] == 100
 
     coordinator.data = first
-    coordinator._refresh_count = 3  # next tick is a medium refresh (count % 3 == 0)
+    coordinator._refresh_count = 2  # next tick is a medium refresh (count % 2 == 0)
 
     second = asyncio.run(coordinator._async_update_data())
 
@@ -462,14 +462,14 @@ def test_coordinator_fast_tick_fetches_host_policies_when_requested() -> None:
     first = asyncio.run(coordinator._async_update_data())
     first["host_policies"] = {"stale": {"policy": "PolicyOld"}}
     coordinator.data = first
-    coordinator._refresh_count = 1  # fast tick: 1 % 6 != 0
+    coordinator._refresh_count = 1  # fast tick: 1 % 3 != 0
 
     # Without the request the fast tick must keep the cached snapshot.
     second = asyncio.run(coordinator._async_update_data())
     assert second["host_policies"] == {"stale": {"policy": "PolicyOld"}}
 
     coordinator.data = second
-    coordinator._refresh_count = 2  # still a fast tick
+    coordinator._refresh_count = 5  # still a fast tick (5 % 3 != 0)
     coordinator.request_host_policies_refresh()
 
     third = asyncio.run(coordinator._async_update_data())
@@ -477,7 +477,7 @@ def test_coordinator_fast_tick_fetches_host_policies_when_requested() -> None:
 
     # The forced fetch is one-shot: the next fast tick caches again.
     coordinator.data = third
-    coordinator._refresh_count = 3
+    coordinator._refresh_count = 7
     third["host_policies"] = {"cached-again": {"policy": "PolicyX"}}
 
     fourth = asyncio.run(coordinator._async_update_data())

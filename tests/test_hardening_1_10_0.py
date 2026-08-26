@@ -22,7 +22,6 @@ import pytest
 
 from custom_components.keenetic_router_pro.coordinator_parts.refresh import (
     build_batch_tree,
-    idle_poll_interval,
     refresh_plan,
 )
 from custom_components.keenetic_router_pro.utils import apply_relative_deadband
@@ -216,26 +215,11 @@ def test_batch_tree_requests_clients_by_default() -> None:
 
 
 # --------------------------------------------------------------------------
-# 5. adaptive backoff on a genuinely idle router
+# 5. adaptive backoff on a genuinely idle router — REMOVED in 1.13.0.
+# The ladder classified a continuously busy router as idle (see
+# tests/test_poll_tiers_1_13_0.py) and its stretch multiplied through the
+# tick-counted refresh tiers. The poll is a flat FAST_SCAN_INTERVAL now.
 # --------------------------------------------------------------------------
-
-
-def test_idle_poll_interval_stays_fast_until_the_router_is_quiet() -> None:
-    assert idle_poll_interval(0) == 30
-    assert idle_poll_interval(5) == 30
-    assert idle_poll_interval(19) == 30
-
-
-def test_idle_poll_interval_stretches_then_caps() -> None:
-    assert idle_poll_interval(20) == 60
-    assert idle_poll_interval(40) == 90
-    assert idle_poll_interval(60) == 120
-    assert idle_poll_interval(10_000) == 120  # capped, never unbounded
-
-
-def test_idle_streak_resets_the_moment_anything_moves() -> None:
-    """Snapping back must be instant — a stretched poll cannot delay a failover."""
-    assert idle_poll_interval(0) == 30
 
 
 # --------------------------------------------------------------------------
@@ -326,7 +310,6 @@ async def test_diagnostics_include_a_health_block() -> None:
         last_update_success=True,
         update_interval=None,
         _refresh_count=1234,
-        _idle_streak=7,
         client=SimpleNamespace(
             _rci_batch_supported=True,
             _ping_check_supported=False,

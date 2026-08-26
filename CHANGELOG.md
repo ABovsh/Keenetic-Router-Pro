@@ -8,6 +8,23 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.13.0
+
+### ✨ Improvements
+
+- Data now refreshes on fixed, predictable intervals. The integration used to
+  slow itself down on a router it judged idle, stretching the poll from 30 to
+  120 seconds — and because every refresh tier is counted in polls, that stretch
+  multiplied through all of them: Wi-Fi, VPN tunnels, WAN throughput and the
+  CPU / memory / connection gauges ended up refreshing once every six minutes,
+  mesh and IPsec once every twelve, firmware and DNS state once an hour. The
+  slowdown also misfired, treating a router carrying traffic non-stop as idle.
+  It has been removed. Polling is now a flat 60 seconds, which puts the medium
+  tier at 2 minutes, the slow tier at 3 and the very slow tier at 15 —
+  regardless of how quiet the router is.
+- The firmware update check still runs once a day, and the backoff that slows
+  polling of a router that is actually down is unchanged.
+
 ## 1.12.0
 
 ### ✨ Improvements

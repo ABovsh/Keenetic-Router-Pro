@@ -187,7 +187,6 @@ def _health(coordinator: Any, client: Any) -> dict[str, Any]:
     return {
         "last_update_success": getattr(source, "last_update_success", None),
         "refresh_count": getattr(source, "_refresh_count", None),
-        "idle_streak": getattr(source, "_idle_streak", None),
         "update_interval_seconds": (
             interval.total_seconds() if interval is not None else None
         ),

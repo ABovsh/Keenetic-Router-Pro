@@ -4,7 +4,7 @@ Raised 15s -> 25s: the ``interfaces`` RCI call was intermittently exceeding
 15s under router load (Yakhny, large ACL/device list), producing repeated
 "Transient critical router fetch failure" log noise even though the router
 was healthy and the call eventually succeeded. 25s still leaves headroom
-before the next 30s (FAST_SCAN_INTERVAL) poll tick.
+before the next 60s (FAST_SCAN_INTERVAL) poll tick.
 """
 
 from custom_components.keenetic_router_pro.api.client import KeeneticClient
