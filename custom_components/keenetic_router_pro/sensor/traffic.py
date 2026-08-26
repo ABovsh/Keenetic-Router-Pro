@@ -13,14 +13,14 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, UnitOfInformation
 
 from ..coordinator import KeeneticCoordinator
-from ..entity import ControllerEntity
+from ..entity import ControllerEntity, DeadbandMixin
 from ..utils import bytes_to_gib
 
 _ICON_DOWNLOAD = "mdi:download-network"
 _ICON_UPLOAD = "mdi:upload-network"
 
 
-class _TrafficSensorBase(ControllerEntity, SensorEntity):
+class _TrafficSensorBase(DeadbandMixin, ControllerEntity, SensorEntity):
     """Shared RX/TX byte counter sensor for one interface."""
 
     _attr_has_entity_name = True
@@ -28,6 +28,12 @@ class _TrafficSensorBase(ControllerEntity, SensorEntity):
     _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # 0.05 GiB (~54 MB). ``bytes_to_gib`` rounds to 0.01 GiB, so every ~10.7 MB
+    # of traffic wrote a recorder row — 3 065 rows/day across the interface
+    # counters, measured live. A counter that reads in the tens of GiB does not
+    # need 10 MB resolution; the coarser step is invisible on a graph and keeps
+    # the value monotonic for TOTAL_INCREASING statistics.
+    _DEADBAND = 0.05
     _direction = "rx"
 
     def __init__(
@@ -63,8 +69,10 @@ class _TrafficSensorBase(ControllerEntity, SensorEntity):
     def native_value(self) -> float | None:
         # Return None (not 0.0) when the stat row is absent so a transient
         # interface-stat gap does not look like a TOTAL_INCREASING reset and
-        # double-count the counter back up in long-term statistics.
-        return bytes_to_gib(self._stats.get(self._field))
+        # double-count the counter back up in long-term statistics. Passing the
+        # None through the deadband also clears the latch, so the sensor does
+        # not resume from a baseline the router no longer reports.
+        return self._apply_deadband(bytes_to_gib(self._stats.get(self._field)))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:

@@ -16,7 +16,12 @@ from homeassistant.const import UnitOfTime, UnitOfInformation, UnitOfDataRate, E
 
 from ..const import LINK_STATE_DOWN, LINK_STATE_UP, WAN_STATUS_CONNECTED, WAN_STATUS_LINK_UP
 from ..coordinator import KeeneticCoordinator
-from ..entity import ControllerEntity, ThroughputDeadbandMixin, WanEntity
+from ..entity import (
+    ControllerEntity,
+    DeadbandMixin,
+    ThroughputDeadbandMixin,
+    WanEntity,
+)
 from ..utils import (
     coerce_byte_count,
     coerce_seconds,
@@ -141,7 +146,7 @@ class KeeneticPppoeUptimeSensor(ControllerEntity, SensorEntity):
         }
 
 
-class KeeneticActiveConnectionsSensor(ControllerEntity, SensorEntity):
+class KeeneticActiveConnectionsSensor(DeadbandMixin, ControllerEntity, SensorEntity):
     """Active connections count sensor."""
     _attr_has_entity_name = True
     _attr_translation_key = "active_connections"
@@ -150,6 +155,11 @@ class KeeneticActiveConnectionsSensor(ControllerEntity, SensorEntity):
     # MEASUREMENT keeps HA statistics from treating it as a monotonic sum.
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 0
+    # A dithering gauge: measured live it walks 269/296/300/320/387/400 on
+    # consecutive polls of an otherwise quiet router, 993 rows/day across three
+    # routers for a number nobody reads below "a few hundred". Against a 63 488
+    # entry conntrack table a 25-connection band is 0.04 % of capacity.
+    _DEADBAND = 25
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -165,9 +175,10 @@ class KeeneticActiveConnectionsSensor(ControllerEntity, SensorEntity):
         connfree = sys.get("connfree", 0)
         try:
             # OverflowError: int(float("inf")) on a non-finite firmware value.
-            return max(0, int(conntotal) - int(connfree))
+            used = max(0, int(conntotal) - int(connfree))
         except (TypeError, ValueError, OverflowError):
             return 0
+        return int(self._apply_deadband(used) or 0)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
@@ -453,12 +464,17 @@ class KeeneticWanUptimeSensor(_WanSensorBase):
         return coerce_seconds(wan.get("uptime"), default=None)
 
 
-class _WanBytesBase(_WanSensorBase):
+class _WanBytesBase(DeadbandMixin, _WanSensorBase):
     """Shared RX/TX byte counter base."""
     _attr_device_class = SensorDeviceClass.DATA_SIZE
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_native_unit_of_measurement = UnitOfInformation.BYTES
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Undamped, this was 2 686 rows/day: a byte counter on a live WAN moves on
+    # every single poll. 50 MB against a counter that reads in the tens of GB
+    # is under a tenth of a percent, and a counter reset (router reboot) is a
+    # move far larger than the band, so TOTAL_INCREASING still sees it at once.
+    _DEADBAND = 50_000_000
     _field = "rx_bytes"
     # native_value reads rx_bytes/tx_bytes — fields the WanEntity base
     # ignores for change-detection. Opt out so counters actually update.
@@ -471,7 +487,9 @@ class _WanBytesBase(_WanSensorBase):
             return None
         # Reject negative/non-finite counters so a malformed router stat does
         # not poison the TOTAL_INCREASING long-term statistics.
-        return coerce_byte_count(wan.get(self._field))
+        count = coerce_byte_count(wan.get(self._field))
+        held = self._apply_deadband(count)
+        return None if held is None else int(held)
 
 
 class KeeneticWanRxBytesSensor(_WanBytesBase):

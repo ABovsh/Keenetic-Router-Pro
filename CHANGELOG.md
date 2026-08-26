@@ -8,6 +8,19 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.12.0
+
+### ✨ Improvements
+
+- Traffic and connection sensors now record far less history for the same
+  picture. The interface byte counters moved from a 10 MB step to a 54 MB one,
+  the per-WAN raw byte counters gained a 50 MB step, throughput needs to move
+  5 % (at least 100 kbit/s) before it updates, and the active-connections gauge
+  holds until it shifts by 25 connections. Measured on a three-router setup
+  this cuts the integration's database writes by roughly half; long-term
+  statistics, energy-style totals and graphs are unaffected, and a counter
+  reset after a router reboot still registers immediately.
+
 ## 1.11.0
 
 ### ✨ Improvements
