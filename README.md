@@ -1,7 +1,7 @@
 # Keenetic Router Pro
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge)](https://github.com/custom-components/hacs)
-![Version](https://img.shields.io/badge/version-1.15.0-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-1.16.0-blue?style=for-the-badge)
 ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.5%2B-41BDF5?style=for-the-badge&logo=home-assistant)
 
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ABovsh_Keenetic-Router-Pro)
@@ -84,7 +84,6 @@ An actively maintained, hardened fork of the original Keenetic Router Pro integr
 - **QR-code image platform removed** — generating Wi-Fi QR codes from HA is rarely useful when the router already shows them.
 - **USB storage polling removed** — this required frequent polling of optional components that may not be present, adding load and noise.
 - **English only** — the upstream shipped mixed-language source comments and non-English translations. Everything here is English.
-- **HACS source download** — no release ZIP assets required; installs directly from the repository archive.
 
 ### Upstream features not carried over
 
@@ -115,7 +114,7 @@ implemented here as of 1.9.0 — see **Bandwidth Limit** under Entities.
   a single `Enabled` switch. VPN uplinks share the same WAN device as their
   WAN status sensors, without duplicate WireGuard controls.
 
-Removed from this fork: QR image entities, USB polling, bundled non-English translations, and ZIP-release mode for HACS.
+Removed from this fork: QR image entities, USB polling, and bundled non-English translations.
 
 ## Install With HACS
 
@@ -126,7 +125,7 @@ Removed from this fork: QR image entities, USB polling, bundled non-English tran
 4. Go to **Settings > Devices & services > Add integration**.
 5. Search for **Keenetic Router Pro**.
 
-This repository uses standard HACS source downloads and does not require release assets.
+HACS installs this integration from the `keenetic_router_pro.zip` release asset attached to each published release.
 
 ## Configuration
 

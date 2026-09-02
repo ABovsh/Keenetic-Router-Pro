@@ -1,5 +1,8 @@
 {
   "name": "Keenetic Router Pro",
   "render_readme": true,
-  "homeassistant": "2024.5.0"
+  "homeassistant": "2024.5.0",
+  "content_in_root": false,
+  "zip_release": true,
+  "filename": "keenetic_router_pro.zip"
 }

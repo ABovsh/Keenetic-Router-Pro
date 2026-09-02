@@ -29,6 +29,9 @@ def test_public_metadata_is_internally_consistent() -> None:
     assert manifest["config_flow"] is True
     assert hacs["render_readme"] is True
     assert hacs["homeassistant"] == "2024.5.0"
+    assert hacs["zip_release"] is True
+    assert hacs["filename"] == f"{manifest['domain']}.zip"
+    assert hacs["content_in_root"] is False
     assert manifest["documentation"].endswith("Keenetic-Router-Pro")
     assert manifest["issue_tracker"].endswith("Keenetic-Router-Pro/issues")
 
@@ -60,14 +63,26 @@ def test_readme_uses_real_sonarcloud_badges() -> None:
     assert f"component_measures?id={project}&metric=coverage" in readme
 
 
+def test_release_asset_workflow_matches_hacs_filename() -> None:
+    """HACS installs from the release asset, so the workflow must build that name."""
+    hacs = _load_json(ROOT / "hacs.json")
+    workflow = (ROOT / ".github" / "workflows" / "release-asset.yaml").read_text(
+        encoding="utf-8"
+    )
+    domain = _load_json(INTEGRATION / "manifest.json")["domain"]
+
+    assert hacs["filename"] in workflow
+    # The zip must hold the CONTENTS of the integration dir, not a nested folder.
+    assert f"HEAD:custom_components/{domain}" in workflow
+
+
 def test_required_public_docs_exist_and_describe_release_mode() -> None:
-    """Public docs should explain source installs, security, and release process."""
+    """Public docs should explain release installs, security, and release process."""
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     security = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
     checklist = (ROOT / "docs" / "release-checklist.md").read_text(encoding="utf-8")
 
-    assert "standard HACS source downloads" in readme
-    assert "does not require release assets" in readme
+    assert "release asset" in readme
     assert "no cloud dependency" in readme.lower()
     assert "KeenDNS protected" in readme
     assert "Repair" in readme
@@ -76,6 +91,7 @@ def test_required_public_docs_exist_and_describe_release_mode() -> None:
     assert "coverage" in checklist
     assert "manifest.json" in checklist
     assert "CHANGELOG.md" in checklist
+    assert "release asset" in checklist
 
 
 def test_challenge_authentication_copy_is_consistent() -> None:

@@ -8,6 +8,14 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.16.0
+
+### ✨ Improvements
+
+- HACS now installs and updates this integration from the `keenetic_router_pro.zip`
+  asset attached to each GitHub release instead of downloading the repository
+  source. Existing installations update in place; no reconfiguration is needed.
+
 ## 1.15.0
 
 ### ✨ Improvements

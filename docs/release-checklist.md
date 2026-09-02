@@ -7,8 +7,8 @@ Use this checklist before tagging or announcing a Keenetic Router Pro release.
 - `custom_components/keenetic_router_pro/manifest.json` has the new patch version.
 - `README.md` version badge matches the manifest version.
 - `CHANGELOG.md` latest section matches the manifest version.
-- `hacs.json` still declares the supported Home Assistant version.
-- Public docs still describe standard HACS source downloads and no release asset requirement.
+- `hacs.json` still declares the supported Home Assistant version, `zip_release`, and the asset `filename`.
+- The published release carries the `keenetic_router_pro.zip` release asset; without it HACS cannot install the integration.
 
 ## Verification
 
