@@ -25,3 +25,6 @@ docs/internal/
 
 # Local agent instructions — machine-local, never published.
 AGENTS.md
+
+# audit-round agent worktrees (integration-deep-audit)
+.claude/worktrees/
