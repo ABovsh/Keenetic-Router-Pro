@@ -64,10 +64,16 @@ jobs:
   sonar:
     name: SonarCloud
     needs: test
+    # main only: sonar-project.properties pins sonar.branch.name=main (the free
+    # plan analyzes one branch), so a scan from any other branch — rc included —
+    # overwrites the main entry with code that is not on main.
     # Dependabot branches read the dependabot secret store, where SONAR_TOKEN
     # doesn't exist — the scanner would fail with "Not authorized" on every
     # bump PR. Skip instead of failing.
-    if: github.event_name == 'push' && github.actor != 'dependabot[bot]'
+    if: >-
+      github.event_name == 'push'
+      && github.ref == 'refs/heads/main'
+      && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
