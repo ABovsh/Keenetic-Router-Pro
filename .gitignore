@@ -25,6 +25,8 @@ docs/internal/
 
 # Local agent instructions — machine-local, never published.
 AGENTS.md
+# CLAUDE.md is a symlink to AGENTS.md (one file, both agents).
+CLAUDE.md
 
 # audit-round agent worktrees (integration-deep-audit)
 .claude/worktrees/
