@@ -28,7 +28,9 @@ MANIFEST=custom_components/keenetic_router_pro/manifest.json
 CUR=$(python3 -c "import json;print(json.load(open('$MANIFEST'))['version'])")
 [[ "$CUR" != "$NEW_VER" ]] || { echo "nothing to bump"; exit 1; }
 git fetch origin
-git log --oneline origin/main..rc || { echo "no rc branch — nothing to promote"; exit 1; }
+git show-ref --verify --quiet refs/heads/rc || { echo "no local rc branch"; exit 1; }
+git log --oneline origin/main..rc
+test "$(git rev-list --count origin/main..rc)" -gt 0 || { echo "rc has no work to promote"; exit 1; }
 echo "Promoting rc: $CUR -> $NEW_VER"
 ```
 
@@ -60,7 +62,6 @@ README. Re-read "Why this fork" when scope shifted.
 
 ```bash
 PYTHONPYCACHEPREFIX=/tmp/keenetic-pycache .venv/bin/python -m compileall -q custom_components tests
-.venv/bin/python -m ruff check custom_components/keenetic_router_pro tests
 .venv/bin/python -m coverage run --source=custom_components/keenetic_router_pro -m pytest -q tests
 .venv/bin/python -m coverage report --show-missing --fail-under=90
 ```
@@ -94,8 +95,11 @@ separately asked for one** ("release" / "зарелізь").
 
 ### 9. Gate 2 — only on that second ask
 
-Tag `v$NEW_VER`, publish the GitHub release via the REST API (no `gh` on this
-host; token from `~/.git-credentials`), then **verify the asset landed**:
+From a clean `main`, fetch and verify `HEAD == origin/main`; confirm manifest,
+badge and CHANGELOG all equal `$NEW_VER`, applicable main CI passed, and an
+existing tag (if any) points at this exact commit. Then tag `v$NEW_VER`, publish
+the GitHub release via the REST API (no `gh` on this host; token from
+`~/.git-credentials`), and **verify the asset landed**:
 `.github/workflows/release-asset.yaml` attaches `keenetic_router_pro.zip` on
 `release: published`, and since 1.16.0 `hacs.json` sets `zip_release: true` — a
 release without that asset is **not installable at all**. Commands:

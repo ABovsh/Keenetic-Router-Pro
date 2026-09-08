@@ -4,7 +4,9 @@ Use this checklist before tagging or announcing a Keenetic Router Pro release.
 
 ## Metadata
 
-- `custom_components/keenetic_router_pro/manifest.json` has the new patch version.
+- `custom_components/keenetic_router_pro/manifest.json` has the approved semver
+  version: patch for fixes/performance, minor for new behavior or user-visible
+  cadence changes, major for deleted entities or breaking config entries.
 - `README.md` version badge matches the manifest version.
 - `CHANGELOG.md` latest section matches the manifest version.
 - `hacs.json` still declares the supported Home Assistant version, `zip_release`, and the asset `filename`.
@@ -15,9 +17,9 @@ Use this checklist before tagging or announcing a Keenetic Router Pro release.
 Run these commands from the repository root:
 
 ```bash
-PYTHONPYCACHEPREFIX=/tmp/keenetic-pycache python3 -m compileall -q custom_components tests
-python3 -m coverage run --source=custom_components/keenetic_router_pro -m pytest -q tests
-python3 -m coverage report --show-missing --fail-under=40
+PYTHONPYCACHEPREFIX=/tmp/keenetic-pycache .venv/bin/python -m compileall -q custom_components tests
+.venv/bin/python -m coverage run --source=custom_components/keenetic_router_pro -m pytest -q tests
+.venv/bin/python -m coverage report --show-missing --fail-under=90
 ```
 
 ## Security And Privacy
@@ -29,7 +31,9 @@ python3 -m coverage report --show-missing --fail-under=40
 
 ## Home Assistant Deployment
 
-- Deploy only after tests pass and the repository is clean.
+- Deploy only when the pushed revision changed integration runtime files, after
+  tests pass and the repository is clean.
 - Copy `custom_components/keenetic_router_pro/` to the Home Assistant custom component directory.
 - Confirm the deployed `manifest.json` version matches the release.
-- Restart Home Assistant, or reload the integration when Home Assistant supports reloading this custom integration cleanly in the test environment.
+- Restart Home Assistant after any Python source change; bound the health check
+  and report a timeout instead of waiting indefinitely.
