@@ -223,12 +223,44 @@ def _router_device_id(hass: HomeAssistant, entry: ConfigEntry) -> str | None:
     """
     try:
         dr = importlib.import_module(_DEVICE_REGISTRY)
-        device = dr.async_get(hass).async_get_device(
-            identifiers={(DOMAIN, entry.entry_id)}
-        )
-    except (ImportError, AttributeError, TypeError):
+        lookup = getattr(dr, "async_get_device_id_by_identifier", None)
+        if lookup is not None:
+            return lookup(
+                hass, (DOMAIN, entry.entry_id), config_entry_id=entry.entry_id
+            )
+        device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+    except (ImportError, AttributeError, TypeError, ValueError):
         return None
     return device.id if device else None
+
+
+def _parent_device_id(hass: HomeAssistant, entry: ConfigEntry) -> str | None:
+    """Resolve the main router id for modern DeviceInfo child links.
+
+    Home Assistant 2026.8 replaces identifier-based ``via_device`` with a
+    scoped device id. Create the otherwise implicit parent before platforms
+    are forwarded so first-install sub-devices retain their parent relation.
+    Older cores keep the identifier link through the utility builders.
+    """
+    try:
+        dr = importlib.import_module(_DEVICE_REGISTRY)
+        lookup = getattr(dr, "async_get_device_id_by_identifier", None)
+        if lookup is None:
+            return None
+        try:
+            return lookup(
+                hass, (DOMAIN, entry.entry_id), config_entry_id=entry.entry_id
+            )
+        except ValueError:
+            pass
+        registry = dr.async_get(hass)
+        parent = registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, entry.entry_id)},
+        )
+        return parent.id
+    except (ImportError, AttributeError, TypeError):
+        return None
 
 
 def _is_loopback_host(host: str) -> bool:
@@ -489,6 +521,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(f"Could not connect to Keenetic router: {err}") from err
 
     coordinator = KeeneticCoordinator(hass, client)
+    coordinator.parent_device_id = _parent_device_id(hass, entry)
     coordinator.needs_client_data = _needs_client_data(entry)
     await coordinator.async_config_entry_first_refresh()
     _async_migrate_mesh_unique_ids(

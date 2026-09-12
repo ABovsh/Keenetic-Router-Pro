@@ -309,8 +309,8 @@ def test_ensure_auth_waiting_task_returns_after_other_task_authenticates() -> No
     client._async_authenticate.assert_not_called()
 
 
-def test_mesh_node_basic_auth_fallback_releases_probe_response() -> None:
-    """Node auth fallback consumes/releases the challenge probe response."""
+def test_mesh_node_missing_challenge_releases_probe_without_credentials() -> None:
+    """A response without a challenge cannot trigger credential forwarding."""
     get_resp = FakeResponse(200)
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
     client._session = FakeSession([get_resp])
@@ -319,8 +319,7 @@ def test_mesh_node_basic_auth_fallback_releases_probe_response() -> None:
 
     assert get_resp.closed
     assert get_resp.read_called
-    assert headers is not None
-    assert "Authorization" in headers
+    assert headers is None
 
 
 def test_mesh_node_challenge_auth_prefers_post_cookie_when_rotated() -> None:

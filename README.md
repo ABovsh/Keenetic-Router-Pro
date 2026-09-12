@@ -27,7 +27,8 @@ An actively maintained, hardened fork of the original Keenetic Router Pro integr
 - **Safer by default.** Diagnostics, debug logs, API response excerpts and
   client object representations redact router passwords, cookies, Basic Auth
   headers, MACs, SSIDs, BSSIDs and Wi-Fi PSKs. Password fields are masked, old
-  passwords are not pre-filled, and plaintext-HTTP setups raise a Repair issue.
+  passwords are not pre-filled, plaintext-HTTP setups raise a Repair issue, and
+  direct mesh updates accept only literal node addresses with challenge auth.
 - **More reliable authentication.** Direct connections support Basic Auth and
   NDW2 challenge auth with session-cookie reuse, one-shot reauth after expired
   cookies, and automatic mesh-node cookie refresh after 401 responses.
@@ -54,6 +55,8 @@ An actively maintained, hardened fork of the original Keenetic Router Pro integr
   a slower cadence than they are polled, and percentages are whole numbers, so
   they stop writing a row for every tenth of a percent. On a three-router
   install this cut the integration's recorder writes by roughly a third.
+  Inventory-only extender counts do not create scheduled statistics rows, and
+  mesh memory ignores one-point fluctuations.
 - **No third-party dependencies.** The integration installs nothing into your
   Home Assistant environment (upstream pulls in `icmplib`, `pyqrcode` and
   `pypng`).
@@ -63,8 +66,9 @@ An actively maintained, hardened fork of the original Keenetic Router Pro integr
   grouped with the interface or WAN device they belong to.
 - **Mesh is treated as a first-class surface.** Mesh nodes and ports can appear
   dynamically without restarting Home Assistant, removed nodes become
-  unavailable instead of stale, firmware update entities support controller and
-  extender flows, and mesh unique IDs are scoped to the HA config entry.
+  unavailable instead of stale, sustained topology or interface-stat failures
+  expire affected measurements, firmware update entities support controller
+  and extender flows, and mesh unique IDs are scoped to the HA config entry.
 - **Useful diagnostics, not just raw counters.** The fork adds DNS proxy
   health and failed-request sensors, IPsec VICI out-of-memory diagnostics,
   ping-check aware WAN interpretation, WireGuard/IPsec state sensors, and

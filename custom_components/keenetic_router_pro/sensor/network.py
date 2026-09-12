@@ -19,7 +19,9 @@ from ..const import COUNTER_DEADBAND_BYTES
 from ..coordinator import KeeneticCoordinator
 from ..entity import (
     ControllerEntity,
+    CounterDeadbandMixin,
     DeadbandMixin,
+    SourceFreshnessMixin,
     ThroughputDeadbandMixin,
     WanEntity,
 )
@@ -466,7 +468,9 @@ class KeeneticWanUptimeSensor(_WanSensorBase):
         return coerce_seconds(wan.get("uptime"), default=None)
 
 
-class _WanBytesBase(DeadbandMixin, _WanSensorBase):
+class _WanBytesBase(
+    SourceFreshnessMixin, CounterDeadbandMixin, _WanSensorBase
+):
     """Shared RX/TX byte counter base."""
     _attr_device_class = SensorDeviceClass.DATA_SIZE
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -474,7 +478,8 @@ class _WanBytesBase(DeadbandMixin, _WanSensorBase):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     # A counter reset (router reboot) is a move far larger than the band, so
     # TOTAL_INCREASING still sees it at once.
-    _DEADBAND = COUNTER_DEADBAND_BYTES
+    _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES
+    _freshness_key = "interface_stats_fresh"
     _field = "rx_bytes"
     # native_value reads rx_bytes/tx_bytes — fields the WanEntity base
     # ignores for change-detection. Opt out so counters actually update.
@@ -488,7 +493,7 @@ class _WanBytesBase(DeadbandMixin, _WanSensorBase):
         # Reject negative/non-finite counters so a malformed router stat does
         # not poison the TOTAL_INCREASING long-term statistics.
         count = coerce_byte_count(wan.get(self._field))
-        held = self._apply_deadband(count)
+        held = self._publish_counter(count)
         return None if held is None else int(held)
 
 
@@ -518,7 +523,9 @@ class KeeneticWanTxBytesSensor(_WanBytesBase):
         return "TX Bytes"
 
 
-class _WanThroughputBase(ThroughputDeadbandMixin, _WanSensorBase):
+class _WanThroughputBase(
+    SourceFreshnessMixin, ThroughputDeadbandMixin, _WanSensorBase
+):
     _attr_device_class = SensorDeviceClass.DATA_RATE
     _attr_state_class = SensorStateClass.MEASUREMENT
     # See _WanBytesBase: throughput fields are also in the base ignore set.
@@ -526,6 +533,7 @@ class _WanThroughputBase(ThroughputDeadbandMixin, _WanSensorBase):
     _attr_native_unit_of_measurement = UnitOfDataRate.BITS_PER_SECOND
     _attr_suggested_display_precision = 0
     _field = "rx_throughput"
+    _freshness_key = "interface_stats_fresh"
 
     @property
     def native_value(self) -> float | None:

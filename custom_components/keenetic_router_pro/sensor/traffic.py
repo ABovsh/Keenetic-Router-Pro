@@ -14,22 +14,27 @@ from homeassistant.const import EntityCategory, UnitOfInformation
 
 from ..coordinator import KeeneticCoordinator
 from ..const import COUNTER_DEADBAND_BYTES
-from ..entity import ControllerEntity, DeadbandMixin
-from ..utils import bytes_to_gib
+from ..entity import ControllerEntity, CounterDeadbandMixin, SourceFreshnessMixin
+from ..utils import bytes_to_gib, coerce_byte_count
 
 _ICON_DOWNLOAD = "mdi:download-network"
 _ICON_UPLOAD = "mdi:upload-network"
 
 
-class _TrafficSensorBase(DeadbandMixin, ControllerEntity, SensorEntity):
+class _TrafficSensorBase(
+    SourceFreshnessMixin, CounterDeadbandMixin, ControllerEntity, SensorEntity
+):
     """Shared RX/TX byte counter sensor for one interface."""
 
     _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.DATA_SIZE
+    # Keep the published legacy unit stable until existing statistics can be
+    # migrated without reinterpreting same-ID TOTAL_INCREASING history.
     _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
+    _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
+    _freshness_key = "interface_stats_fresh"
     _direction = "rx"
 
     def __init__(
@@ -68,7 +73,8 @@ class _TrafficSensorBase(DeadbandMixin, ControllerEntity, SensorEntity):
         # double-count the counter back up in long-term statistics. Passing the
         # None through the deadband also clears the latch, so the sensor does
         # not resume from a baseline the router no longer reports.
-        return self._apply_deadband(bytes_to_gib(self._stats.get(self._field)))
+        raw = coerce_byte_count(self._stats.get(self._field))
+        return self._publish_counter(bytes_to_gib(raw), raw_value=raw)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:

@@ -14,8 +14,8 @@ from homeassistant.const import UnitOfInformation, UnitOfTime, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
 from ..const import COUNTER_DEADBAND_BYTES
-from ..entity import ControllerEntity, DeadbandMixin
-from ..utils import bytes_to_mib, coerce_seconds
+from ..entity import ControllerEntity, CounterDeadbandMixin
+from ..utils import bytes_to_mib, coerce_byte_count, coerce_seconds
 
 
 class _BaseWgSensor(ControllerEntity, SensorEntity):
@@ -82,7 +82,7 @@ class KeeneticWgUptimeSensor(_BaseWgSensor):
         return 0
 
 
-class KeeneticWgRxSensor(DeadbandMixin, _BaseWgSensor):
+class KeeneticWgRxSensor(CounterDeadbandMixin, _BaseWgSensor):
     """WireGuard RX (received traffic) sensor."""
     _attr_has_entity_name = True
     # RX bytes is a cumulative counter that resets when the tunnel restarts —
@@ -92,7 +92,7 @@ class KeeneticWgRxSensor(DeadbandMixin, _BaseWgSensor):
     _attr_device_class = SensorDeviceClass.DATA_SIZE
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     # Shared byte step expressed in this sensor's own unit (MiB).
-    _DEADBAND = COUNTER_DEADBAND_BYTES / 1024**2
+    _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**2
 
     @property
     def unique_id(self) -> str:
@@ -109,20 +109,21 @@ class KeeneticWgRxSensor(DeadbandMixin, _BaseWgSensor):
     @property
     def native_value(self) -> float | None:
         for key in ("rxbytes", "rx", "received"):
-            mib = bytes_to_mib(self._wg.get(key))
+            raw = coerce_byte_count(self._wg.get(key))
+            mib = bytes_to_mib(raw)
             if mib is not None:
-                return self._apply_deadband(mib)
-        return self._apply_deadband(None)
+                return self._publish_counter(mib, raw_value=raw)
+        return self._publish_counter(None)
 
 
-class KeeneticWgTxSensor(DeadbandMixin, _BaseWgSensor):
+class KeeneticWgTxSensor(CounterDeadbandMixin, _BaseWgSensor):
     """WireGuard TX (sent traffic) sensor."""
     _attr_has_entity_name = True
     # See KeeneticWgRxSensor: cumulative counter → TOTAL_INCREASING.
     _attr_device_class = SensorDeviceClass.DATA_SIZE
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     # Shared byte step expressed in this sensor's own unit (MiB).
-    _DEADBAND = COUNTER_DEADBAND_BYTES / 1024**2
+    _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**2
 
     @property
     def unique_id(self) -> str:
@@ -139,7 +140,8 @@ class KeeneticWgTxSensor(DeadbandMixin, _BaseWgSensor):
     @property
     def native_value(self) -> float | None:
         for key in ("txbytes", "tx", "sent"):
-            mib = bytes_to_mib(self._wg.get(key))
+            raw = coerce_byte_count(self._wg.get(key))
+            mib = bytes_to_mib(raw)
             if mib is not None:
-                return self._apply_deadband(mib)
-        return self._apply_deadband(None)
+                return self._publish_counter(mib, raw_value=raw)
+        return self._publish_counter(None)

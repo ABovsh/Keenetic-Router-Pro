@@ -68,7 +68,11 @@ def test_every_data_size_sensor_declares_a_deadband() -> None:
     # reports success forever. Pin the floor so a broken walk fails loudly.
     assert len(counters) >= 10, f"discovery found only {len(counters)} counters"
 
-    undamped = [c.__name__ for c in counters if not getattr(c, "_DEADBAND", 0)]
+    undamped = [
+        c.__name__
+        for c in counters
+        if not getattr(c, "_COUNTER_DEADBAND", getattr(c, "_DEADBAND", 0))
+    ]
     assert undamped == [], (
         "these DATA_SIZE sensors write a recorder row on every poll: "
         f"{sorted(undamped)}"

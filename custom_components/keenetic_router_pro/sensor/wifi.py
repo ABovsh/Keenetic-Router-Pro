@@ -8,8 +8,13 @@ from homeassistant.const import UnitOfInformation, UnitOfTemperature, EntityCate
 
 from ..coordinator import KeeneticCoordinator
 from ..const import COUNTER_DEADBAND_BYTES
-from ..entity import ControllerEntity, DeadbandMixin
-from ..utils import bytes_to_gib, coerce_float
+from ..entity import (
+    ControllerEntity,
+    CounterDeadbandMixin,
+    DeadbandMixin,
+    SourceFreshnessMixin,
+)
+from ..utils import bytes_to_gib, coerce_byte_count, coerce_float
 
 # Measured on live hardware: the radio temperature alternates between two
 # readings 2 °C apart on every poll, writing ~1,000 recorder rows a day while
@@ -91,7 +96,9 @@ class KeeneticWifi5TemperatureSensor(DeadbandMixin, ControllerEntity, SensorEnti
         return bool(getattr(super(), "available", True)) and self.native_value is not None
 
 
-class KeeneticWifi24RxSensor(DeadbandMixin, ControllerEntity, SensorEntity):
+class KeeneticWifi24RxSensor(
+    SourceFreshnessMixin, CounterDeadbandMixin, ControllerEntity, SensorEntity
+):
     """WiFi 2.4GHz RX sensor."""
     _attr_has_entity_name = True
     _attr_icon = "mdi:download-network"
@@ -100,7 +107,8 @@ class KeeneticWifi24RxSensor(DeadbandMixin, ControllerEntity, SensorEntity):
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     # Shared byte step expressed in this sensor's own unit (GiB).
-    _DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
+    _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
+    _freshness_key = "interface_stats_fresh"
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -119,10 +127,13 @@ class KeeneticWifi24RxSensor(DeadbandMixin, ControllerEntity, SensorEntity):
     def native_value(self) -> float | None:
         stats = self.coordinator.data.get("interface_stats", {})
         iface_stats = stats.get(self._iface_name, {})
-        return self._apply_deadband(bytes_to_gib(iface_stats.get("rxbytes")))
+        raw = coerce_byte_count(iface_stats.get("rxbytes"))
+        return self._publish_counter(bytes_to_gib(raw), raw_value=raw)
 
 
-class KeeneticWifi24TxSensor(DeadbandMixin, ControllerEntity, SensorEntity):
+class KeeneticWifi24TxSensor(
+    SourceFreshnessMixin, CounterDeadbandMixin, ControllerEntity, SensorEntity
+):
     """WiFi 2.4GHz TX sensor."""
     _attr_has_entity_name = True
     _attr_icon = "mdi:upload-network"
@@ -131,7 +142,8 @@ class KeeneticWifi24TxSensor(DeadbandMixin, ControllerEntity, SensorEntity):
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     # Shared byte step expressed in this sensor's own unit (GiB).
-    _DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
+    _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
+    _freshness_key = "interface_stats_fresh"
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -150,10 +162,13 @@ class KeeneticWifi24TxSensor(DeadbandMixin, ControllerEntity, SensorEntity):
     def native_value(self) -> float | None:
         stats = self.coordinator.data.get("interface_stats", {})
         iface_stats = stats.get(self._iface_name, {})
-        return self._apply_deadband(bytes_to_gib(iface_stats.get("txbytes")))
+        raw = coerce_byte_count(iface_stats.get("txbytes"))
+        return self._publish_counter(bytes_to_gib(raw), raw_value=raw)
 
 
-class KeeneticWifi5RxSensor(DeadbandMixin, ControllerEntity, SensorEntity):
+class KeeneticWifi5RxSensor(
+    SourceFreshnessMixin, CounterDeadbandMixin, ControllerEntity, SensorEntity
+):
     """WiFi 5GHz RX sensor."""
     _attr_has_entity_name = True
     _attr_icon = "mdi:download-network"
@@ -162,7 +177,8 @@ class KeeneticWifi5RxSensor(DeadbandMixin, ControllerEntity, SensorEntity):
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     # Shared byte step expressed in this sensor's own unit (GiB).
-    _DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
+    _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
+    _freshness_key = "interface_stats_fresh"
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -181,10 +197,13 @@ class KeeneticWifi5RxSensor(DeadbandMixin, ControllerEntity, SensorEntity):
     def native_value(self) -> float | None:
         stats = self.coordinator.data.get("interface_stats", {})
         iface_stats = stats.get(self._iface_name, {})
-        return self._apply_deadband(bytes_to_gib(iface_stats.get("rxbytes")))
+        raw = coerce_byte_count(iface_stats.get("rxbytes"))
+        return self._publish_counter(bytes_to_gib(raw), raw_value=raw)
 
 
-class KeeneticWifi5TxSensor(DeadbandMixin, ControllerEntity, SensorEntity):
+class KeeneticWifi5TxSensor(
+    SourceFreshnessMixin, CounterDeadbandMixin, ControllerEntity, SensorEntity
+):
     """WiFi 5GHz TX sensor."""
     _attr_has_entity_name = True
     _attr_icon = "mdi:upload-network"
@@ -193,7 +212,8 @@ class KeeneticWifi5TxSensor(DeadbandMixin, ControllerEntity, SensorEntity):
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     # Shared byte step expressed in this sensor's own unit (GiB).
-    _DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
+    _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
+    _freshness_key = "interface_stats_fresh"
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -212,4 +232,5 @@ class KeeneticWifi5TxSensor(DeadbandMixin, ControllerEntity, SensorEntity):
     def native_value(self) -> float | None:
         stats = self.coordinator.data.get("interface_stats", {})
         iface_stats = stats.get(self._iface_name, {})
-        return self._apply_deadband(bytes_to_gib(iface_stats.get("txbytes")))
+        raw = coerce_byte_count(iface_stats.get("txbytes"))
+        return self._publish_counter(bytes_to_gib(raw), raw_value=raw)

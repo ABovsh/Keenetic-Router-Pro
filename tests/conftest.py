@@ -35,7 +35,8 @@ class _AttrEnum:
 class _Entity:
     """Base stand-in for Home Assistant entity classes."""
 
-    pass
+    def async_write_ha_state(self) -> None:
+        """Mirror the HA entity write hook for control-entity tests."""
 
 
 class HomeAssistantError(Exception):
@@ -330,6 +331,11 @@ sensor.SensorDeviceClass = _AttrEnum()
 sensor.SensorStateClass = _AttrEnum()
 components.sensor = sensor
 
+number = types.ModuleType("homeassistant.components.number")
+number.NumberEntity = _Entity
+number.NumberMode = _AttrEnum()
+components.number = number
+
 switch = types.ModuleType("homeassistant.components.switch")
 switch.SwitchEntity = _Entity
 components.switch = switch
@@ -498,6 +504,7 @@ sys.modules["homeassistant.helpers.update_coordinator"] = update_coordinator
 sys.modules["homeassistant.helpers.device_registry"] = device_registry
 sys.modules["homeassistant.components"] = components
 sys.modules["homeassistant.components.sensor"] = sensor
+sys.modules["homeassistant.components.number"] = number
 sys.modules["homeassistant.components.switch"] = switch
 sys.modules["homeassistant.components.binary_sensor"] = binary_sensor
 sys.modules["homeassistant.components.button"] = button

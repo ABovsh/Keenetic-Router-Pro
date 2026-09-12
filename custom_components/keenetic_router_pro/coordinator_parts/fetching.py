@@ -19,6 +19,7 @@ CRITICAL_FETCH_NAMES = {"system_info", "interfaces"}
 # integration for a tick. Auth failures are never tolerated (see
 # ``evaluate_critical_failures``).
 CRITICAL_FETCH_GRACE_TICKS = 3
+OPTIONAL_FETCH_GRACE_ATTEMPTS = 3
 
 
 @dataclass(frozen=True)
