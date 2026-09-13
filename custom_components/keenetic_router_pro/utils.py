@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Iterator
+from ipaddress import ip_address
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -35,6 +36,22 @@ def bracket_host(host: Any) -> str:
     if ":" in text and not text.startswith("["):
         return f"[{text}]"
     return text
+
+
+def normalize_mesh_node_address(value: Any) -> str | None:
+    """Return a safe literal IP for direct mesh-node requests."""
+    text = str(value or "").strip()
+    if text.startswith("[") and text.endswith("]"):
+        text = text[1:-1]
+    if not text or "%" in text:
+        return None
+    try:
+        address = ip_address(text)
+    except ValueError:
+        return None
+    if address.is_unspecified or address.is_multicast or address.is_loopback:
+        return None
+    return address.compressed
 
 
 def coerce_seconds(value: Any, default: int | None = 0) -> int | None:
@@ -399,6 +416,7 @@ def get_mesh_device_info(
     host: str | None = None,
     ssl: bool = False,
     fqdn: str | None = None,
+    parent_device_id: str | None = None,
 ) -> dict[str, Any]:
     """Build DeviceInfo for a Mesh extender node."""
     if node and node_cid:
@@ -413,15 +431,16 @@ def get_mesh_device_info(
                 f"{scheme}://{bracket_host(node_ip)}" if node_ip else None
             )
 
-        return {
+        device_info = {
             "identifiers": {(DOMAIN, f"{entry_id}_mesh_{sanitize_mesh_id(node_cid)}")},
             "name": node_name,
             "manufacturer": "Keenetic",
             "model": node.get("model") or "Extender",
             "sw_version": node.get("firmware"),
-            "via_device": (DOMAIN, entry_id),
             "configuration_url": configuration_url,
         }
+        device_info.update(_parent_device_info(entry_id, parent_device_id))
+        return device_info
 
     # Fallback to the main router device.
     return get_main_device_info(title, entry_id, None, None, host, ssl)
@@ -434,6 +453,7 @@ def get_wan_device_info(
     description: str | None = None,
     iface_type: str | None = None,
     role_label: str | None = None,
+    parent_device_id: str | None = None,
 ) -> dict[str, Any]:
     """Device info for a single WAN interface.
 
@@ -449,13 +469,14 @@ def get_wan_device_info(
         name_parts.append(f"({role_label})")
     device_name = " ".join(name_parts)
 
-    return {
+    device_info = {
         "identifiers": {(DOMAIN, f"{entry_id}_wan_{wan_id}")},
         "name": f"{title} — {device_name}",
         "manufacturer": "Keenetic",
         "model": f"WAN ({iface_type})" if iface_type else "WAN",
-        "via_device": (DOMAIN, entry_id),
     }
+    device_info.update(_parent_device_info(entry_id, parent_device_id))
+    return device_info
 
 
 def get_vpn_interface_device_info(
@@ -464,6 +485,7 @@ def get_vpn_interface_device_info(
     iface_id: str,
     label: str | None = None,
     iface_type: str | None = None,
+    parent_device_id: str | None = None,
 ) -> dict[str, Any]:
     """Device info for a VPN/interface that is not a WAN uplink."""
     display = label or iface_id
@@ -471,13 +493,14 @@ def get_vpn_interface_device_info(
     if iface_type:
         model = f"{str(iface_type).upper()} interface"
 
-    return {
+    device_info = {
         "identifiers": {(DOMAIN, f"{entry_id}_iface_{iface_id}")},
         "name": f"{title} — {display}",
         "manufacturer": "Keenetic",
         "model": model,
-        "via_device": (DOMAIN, entry_id),
     }
+    device_info.update(_parent_device_info(entry_id, parent_device_id))
+    return device_info
 
 
 def get_crypto_map_device_info(
@@ -485,6 +508,7 @@ def get_crypto_map_device_info(
     entry_id: str,
     cmap_name: str,
     remote_peer: str | None = None,
+    parent_device_id: str | None = None,
 ) -> dict[str, Any]:
     """Device info for a single site-to-site IPsec `crypto map` tunnel.
 
@@ -504,13 +528,14 @@ def get_crypto_map_device_info(
         name_parts.append(f"→ {remote_peer}")
     device_name = " ".join(name_parts)
 
-    return {
+    device_info = {
         "identifiers": {(DOMAIN, f"{entry_id}_cmap_{cmap_name}")},
         "name": f"{title} — IPsec {device_name}",
         "manufacturer": "Keenetic",
         "model": "IPsec site-to-site tunnel",
-        "via_device": (DOMAIN, entry_id),
     }
+    device_info.update(_parent_device_info(entry_id, parent_device_id))
+    return device_info
 
 
 def get_client_device_info(
@@ -520,6 +545,7 @@ def get_client_device_info(
     label: str,
     client: dict[str, Any] | None = None,
     initial_ip: str | None = None,
+    parent_device_id: str | None = None,
 ) -> dict[str, Any]:
     """Build DeviceInfo for a tracked client exposed as its own HA device."""
     device_name = client_display_name(client, label)
@@ -540,18 +566,26 @@ def get_client_device_info(
 
     display_name = f"{device_name} ({title})" if title else device_name
 
-    return {
+    device_info = {
         "identifiers": {(DOMAIN, f"{entry_id}_client_{mac.replace(':', '_')}")},
         "name": display_name,
         "manufacturer": manufacturer,
         "model": model,
-        "via_device": (DOMAIN, entry_id),
         "configuration_url": (
             urlunsplit(("http", bracket_host(ip_address), "", "", ""))
             if ip_address
             else None
         ),
     }
+    device_info.update(_parent_device_info(entry_id, parent_device_id))
+    return device_info
+
+
+def _parent_device_info(entry_id: str, parent_device_id: str | None) -> dict[str, Any]:
+    """Build a version-compatible link to the main router device."""
+    if parent_device_id is not None:
+        return {"via_device_id": parent_device_id}
+    return {"via_device": (DOMAIN, entry_id)}
 
 
 def mask_identifier(value: Any, *, keep: int = 5) -> str:

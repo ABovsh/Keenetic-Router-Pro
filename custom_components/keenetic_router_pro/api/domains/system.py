@@ -12,7 +12,12 @@ import aiohttp
 from homeassistant.exceptions import HomeAssistantError
 
 from ...const import DOMAIN, RCI_SHOW_VERSION
-from ...utils import bracket_host, coerce_bool, mask_identifier
+from ...utils import (
+    bracket_host,
+    coerce_bool,
+    mask_identifier,
+    normalize_mesh_node_address,
+)
 from ..constants import RCI_ROOT
 from ..errors import KeeneticApiError
 from ..helpers import (
@@ -232,6 +237,10 @@ class SystemMixin:
                     type(err).__name__,
                 )
 
+        direct_address = normalize_mesh_node_address(node_ip)
+        if direct_address is None:
+            raise HomeAssistantError("Mesh node address is not a valid literal IP")
+        node_ip = direct_address
         scheme = "https" if self._ssl else "http"
 
         # Try controller's port first, then default port 80
@@ -474,16 +483,11 @@ class SystemMixin:
 
                 if not challenge:
                     _LOGGER.debug(
-                        "Node %s did not return challenge header, "
-                        "using basic auth fallback",
+                        "Node %s did not return a challenge header",
                         mask_identifier(node_ip),
                     )
                     await get_resp.read()
-                    # Do NOT cache the Basic fallback: a transient error
-                    # page without the challenge header would otherwise
-                    # latch an unusable header for the whole session on a
-                    # challenge-auth node.
-                    return dict(self._basic_auth_headers())
+                    return None
 
                 # Step 2: Compute hash
                 ha1 = hashlib.md5(

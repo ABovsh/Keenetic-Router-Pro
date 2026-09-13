@@ -82,8 +82,8 @@ def test_ndns_info_does_not_mutate_rci_payload() -> None:
 
 
 # ---------------------------------------------------------------- CA03
-def test_node_auth_basic_fallback_not_cached() -> None:
-    """A no-challenge response must not latch Basic auth for the session."""
+def test_node_auth_missing_challenge_sends_no_credentials() -> None:
+    """A no-challenge response must neither send nor cache credentials."""
 
     class FakeResponse:
         status = 200
@@ -106,7 +106,7 @@ def test_node_auth_basic_fallback_not_cached() -> None:
     client._session = FakeSession()
 
     headers = asyncio.run(client._authenticate_to_node("192.168.1.3", 80))
-    assert "Authorization" in headers
+    assert headers is None
     assert ("192.168.1.3", 80) not in client._node_auth_headers
 
 

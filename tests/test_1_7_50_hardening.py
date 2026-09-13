@@ -169,7 +169,6 @@ def test_is_ranked_wan_string_false_global() -> None:
         ("sensor/clients.py", "KeeneticConnectedClientsSensor"),
         ("sensor/clients.py", "KeeneticRouterClientsSensor"),
         ("sensor/clients.py", "KeeneticDisconnectedClientsSensor"),
-        ("sensor/clients.py", "KeeneticExtenderCountSensor"),
         ("sensor/mesh.py", "KeeneticMeshClientsSensor"),
     ],
 )
@@ -178,6 +177,13 @@ def test_count_sensors_use_measurement(relative_path: str, class_name: str) -> N
     assert assignments.get("_attr_state_class") == "SensorStateClass.MEASUREMENT", (
         f"{class_name} is an instantaneous count and must use MEASUREMENT"
     )
+
+
+def test_extender_count_does_not_create_long_term_statistics() -> None:
+    assignments = _class_assignments(
+        ROOT / "sensor/clients.py", "KeeneticExtenderCountSensor"
+    )
+    assert "_attr_state_class" not in assignments
 
 
 @pytest.mark.parametrize("class_name", ["KeeneticWgRxSensor", "KeeneticWgTxSensor"])

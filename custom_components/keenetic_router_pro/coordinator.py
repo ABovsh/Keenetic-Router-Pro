@@ -28,6 +28,7 @@ from .coordinator_parts.enrichment import (
 )
 from .coordinator_parts.fetching import (
     FetchFailure,
+    OPTIONAL_FETCH_GRACE_ATTEMPTS,
     evaluate_critical_failures,
     next_backoff_interval,
     ok_or_default,
@@ -135,6 +136,9 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # poll backoff during a sustained outage. Reset to 0 on any tick that
         # doesn't raise UpdateFailed. See ``next_backoff_interval``.
         self._critical_fail_backoff_count = 0
+        # Optional fetch families can fail while the coordinator itself stays
+        # healthy. Keep a short grace window, then mark only that source stale.
+        self._source_failure_streaks: dict[str, int] = {}
         # Per-config-entry persistent OOM tracker. The Store key is
         # derived from the API host so two routers on the same HA
         # instance keep their counters independent. Schema:
@@ -151,6 +155,24 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "total": 0,
         }
         self._oom_state_loaded = False
+        self._oom_state_dirty = False
+        self._oom_save_backoff_ticks = 0
+        self._oom_save_retry_after = 0
+
+    def _source_is_fresh(self, name: str, *, attempted: bool, failed: bool) -> bool:
+        """Track freshness for a tiered optional source by attempted refreshes."""
+        key = f"{name}_fresh"
+        if not attempted:
+            return bool((self.data or {}).get(key, True))
+        streaks = getattr(self, "_source_failure_streaks", None)
+        if streaks is None:
+            streaks = self._source_failure_streaks = {}
+        if not failed:
+            streaks[name] = 0
+            return True
+        streak = streaks.get(name, 0) + 1
+        streaks[name] = streak
+        return self.data is not None and streak <= OPTIONAL_FETCH_GRACE_ATTEMPTS
 
     def request_host_policies_refresh(self) -> None:
         """Force a live host_policies fetch on the next refresh tick."""
@@ -408,6 +430,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     mesh_nodes = err
             else:
                 mesh_nodes = _prev.get("mesh_nodes", [])
+            mesh_nodes_failed = slow_refresh and isinstance(mesh_nodes, BaseException)
 
             # Critical fetches default to the previous snapshot, not an empty
             # shape, so a tolerated transient failure (see the grace-window
@@ -427,6 +450,11 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # the API layer now raises instead of returning MAC-keyed
             # fallback nodes (which used to flip mesh unique_ids).
             mesh_nodes = _ok("mesh_nodes", mesh_nodes, _prev.get("mesh_nodes", []))
+            mesh_nodes_fresh = self._source_is_fresh(
+                "mesh_nodes",
+                attempted=slow_refresh,
+                failed=mesh_nodes_failed,
+            )
             # On a transient fetch failure keep the previous snapshot — an
             # empty default would flip every policy select to "Default"
             # until the next slow-tier refetch.
@@ -527,12 +555,32 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 next_oom_state = advance_oom_state(self._oom_state, events)
                 if next_oom_state != self._oom_state:
                     self._oom_state = next_oom_state
-                    store = getattr(self, "_oom_store", None)
-                    if store is not None:
-                        try:
-                            await store.async_save(self._oom_state)
-                        except (OSError, TypeError) as err:
-                            _LOGGER.debug("OOM Store save failed: %s", err)
+                    self._oom_state_dirty = True
+                    self._oom_save_retry_after = 0
+            if getattr(self, "_oom_state_dirty", False) and self._oom_state_loaded:
+                store = getattr(self, "_oom_store", None)
+                retry_after = getattr(self, "_oom_save_retry_after", 0)
+                if retry_after > 0:
+                    self._oom_save_retry_after = retry_after - 1
+                elif store is not None:
+                    try:
+                        await store.async_save(self._oom_state)
+                    except (OSError, TypeError) as err:
+                        delay = min(
+                            max(1, getattr(self, "_oom_save_backoff_ticks", 0) * 2),
+                            15,
+                        )
+                        self._oom_save_backoff_ticks = delay
+                        self._oom_save_retry_after = delay - 1
+                        _LOGGER.debug(
+                            "OOM Store save failed: %s — retrying in %s tick(s)",
+                            err,
+                            delay,
+                        )
+                    else:
+                        self._oom_state_dirty = False
+                        self._oom_save_backoff_ticks = 0
+                        self._oom_save_retry_after = 0
 
             # Copy before mutating: on non-very-slow ticks this is the SAME
             # dict object as the currently-published self.data snapshot.
@@ -693,6 +741,11 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 interface_stats = _prev.get("interface_stats", {})
 
             interface_stats_failed = isinstance(interface_stats, BaseException)
+            interface_stats_fresh = self._source_is_fresh(
+                "interface_stats",
+                attempted=medium_refresh,
+                failed=interface_stats_failed,
+            )
             # On a stage-2 task exception keep the previous snapshot — an
             # empty default would make every existing entity of that family
             # unavailable for the tick (same policy as mesh/crypto_maps).
@@ -892,9 +945,11 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "wan_interfaces": wan_interfaces,
                 "wan_by_id": wan_by_id,
                 "mesh_nodes": mesh_nodes,
+                "mesh_nodes_fresh": mesh_nodes_fresh,
                 "mesh_associations": mesh_associations_data,
                 "mesh_nodes_by_cid": mesh_nodes_by_cid,
                 "interface_stats": interface_stats,
+                "interface_stats_fresh": interface_stats_fresh,
                 "client_stats": client_stats,
                 "ndns": ndns_info,
                 "host_policies": host_policies,

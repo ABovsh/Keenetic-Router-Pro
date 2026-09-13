@@ -26,6 +26,11 @@ from .utils import (
 )
 
 
+def _parent_device_id(coordinator: KeeneticCoordinator) -> str | None:
+    """Return the setup-time-resolved router device id, when HA supports it."""
+    return getattr(coordinator, "parent_device_id", None)
+
+
 def _entity_fingerprint(
     data: dict[str, Any] | None,
     ignore: frozenset[str],
@@ -59,6 +64,45 @@ class DeadbandMixin:
         )
         self._deadband_published = published
         return published
+
+
+class CounterDeadbandMixin:
+    """Deadband a cumulative counter while always exposing resets."""
+
+    _COUNTER_DEADBAND: float = 0.0
+
+    def _publish_counter(
+        self, value: float | None, *, raw_value: float | None = None
+    ) -> float | None:
+        """Hold small increases but publish every raw counter decrease."""
+        if value is None:
+            self._counter_raw = None
+            self._counter_published = None
+            return None
+        raw = value if raw_value is None else raw_value
+        previous_raw = getattr(self, "_counter_raw", None)
+        previous_published = getattr(self, "_counter_published", None)
+        if previous_raw is None or raw < previous_raw:
+            published = value
+        else:
+            published = apply_deadband(
+                value, previous_published, self._COUNTER_DEADBAND
+            )
+        self._counter_raw = raw
+        self._counter_published = published
+        return published
+
+
+class SourceFreshnessMixin:
+    """Make an entity unavailable after its optional source goes stale."""
+
+    _freshness_key: str
+
+    @property
+    def available(self) -> bool:
+        return bool(getattr(super(), "available", True)) and bool(
+            (self.coordinator.data or {}).get(self._freshness_key, True)
+        )
 
 
 class ThroughputDeadbandMixin:
@@ -282,6 +326,12 @@ class MeshEntity(_FingerprintedCoordinatorEntity):
         return find_mesh_node(self.coordinator.data or {}, self._node_cid)
 
     @property
+    def available(self) -> bool:
+        return super().available and bool(
+            (self.coordinator.data or {}).get("mesh_nodes_fresh", True)
+        )
+
+    @property
     def device_info(self) -> DeviceInfo:
         node = self._node
         node_ip = node.get("ip") if node else None
@@ -294,6 +344,7 @@ class MeshEntity(_FingerprintedCoordinatorEntity):
             host=node_ip,
             ssl=bool(getattr(self.coordinator.client, "ssl", False)),
             fqdn=node.get("fqdn") if node else None,
+            parent_device_id=_parent_device_id(self.coordinator),
         )
 
 class WanEntity(_FingerprintedCoordinatorEntity):
@@ -352,6 +403,7 @@ class WanEntity(_FingerprintedCoordinatorEntity):
             description=wan.get("description"),
             iface_type=wan.get("type"),
             role_label=wan.get("role_label"),
+            parent_device_id=_parent_device_id(self.coordinator),
         )
 
 
@@ -396,6 +448,7 @@ class InterfaceEntity(CoordinatorEntity):
                 description=wan.get("description"),
                 iface_type=wan.get("type"),
                 role_label=wan.get("role_label"),
+                parent_device_id=_parent_device_id(self.coordinator),
             )
 
         return get_vpn_interface_device_info(
@@ -404,6 +457,7 @@ class InterfaceEntity(CoordinatorEntity):
             iface_id=self._iface_id,
             label=self._label,
             iface_type=self._iface_type,
+            parent_device_id=_parent_device_id(self.coordinator),
         )
 
 
@@ -458,6 +512,7 @@ class CryptoMapEntity(_FingerprintedCoordinatorEntity):
             entry_id=self._entry_id,
             cmap_name=self._cmap_name,
             remote_peer=cmap.get("remote_peer"),
+            parent_device_id=_parent_device_id(self.coordinator),
         )
 
 
@@ -539,6 +594,7 @@ class ClientEntity(_FingerprintedCoordinatorEntity):
             label=self._label,
             client=client,
             initial_ip=self._initial_ip,
+            parent_device_id=_parent_device_id(self.coordinator),
         )
 
     @property

@@ -103,7 +103,6 @@ class KeeneticExtenderCountSensor(ControllerEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "extender_count"
     _attr_icon = "mdi:access-point-network"
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:

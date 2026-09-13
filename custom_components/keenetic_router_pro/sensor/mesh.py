@@ -240,7 +240,7 @@ class KeeneticMeshCpuLoadSensor(DeadbandMixin, MeshEntity, SensorEntity):
         return self._apply_deadband(None)
 
 
-class KeeneticMeshMemorySensor(MeshEntity, SensorEntity):
+class KeeneticMeshMemorySensor(DeadbandMixin, MeshEntity, SensorEntity):
     """Mesh node memory usage percentage sensor."""
     _attr_has_entity_name = True
     _attr_translation_key = "memory_usage"
@@ -248,6 +248,7 @@ class KeeneticMeshMemorySensor(MeshEntity, SensorEntity):
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:memory"
+    _DEADBAND = 2.0
     # Defensive opt-out: native_value derives from node["memory"]; the MeshEntity
     # base ignore set predates this sensor and may add memory fields later.
     _FINGERPRINT_IGNORE = frozenset()
@@ -263,8 +264,8 @@ class KeeneticMeshMemorySensor(MeshEntity, SensorEntity):
     def native_value(self) -> float | None:
         node = self._node
         if node:
-            return parse_memory_fraction(node.get("memory"))
-        return None
+            return self._apply_deadband(parse_memory_fraction(node.get("memory")))
+        return self._apply_deadband(None)
 
 
 class KeeneticMeshFirmwareVersionSensor(MeshEntity, SensorEntity):

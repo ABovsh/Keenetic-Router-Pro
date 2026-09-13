@@ -6,6 +6,7 @@ from conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
 
 from collections import deque
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -141,12 +142,12 @@ async def test_start_node_firmware_update_releases_node_responses() -> None:
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
     session = _Session([
         _Response({}),  # initial auth
-        _Response({}, headers={}),  # node auth GET without challenge -> basic fallback
         _Response({"ndw": {"components": "base"}}),
         _Response({}, status=204),
         _Response({}, status=204),
     ])
     await client.async_start(session)
+    client._authenticate_to_node = AsyncMock(return_value={"Cookie": "session=node"})
 
     assert await client.async_start_node_firmware_update("192.0.2.2", "Kitchen") is True
     assert session.open_responses == []
