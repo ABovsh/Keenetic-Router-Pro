@@ -8,14 +8,19 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
-## Unreleased
+## 1.17.0
 
-### Security
+### ⚠️ Breaking
+
+- Extender Count keeps its entity and history but no longer creates future
+  long-term statistics rows.
+
+### 🔒 Security
 
 - Direct mesh updates accept literal IP addresses only and do not send Basic
   credentials when a node omits the Keenetic authentication challenge.
 
-### Bug fixes
+### 🐛 Fixed
 
 - Traffic counter resets now publish immediately even when the new value is
   smaller than the recorder deadband, preventing inflated usage totals.
@@ -25,10 +30,8 @@ git log.
   next refresh.
 - Device grouping now uses the current Home Assistant device-registry APIs.
 
-### Improvements
+### ✨ Improvements
 
-- ⚠️ Breaking: Extender Count keeps its entity and history but no longer
-  creates future long-term statistics rows.
 - Mesh memory changes below two percentage points are held at the source,
   reducing recorder writes from harmless one-point fluctuations.
 
