@@ -1,7 +1,7 @@
 # Keenetic Router Pro
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge)](https://github.com/custom-components/hacs)
-![Version](https://img.shields.io/badge/version-1.17.0-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-1.18.0-blue?style=for-the-badge)
 ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.5%2B-41BDF5?style=for-the-badge&logo=home-assistant)
 
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ABovsh_Keenetic-Router-Pro)
@@ -55,8 +55,9 @@ An actively maintained, hardened fork of the original Keenetic Router Pro integr
   a slower cadence than they are polled, and percentages are whole numbers, so
   they stop writing a row for every tenth of a percent. On a three-router
   install this cut the integration's recorder writes by roughly a third.
-  Inventory-only extender counts do not create scheduled statistics rows, and
-  mesh memory ignores one-point fluctuations.
+  Inventory-only extender counts and the duplicate router-level WAN counters
+  do not create scheduled statistics rows, and router and mesh memory ignore
+  one-point fluctuations.
 - **No third-party dependencies.** The integration installs nothing into your
   Home Assistant environment (upstream pulls in `icmplib`, `pyqrcode` and
   `pypng`).
@@ -67,8 +68,10 @@ An actively maintained, hardened fork of the original Keenetic Router Pro integr
 - **Mesh is treated as a first-class surface.** Mesh nodes and ports can appear
   dynamically without restarting Home Assistant, removed nodes become
   unavailable instead of stale, sustained topology or interface-stat failures
-  expire affected measurements, firmware update entities support controller
-  and extender flows, and mesh unique IDs are scoped to the HA config entry.
+  expire affected measurements, nodes recover on their own after a router
+  reboot, retired nodes can be deleted from the UI, firmware update entities
+  support controller and extender flows, and mesh unique IDs are scoped to the
+  HA config entry.
 - **Useful diagnostics, not just raw counters.** The fork adds DNS proxy
   health and failed-request sensors, IPsec VICI out-of-memory diagnostics,
   ping-check aware WAN interpretation, WireGuard/IPsec state sensors, and

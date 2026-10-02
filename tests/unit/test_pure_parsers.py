@@ -148,7 +148,7 @@ def test_dns_proxy_status_normalizes_malformed_and_single_doh_payloads() -> None
                 {
                     "proxy-name": "main",
                     "proxy-config": "server https://dns.example/dns-query",
-                    "proxy-stat": "1.1.1.1 53 100 60 0 7ms 9ms 50\nbad",
+                    "proxy-stat": "1.1.1.1 53 100 40 0 7ms 9ms 50\nbad",
                     "proxy-https": {
                         "server-https": {"uri": "https://dns.example/dns-query"}
                     },
@@ -166,7 +166,7 @@ def test_dns_proxy_status_normalizes_malformed_and_single_doh_payloads() -> None
     assert status["doh_server_count"] == 1
     assert status["dns_server_count"] == 1
     assert status["requests_sent"] == 100
-    assert status["failed_requests"] == 40
+    assert status["failed_requests"] == 60
     assert status["client_path_uses_doh"] is True
 
 

@@ -8,6 +8,40 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.18.0
+
+### ⚠️ Breaking
+
+- The router-level WAN RX and WAN TX sensors keep their entities and
+  history, but no longer write long-term statistics. Use each WAN's own
+  RX Bytes and TX Bytes sensors for traffic statistics: they record the
+  same counter for the actual uplink. The router-level pair always reads
+  GigabitEthernet1, which on some routers is not the main WAN.
+
+### 🐛 Fixed
+
+- DNS Proxy Status no longer switches between ok and degraded on a healthy
+  resolver. It now reports degraded only when one upstream answers fewer
+  than half of at least 20 queries. Previously the router's normal racing
+  between two upstreams left 10–15 % of queries unanswered, which was
+  enough to trip the old threshold.
+- DNS Proxy Status no longer reports down when a filtering upstream
+  answered only blocked names (NXDOMAIN).
+- After a router reboot, clients and mesh nodes now recover by themselves.
+  Previously, endpoints that answered "not found" while the router was
+  booting stayed switched off until the integration was reloaded. During
+  that time every client showed as disconnected and the mesh node entities
+  were unavailable.
+- A mesh node that the router no longer reports can be deleted from
+  Settings → Devices together with its entities. Previously the delete was
+  refused while the device still had entities.
+
+### ✨ Improvements
+
+- Fewer recorder writes: router memory usage holds within 2 percentage
+  points, and Active Connections ignores changes under 5 % of the current
+  count (minimum 50).
+
 ## 1.17.0
 
 ### ⚠️ Breaking

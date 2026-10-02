@@ -36,6 +36,17 @@ def _redact_doh_uri(value: Any) -> str:
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.api.dns")
 
+# An upstream counts as failing once it has been sent this many queries in
+# the router's stats window and answered fewer than half of them.
+_WEAK_UPSTREAM_MIN_SENT = 20
+_WEAK_UPSTREAM_MIN_ANSWER_RATIO = 0.5
+
+
+def _upstream_is_weak(server: Dict[str, Any]) -> bool:
+    sent = int(server["sent"])
+    answered = int(server["answered"]) + int(server["nxdomain"])
+    return sent >= _WEAK_UPSTREAM_MIN_SENT and answered < sent * _WEAK_UPSTREAM_MIN_ANSWER_RATIO
+
 
 class DnsMixin:
     @staticmethod
@@ -87,6 +98,7 @@ class DnsMixin:
             failed_requests = 0
             sent_requests = 0
             do_h_servers = 0
+            weak_servers = 0
 
             for proxy in proxy_status:
                 if not isinstance(proxy, dict):
@@ -106,7 +118,12 @@ class DnsMixin:
 
                 proxy_sent = sum(int(s["sent"]) for s in stat_servers)
                 proxy_failed = sum(int(s["failed"]) for s in stat_servers)
-                proxy_active = sum(1 for s in stat_servers if int(s["answered"]) > 0)
+                # NXDOMAIN is an answer: a family filter that only blocked
+                # names in this window is alive, not down.
+                proxy_active = sum(
+                    1 for s in stat_servers if int(s["answered"]) + int(s["nxdomain"]) > 0
+                )
+                weak_servers += sum(1 for s in stat_servers if _upstream_is_weak(s))
                 proxy_doh = sum(
                     1
                     for server in https_servers
@@ -138,19 +155,17 @@ class DnsMixin:
 
             # Status thresholds:
             #   "down"     — traffic is flowing but no upstream answered any query
-            #   "degraded" — meaningful failure rate on a non-trivial sample
-            #                (>=5% failed of >=50 sent). The router's DNS proxy
-            #                races DoH upstreams and prunes losers; race-loser
-            #                probes routinely accumulate 1-2 timeouts that the
-            #                cumulative `show dns-proxy` counters never zero,
-            #                so a strict ">0 failed" rule sticks at "degraded"
-            #                forever on a perfectly healthy resolver.
-            failure_rate = (failed_requests / sent_requests) if sent_requests else 0.0
+            #   "degraded" — one upstream answers less than half of what it was
+            #                sent, on a non-trivial sample. An overall failure
+            #                rate cannot be used: the proxy races two upstreams
+            #                and drops the slower answer, so a healthy resolver
+            #                leaves ~10-15 % of queries "unanswered" (measured
+            #                2026-10-02), which flipped the status every poll.
             if not proxies or total_servers == 0:
                 status = "unknown"
             elif active_servers == 0 and sent_requests > 0:
                 status = "down"
-            elif sent_requests >= 50 and failure_rate >= 0.05:
+            elif weak_servers:
                 status = "degraded"
             else:
                 status = "ok"

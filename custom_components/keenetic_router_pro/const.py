@@ -5,6 +5,11 @@ DEFAULT_PORT = 100
 DEFAULT_SSL = False
 FAST_SCAN_INTERVAL = 60
 
+# While KeeneticOS boots, runtime endpoints can briefly answer "not found".
+# Endpoint-capability latches recorded within this many seconds of router
+# uptime are re-probed on the next poll instead of being kept for the session.
+CAPABILITY_BOOT_GRACE_S = 600
+
 # Deadband for every cumulative data counter, stated once here in bytes and
 # converted into each sensor's own unit at its base class. Counters are the
 # integration's largest recorder cost: on a live link they move on every poll,

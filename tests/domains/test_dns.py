@@ -16,12 +16,12 @@ from custom_components.keenetic_router_pro.api import KeeneticApiError, Keenetic
 @pytest.mark.parametrize(
     ("payload", "status", "doh_count"),
     [
-        # Small sample with failures: under the new threshold (>=50 sent and
-        # >=5% failure rate) this is treated as "ok" — race-loser DoH probes
-        # routinely accumulate a couple of timeouts.
+        # Small sample with failures: below the 20-query minimum -> "ok".
         ({"proxy-status": [{"proxy-name": "main", "proxy-config": "server https://dns.example/id", "proxy-stat": "1.1.1.1 53 2 1 0 5ms 6ms 10", "proxy-https": {"server-https": {"uri": "https://dns.example/private/path"}}}]}, "ok", 1),
-        # Large sample with >=5% failure rate -> degraded.
-        ({"proxy-status": [{"proxy-name": "main", "proxy-config": "server https://dns.example/id", "proxy-stat": "1.1.1.1 53 100 90 0 5ms 6ms 10", "proxy-https": {"server-https": {"uri": "https://dns.example/private/path"}}}]}, "degraded", 1),
+        # 10 % unanswered is race-loser noise on a healthy resolver -> ok.
+        ({"proxy-status": [{"proxy-name": "main", "proxy-config": "server https://dns.example/id", "proxy-stat": "1.1.1.1 53 100 90 0 5ms 6ms 10", "proxy-https": {"server-https": {"uri": "https://dns.example/private/path"}}}]}, "ok", 1),
+        # An upstream answering under half of >=20 queries -> degraded.
+        ({"proxy-status": [{"proxy-name": "main", "proxy-config": "server https://dns.example/id", "proxy-stat": "1.1.1.1 53 100 40 0 5ms 6ms 10", "proxy-https": {"server-https": {"uri": "https://dns.example/private/path"}}}]}, "degraded", 1),
         # Large sample but failure rate <5% -> ok.
         ({"proxy-status": [{"proxy-name": "main", "proxy-config": "server https://dns.example/id", "proxy-stat": "1.1.1.1 53 200 198 0 5ms 6ms 10", "proxy-https": {"server-https": {"uri": "https://dns.example/private/path"}}}]}, "ok", 1),
         # Traffic flowing but zero answers -> down.
