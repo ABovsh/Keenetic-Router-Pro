@@ -775,7 +775,8 @@ async def test_dns_proxy_status_handles_collapsed_doh_and_latches_missing_endpoi
                 {
                     "proxy-name": "Proxy",
                     "proxy-config": "https://dns.example/doh",
-                    "proxy-stat": "8.8.8.8 53 100 80 10 20ms 30ms 1",
+                    # 30 + 10 NX answers of 100 sent: under half -> degraded.
+                    "proxy-stat": "8.8.8.8 53 100 30 10 20ms 30ms 1",
                     "proxy-https": {
                         "server-https": {"uri": "https://nextdns.io/private-id?x=1"}
                     },
@@ -789,7 +790,7 @@ async def test_dns_proxy_status_handles_collapsed_doh_and_latches_missing_endpoi
 
     assert result["status"] == "degraded"
     assert result["doh_server_count"] == 1
-    assert result["failed_requests"] == 10
+    assert result["failed_requests"] == 60
     assert result["proxies"][0]["configured_doh_uris"] == ["https://nextdns.io/"]
 
     client._rci_get = AsyncMock(side_effect=aiohttp.ClientError("404 missing"))
