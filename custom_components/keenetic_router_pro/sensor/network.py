@@ -26,6 +26,7 @@ from ..entity import (
     WanEntity,
 )
 from ..utils import (
+    apply_relative_deadband,
     coerce_byte_count,
     coerce_seconds,
 )
@@ -161,8 +162,11 @@ class KeeneticActiveConnectionsSensor(DeadbandMixin, ControllerEntity, SensorEnt
     # A dithering gauge: measured live it walks +31/+70/-97/+54 between
     # adjacent polls of an otherwise quiet router. 25 was too narrow to catch
     # that — the gauge stepped straight over it — so 50, still only 0.08 % of
-    # the 63 488-entry conntrack table.
+    # the 63 488-entry conntrack table. On a busy router with thousands of
+    # flows the swing grows with the count, so the band does too: 2026-10-02 a
+    # router at ~3,000 flows still crossed the fixed 50 band 308 times a day.
     _DEADBAND = 50
+    _DEADBAND_FRACTION = 0.05
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -181,7 +185,14 @@ class KeeneticActiveConnectionsSensor(DeadbandMixin, ControllerEntity, SensorEnt
             used = max(0, int(conntotal) - int(connfree))
         except (TypeError, ValueError, OverflowError):
             return 0
-        return int(self._apply_deadband(used) or 0)
+        published = apply_relative_deadband(
+            used,
+            getattr(self, "_deadband_published", None),
+            self._DEADBAND_FRACTION,
+            floor=self._DEADBAND,
+        )
+        self._deadband_published = published
+        return int(published)
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:

@@ -47,13 +47,16 @@ class KeeneticCpuLoadSensor(DeadbandMixin, ControllerEntity, SensorEntity):
         return self._apply_deadband(None)
 
 
-class KeeneticMemoryUsageSensor(ControllerEntity, SensorEntity):
+class KeeneticMemoryUsageSensor(DeadbandMixin, ControllerEntity, SensorEntity):
     """RAM usage percentage sensor."""
     _attr_has_entity_name = True
     _attr_translation_key = "memory_usage"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:memory"
+    # Same band as the mesh-node memory sensor: measured live, the main router
+    # flipped between two adjacent whole percents 187 times a day.
+    _DEADBAND = 2.0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -68,6 +71,9 @@ class KeeneticMemoryUsageSensor(ControllerEntity, SensorEntity):
 
     @property
     def native_value(self) -> float | None:
+        return self._apply_deadband(self._memory_percent())
+
+    def _memory_percent(self) -> float | None:
         sys = self.coordinator.data.get("system", {}) or {}
         mem = sys.get("memory") or sys.get("mem")
         memtotal = sys.get("memtotal")

@@ -155,6 +155,10 @@ class KeeneticLanTxSensor(_FixedTrafficSensor):
 class KeeneticWanRxSensor(_FixedTrafficSensor):
     """WAN (GigabitEthernet1/ISP) RX sensor."""
 
+    # The per-WAN "RX Bytes" sensor already records long-term statistics for
+    # this uplink; a second copy doubled the rows (and on routers whose main
+    # WAN is not GigabitEthernet1 it recorded the wrong uplink).
+    _attr_state_class = None
     _attr_icon = _ICON_DOWNLOAD
     _direction = "rx"
     _fixed_iface_name = "GigabitEthernet1"
@@ -165,6 +169,8 @@ class KeeneticWanRxSensor(_FixedTrafficSensor):
 class KeeneticWanTxSensor(_FixedTrafficSensor):
     """WAN (GigabitEthernet1/ISP) TX sensor."""
 
+    # See KeeneticWanRxSensor: the per-WAN "TX Bytes" sensor keeps the stats.
+    _attr_state_class = None
     _attr_icon = _ICON_UPLOAD
     _direction = "tx"
     _fixed_iface_name = "GigabitEthernet1"
