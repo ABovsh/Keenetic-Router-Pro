@@ -8,7 +8,7 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
-## Unreleased
+## 1.18.0
 
 ### ⚠️ Breaking
 
@@ -19,6 +19,7 @@ git log.
   GigabitEthernet1, which on some routers is not the main WAN.
 
 ### 🐛 Fixed
+
 - DNS Proxy Status no longer switches between ok and degraded on a healthy
   resolver. It now reports degraded only when one upstream answers fewer
   than half of at least 20 queries. Previously the router's normal racing
@@ -26,7 +27,6 @@ git log.
   enough to trip the old threshold.
 - DNS Proxy Status no longer reports down when a filtering upstream
   answered only blocked names (NXDOMAIN).
-
 - After a router reboot, clients and mesh nodes now recover by themselves.
   Previously, endpoints that answered "not found" while the router was
   booting stayed switched off until the integration was reloaded. During
@@ -36,7 +36,7 @@ git log.
   Settings → Devices together with its entities. Previously the delete was
   refused while the device still had entities.
 
-### ⚡ Improved
+### ✨ Improvements
 
 - Fewer recorder writes: router memory usage holds within 2 percentage
   points, and Active Connections ignores changes under 5 % of the current
