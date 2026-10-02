@@ -11,7 +11,7 @@ import aiohttp
 
 from homeassistant.exceptions import HomeAssistantError
 
-from ...const import DOMAIN, RCI_SHOW_VERSION
+from ...const import CAPABILITY_BOOT_GRACE_S, DOMAIN, RCI_SHOW_VERSION
 from ...utils import (
     bracket_host,
     coerce_bool,
@@ -37,7 +37,31 @@ class SystemMixin:
         """Return basic system info: hostname, version, cpu, memory, uptime, etc."""
         data = await self._rci_get("show/system")
         # A list/str payload would crash every dict consumer downstream.
-        return data if isinstance(data, dict) else {}
+        if not isinstance(data, dict):
+            return {}
+        self._reprobe_capabilities_after_boot(data.get("uptime"))
+        return data
+
+    def _reprobe_capabilities_after_boot(self, raw_uptime: Any) -> None:
+        """Drop capability latches that a booting router may have caused.
+
+        Runtime endpoints can answer "not found" for a moment while KeeneticOS
+        starts. A latch taken then would hold for the whole session, e.g.
+        reading clients from the config tree where every host looks offline.
+        """
+        if raw_uptime is None:
+            return
+        try:
+            uptime = int(raw_uptime)
+        except (TypeError, ValueError):
+            return
+        previous = self._last_seen_uptime
+        self._last_seen_uptime = uptime
+        rebooted = previous is not None and uptime < previous
+        if rebooted:
+            _LOGGER.info("Router uptime went back; re-probing capability endpoints")
+        if rebooted or uptime < CAPABILITY_BOOT_GRACE_S:
+            self.reset_capability_caches()
 
 
     async def async_get_current_version_info(self) -> Dict[str, Any]:

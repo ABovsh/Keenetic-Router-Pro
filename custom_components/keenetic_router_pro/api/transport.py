@@ -82,6 +82,8 @@ class _Transport:
         # ``async_get_current_version_info``. Used to detect firmware
         # updates and re-probe capability caches below.
         self._last_seen_fw_version: str | None = None
+        # Router uptime from the last ``show/system``; a drop means a reboot.
+        self._last_seen_uptime: int | None = None
         # Tick-scoped cache populated by ``prefetch_tick`` at the top of a
         # coordinator refresh. ``_rci_get`` walks this tree (segment by
         # segment) before issuing an HTTP request, so many params-less GETs
