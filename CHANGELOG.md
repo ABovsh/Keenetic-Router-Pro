@@ -8,6 +8,19 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## Unreleased
+
+### 🐛 Fixed
+
+- After a router reboot, clients and mesh nodes now recover by themselves.
+  Previously, endpoints that answered "not found" while the router was
+  booting stayed switched off until the integration was reloaded. During
+  that time every client showed as disconnected and the mesh node entities
+  were unavailable.
+- A mesh node that the router no longer reports can be deleted from
+  Settings → Devices together with its entities. Previously the delete was
+  refused while the device still had entities.
+
 ## 1.17.0
 
 ### ⚠️ Breaking

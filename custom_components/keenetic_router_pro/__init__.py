@@ -36,6 +36,7 @@ from .utils import (
     mask_identifier,
     mesh_unique_id,
     normalize_mac,
+    sanitize_mesh_id,
 )
 
 
@@ -211,7 +212,32 @@ async def async_remove_config_entry_device(
     entities = entities_for(
         er.async_get(hass), device.id, include_disabled_entities=True
     )
-    return not entities
+    return not entities or _is_retired_mesh_device(entry, device)
+
+
+def _is_retired_mesh_device(entry: ConfigEntry, device: Any) -> bool:
+    """Return True for a mesh node the router no longer reports.
+
+    Its entities go with the device, so this needs fresh, non-empty mesh data:
+    a router that is still booting briefly reports no nodes at all.
+    """
+    runtime = getattr(entry, "runtime_data", None)
+    data = getattr(getattr(runtime, "coordinator", None), "data", None)
+    if not isinstance(data, dict) or not data.get("mesh_nodes_fresh", False):
+        return False
+    nodes = [n for n in data.get("mesh_nodes") or [] if isinstance(n, dict)]
+    if not nodes:
+        return False
+    prefix = f"{entry.entry_id}_mesh_"
+    tokens = {
+        identifier[len(prefix):]
+        for domain, identifier in getattr(device, "identifiers", set()) or set()
+        if domain == DOMAIN and str(identifier).startswith(prefix)
+    }
+    if not tokens:
+        return False
+    reported = {sanitize_mesh_id(n.get("cid") or n.get("id")) for n in nodes}
+    return tokens.isdisjoint(reported)
 
 
 def _router_device_id(hass: HomeAssistant, entry: ConfigEntry) -> str | None:
