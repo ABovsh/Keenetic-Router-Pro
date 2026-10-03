@@ -252,6 +252,8 @@ class KeeneticWanEnabledSensor(WanEntity, BinarySensorEntity):
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:toggle-switch-variant"
+    # The WAN's Enabled switch shows the same state; new installs opt in.
+    _attr_entity_registry_enabled_default = False
 
     def __init__(
         self,

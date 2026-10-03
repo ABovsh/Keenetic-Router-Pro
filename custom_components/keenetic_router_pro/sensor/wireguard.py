@@ -84,7 +84,24 @@ class _WgLinkActiveMixin(LinkActiveMixin):
         return bool(self._wg.get("enabled"))
 
 
-class KeeneticWgRxSensor(_WgLinkActiveMixin, CounterDeadbandMixin, _BaseWgSensor):
+class _WgUplinkStatisticsMixin:
+    """Leave a WAN uplink's traffic statistics to its WAN RX/TX Bytes sensor.
+
+    A profile used as an uplink is also a WAN, whose own byte sensors record
+    the same counter; two statistics streams for one counter double the rows.
+    """
+
+    @property
+    def state_class(self) -> SensorStateClass | None:
+        wans = (self.coordinator.data or {}).get("wan_interfaces") or []
+        if any(isinstance(w, dict) and w.get("id") == self._wg_name for w in wans):
+            return None
+        return self._attr_state_class
+
+
+class KeeneticWgRxSensor(
+    _WgUplinkStatisticsMixin, _WgLinkActiveMixin, CounterDeadbandMixin, _BaseWgSensor
+):
     """WireGuard RX (received traffic) sensor."""
     _attr_has_entity_name = True
     # RX bytes is a cumulative counter that resets when the tunnel restarts —
@@ -118,7 +135,9 @@ class KeeneticWgRxSensor(_WgLinkActiveMixin, CounterDeadbandMixin, _BaseWgSensor
         return self._publish_counter(None)
 
 
-class KeeneticWgTxSensor(_WgLinkActiveMixin, CounterDeadbandMixin, _BaseWgSensor):
+class KeeneticWgTxSensor(
+    _WgUplinkStatisticsMixin, _WgLinkActiveMixin, CounterDeadbandMixin, _BaseWgSensor
+):
     """WireGuard TX (sent traffic) sensor."""
     _attr_has_entity_name = True
     # See KeeneticWgRxSensor: cumulative counter → TOTAL_INCREASING.

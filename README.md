@@ -114,11 +114,9 @@ implemented here as of 1.9.0 — see **Bandwidth Limit** under Entities.
 - Wi-Fi, VPN, and client policy controls where supported by the router firmware.
 - Firmware update entities for the controller and mesh nodes.
 - WireGuard and IPsec diagnostic sensors.
-- IPsec VICI OOM Total: a monotonic counter of
-  `IpSec::Vici::Stats: out of memory` events from the router log,
-  persisted across HA restarts and HA-Statistics-friendly for
-  `events/hour` graphs. Disabled by default on new installations: it
-  stays at 0 on a healthy router.
+- IPsec VICI OOM Total: a count of `IpSec::Vici::Stats: out of memory`
+  events from the router log, persisted across HA restarts. Disabled by
+  default on new installations: it stays at 0 on a healthy router.
 - WAN and IPsec throughput shown in Mbit/s with automatic unit conversion (kbit/s ↔ Mbit/s ↔ Gbit/s) in the HA entity UI.
 - WAN interface devices group status, public IP, role, traffic counters,
   throughput and enable/disable control for each uplink.
@@ -195,8 +193,9 @@ headers in logs can be decoded.
 
 ## Polling
 
-- Fast tier: every `60s` — link state, client presence, IP neighbours.
-- Medium tier: every `120s` — Wi-Fi, WireGuard, VPN tunnels, WAN status and
+- Fast tier: every `60s` — link state, client presence, IP neighbours, and
+  each WAN's link, address, ping check and failover.
+- Medium tier: every `120s` — Wi-Fi, WireGuard, VPN tunnels, WAN traffic and
   throughput, interface counters, CPU, memory, connection counts.
 - Slow tier: every `180s` — mesh nodes, IPsec tunnels, per-client policies.
 - Very slow tier: every `900s` — firmware version, KeenDNS, DNS proxy.
@@ -215,8 +214,9 @@ attributes** changes, so an attribute that moves every poll costs a row every
 poll even when the entity itself has not changed. Nothing here publishes one:
 counters that only ever go up live on their own sensors, gauges are rounded and
 published on a slower tier than they are polled, uptime sensors update once
-an hour without long-term statistics, and the Wi-Fi session sensor reports
-when the session started rather than counting seconds. Traffic
+an hour without long-term statistics, the Wi-Fi session sensor reports
+when the session started rather than counting seconds, and Last Seen moves at
+most every ten minutes while the router keeps seeing a dozing phone. Traffic
 counters, throughput and the connection-count gauge each hold their last
 published value until it moves by a meaningful amount, so a busy link does not
 write a row per poll for a change no graph can render. The counters of a WAN
@@ -285,8 +285,10 @@ Common entity groups:
 
 - Router device: router-wide health, firmware, reboot, client totals, ports,
   Wi-Fi radio temperature and legacy WAN summary sensors kept for compatibility.
-- WAN interface devices: per-uplink connectivity, enabled state, enable switch,
-  provider, role, public IP, uptime, traffic counters and throughput.
+- WAN interface devices: per-uplink connectivity, enable switch, public IP,
+  uptime, downtime, traffic counters and throughput. Provider, role and
+  interface name are attributes of the Connected sensor; their separate
+  sensors and the Enabled binary sensor are opt-in on new installations.
 - VPN interface devices: VPN state and enable/disable control for VPN profiles
   that are not WAN uplinks.
 - IPsec crypto-map devices: site-to-site tunnel state, IKE state, traffic,

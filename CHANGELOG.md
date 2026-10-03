@@ -18,15 +18,20 @@ git log.
 
 - **Uptime sensors update hourly and no longer keep long-term statistics.** Router, mesh-node, WAN, PPPoE and WireGuard uptime are shown in days and update at once after a reboot or reconnect. WireGuard uptime is unavailable while the profile is down instead of 0.
 - **WAN Downtime is renamed Internet Downtime and counts lost internet, not only a lost default route.** The entity ID is unchanged. Time when the router could not be read, and its first five minutes after a boot, are no longer counted.
+- **Last Seen is a timestamp.** Dashboards show it as "2 hours ago" in your language and automations can compare it; templates that parsed the `03.10.2026 09:26:16` text need updating.
+- **Five counters no longer keep long-term statistics:** Disconnected Clients, DNS Proxy Failed Requests, IPsec VICI OOM Total, LAN RX and LAN TX. WireGuard RX/TX of a profile that is also a WAN uplink drop theirs too; the WAN's RX/TX Bytes sensors keep the same counter. Home Assistant shows a one-time Repairs notice for each.
 
 ### 🔧 Changed
 
+- **WAN outages and failovers show within a minute instead of two.** WAN Connected, link, public IP, ping check and the active WAN update on every poll, at no extra request to the router.
 - **One request to the router per update instead of about twenty.** The combined request now goes to `/rci/`; the router rejected `/rci` with HTTP 405, so every update fell back to separate requests. Behind a KeenDNS address with authentication, this also stops a `Lockout … invalid address '127.0.0.1'` line in the router's log on every update.
 - **Fewer recorder rows.**
   - Traffic and throughput of a WAN without link, an IPsec tunnel that is not established, or a WireGuard profile that is down are unavailable instead of 0.
   - Internet Downtime updates every five minutes during an outage instead of every poll.
   - WAN Connected `all_ping_check_profiles` no longer carries the per-poll success and fail counters.
   - IPsec VICI OOM Total is disabled by default on new installations.
+  - Last Seen of a client the router still sees (a phone in Wi-Fi power-save) updates at most every ten minutes instead of every minute.
+- **Fewer duplicate entities on new installations.** Provider, Role and Interface per WAN, the WAN Enabled binary sensor, PPPoE Uptime and the router-level WAN RX/TX start disabled; WAN Connected carries provider, role and interface as attributes, and the Enabled switch shows the same state.
 
 ### 🐛 Fixed
 

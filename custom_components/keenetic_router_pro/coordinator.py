@@ -24,6 +24,7 @@ from .coordinator_parts.derived import (
     real_client_macs,
 )
 from .coordinator_parts.enrichment import (
+    carry_wan_samples,
     enrich_crypto_maps,
     enrich_wan_interfaces,
 )
@@ -400,7 +401,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _bounded(self.client.async_get_host_policies()) if host_policies_refresh else _resolve(_prev.get("host_policies", {})),
                 _bounded(self.client.async_get_policies()) if very_slow_refresh else _resolve(_prev.get("policies", {})),
                 _bounded(self.client.async_get_ndns_info()) if very_slow_refresh else _resolve(_prev.get("ndns", {})),
-                _bounded(self.client.async_get_ping_check_status()) if medium_refresh else _resolve(_prev.get("ping_check_status", {})),
+                _bounded(self.client.async_get_ping_check_status()),
                 _bounded(self.client.async_get_ipsec_status()) if ipsec_status_refresh else _resolve(_prev.get("crypto_maps", {})),
                 _bounded(self.client.async_get_dns_proxy_status()) if very_slow_refresh else _resolve(_prev.get("dns_proxy", {})),
                 _bounded(self.client.async_get_ipsec_diagnostics()) if very_slow_refresh else _resolve(_prev.get("ipsec_diagnostics", {})),
@@ -477,8 +478,14 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _ok("policies", policies, _prev.get("policies", {}))
             )
             ndns_info = dict_or_empty(_ok("ndns_info", ndns_info, {}))
+            # Read every tick now: one failed read must not drop every WAN
+            # back to the link heuristic, so keep the last answer.
             ping_check_status = dict_or_empty(
-                _ok("ping_check_status", ping_check_status, {})
+                _ok(
+                    "ping_check_status",
+                    ping_check_status,
+                    _prev.get("ping_check_status", {}),
+                )
             )
             # Crypto maps: not every router/firmware has the IPsec component,
             # so this endpoint may be unavailable. Mark the fetch as silent
@@ -692,28 +699,30 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 (i.get("id"), i.get("type"), i.get("link"), i.get("state"))
                 for i in iface_list
             )
-            if medium_refresh:
-                # Rebuild the per-WAN payload every medium tick. This is a
-                # CPU-only transform of the already-fetched ``iface_list``
-                # (``async_get_wan_interfaces`` makes no RCI call when
-                # ``iface_list`` is passed), so it is cheap. It must NOT be
-                # cached on the ``(id, type, link, state)`` interface
-                # fingerprint: that fingerprint excludes the volatile
-                # ``uptime`` / ``ip`` fields, so reusing the cached list froze
-                # every WAN-interface uptime sensor at its value from the last
-                # link flap until the next flap. ``iface_fp`` is still emitted
-                # below for diagnostics/contract consumers.
-                try:
-                    wan_interfaces = await _bounded(
-                        self.client.async_get_wan_interfaces(
-                            interfaces=interfaces,
-                            iface_list=iface_list,
-                        )
+            # Rebuild the per-WAN payload EVERY tick: link, address, default
+            # route and ping check are what users alert on, and ``interfaces``
+            # is fetched every tick anyway. This is a
+            # CPU-only transform of the already-fetched ``iface_list``
+            # (``async_get_wan_interfaces`` makes no RCI call when
+            # ``iface_list`` is passed), so it is cheap. It must NOT be
+            # cached on the ``(id, type, link, state)`` interface
+            # fingerprint: that fingerprint excludes the volatile
+            # ``uptime`` / ``ip`` fields, so reusing the cached list froze
+            # every WAN-interface uptime sensor at its value from the last
+            # link flap until the next flap. ``iface_fp`` is still emitted
+            # below for diagnostics/contract consumers.
+            try:
+                wan_interfaces = await _bounded(
+                    self.client.async_get_wan_interfaces(
+                        interfaces=interfaces,
+                        iface_list=iface_list,
                     )
-                except asyncio.CancelledError:
-                    raise
-                except Exception as err:  # noqa: BLE001
-                    wan_interfaces = err
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:  # noqa: BLE001
+                wan_interfaces = err
+            if medium_refresh:
                 (
                     wifi,
                     wireguard,
@@ -761,7 +770,6 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     return_exceptions=True,
                 )
             else:
-                wan_interfaces = _prev.get("wan_interfaces", [])
                 wifi = _prev.get("wifi", [])
                 wireguard = _prev.get("wireguard", [])
                 vpn_tunnels = _prev.get("vpn_tunnels", [])
@@ -797,7 +805,6 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             interface_stats = dict_or_empty(_ok("interface_stats", interface_stats, {}))
             if interface_stats_failed:
                 interface_stats = _prev.get("interface_stats", {})
-                wan_interfaces = _prev.get("wan_interfaces", wan_interfaces)
 
             # Emit a single aggregated warning per tick for any non-critical
             # fetches that fell back to defaults. Keeping this above debug
@@ -830,7 +837,13 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     now_ts,
                 )
             else:
-                wan_by_id = _prev.get("wan_by_id", {})
+                # Fresh state, last counter sample: counters and rates are
+                # only re-read on the medium tier.
+                wan_interfaces, wan_by_id = carry_wan_samples(
+                    wan_interfaces,
+                    ping_check_status,
+                    self.data.get("wan_interfaces", []) if self.data else [],
+                )
 
             # ---------- Crypto map (site-to-site IPsec) enrichment ----------
             # Same delta pattern as the WAN block above. Counters reset to

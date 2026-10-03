@@ -118,6 +118,8 @@ class KeeneticPppoeUptimeSensor(UptimeMixin, ControllerEntity, SensorEntity):
     _attr_translation_key = "pppoe_uptime"
     _attr_icon = "mdi:timer-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Each WAN has its own Uptime sensor; new installs opt in to this copy.
+    _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -322,6 +324,8 @@ class _WanSensorBase(WanEntity, SensorEntity):
 class KeeneticWanProviderSensor(_WanSensorBase):
     """Provider / description shown as the entity name."""
     _attr_icon = "mdi:web"
+    # Static text, also the WAN Connected ``description`` attribute; opt in.
+    _attr_entity_registry_enabled_default = False
 
     @property
     def unique_id(self) -> str:
@@ -343,6 +347,8 @@ class KeeneticWanRoleSensor(_WanSensorBase):
     """Routing role: Default connection / Backup connection N."""
     _attr_icon = "mdi:sort-numeric-ascending"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Also the WAN Connected ``role_label`` attribute; opt in.
+    _attr_entity_registry_enabled_default = False
 
     @property
     def unique_id(self) -> str:
@@ -375,6 +381,8 @@ class KeeneticWanInterfaceSensor(_WanSensorBase):
     """Underlying interface id (e.g. GigabitEthernet1/Vlan35)."""
     _attr_icon = "mdi:ethernet-cable"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Static, also the WAN Connected ``underlying`` attribute; opt in.
+    _attr_entity_registry_enabled_default = False
 
     @property
     def unique_id(self) -> str:

@@ -68,20 +68,10 @@ async def test_async_get_dns_proxy_status_missing_endpoint_returns_empty() -> No
 
 
 
-def test_dns_proxy_failed_requests_uses_total_increasing_state_class() -> None:
-    """`failed_requests` is monotonic between proxy restarts — must be TOTAL_INCREASING.
-
-    A `MEASUREMENT` declaration would make HA Statistics chart the
-    absolute counter as a sawtooth; TOTAL_INCREASING produces the
-    "failed per hour" rate users actually want.
-    """
-    from homeassistant.components.sensor import SensorStateClass
-
+def test_dns_proxy_failed_requests_keeps_no_statistics() -> None:
+    """A diagnostic counter: its state is enough, statistics only added rows."""
     from custom_components.keenetic_router_pro.sensor.dns import (
         KeeneticDnsProxyFailedRequestsSensor,
     )
 
-    assert (
-        KeeneticDnsProxyFailedRequestsSensor._attr_state_class
-        == SensorStateClass.TOTAL_INCREASING
-    )
+    assert KeeneticDnsProxyFailedRequestsSensor._attr_state_class is None

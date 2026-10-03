@@ -220,13 +220,18 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
 # Wide enough to swallow the recompute jitter, far too small to hide a genuine
 # new sighting (which resets the router's counter by minutes or hours).
 _LAST_SEEN_TOLERANCE = timedelta(seconds=15)
+# A phone in Wi-Fi power-save is "offline" while the router still sees it
+# every few seconds; following each sighting wrote a row a minute all night
+# (measured live, 2026-10-03). Within one offline spell a later sighting is
+# published only once it is this much newer.
+_LAST_SEEN_STEP = timedelta(minutes=10)
 
 
 class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
-    """Local date/time when the router last saw the offline client."""
+    """When the router last saw the offline client."""
     _attr_has_entity_name = True
     _attr_icon = "mdi:clock"
-    _attr_device_class = None
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     # last-seen must stay IN the fingerprint for this sensor to advance.
     _FINGERPRINT_IGNORE = frozenset({"uptime"})
@@ -260,27 +265,34 @@ class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
             default=None,
         ) is not None
 
+    @staticmethod
+    def _now() -> datetime:
+        return datetime.now().astimezone()
+
     @property
-    def native_value(self) -> str | None:
+    def native_value(self) -> datetime | None:
         client = self._client
         if not client:
             return None
         if is_client_online(client):
+            # A new offline spell starts from its own first sighting.
+            self._seen_at = None
             return None
         seconds = coerce_seconds(client.get("last-seen"), default=None)
         if seconds is None:
             return None
-        seen_at = datetime.now().astimezone() - timedelta(seconds=seconds)
+        seen_at = (self._now() - timedelta(seconds=seconds)).replace(microsecond=0)
         # Measured live: this recomputation wobbles by a second between polls
         # (the router's counter and our clock round differently), which wrote a
         # recorder row per tick for a client that had not been seen in hours.
         # Hold the previous instant unless the sighting really moved.
         if (
             self._seen_at is None
-            or abs(seen_at - self._seen_at) > _LAST_SEEN_TOLERANCE
+            or self._seen_at - seen_at > _LAST_SEEN_TOLERANCE
+            or seen_at - self._seen_at >= _LAST_SEEN_STEP
         ):
             self._seen_at = seen_at
-        return self._seen_at.strftime("%d.%m.%Y %H:%M:%S")
+        return self._seen_at
 
 
 class KeeneticClientRxSensor(CounterDeadbandMixin, ClientEntity, SensorEntity):

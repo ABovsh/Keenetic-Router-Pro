@@ -88,7 +88,7 @@ def test_active_connections_sensor_uses_measurement() -> None:
     "class_name",
     ["KeeneticClientLastSeenSensor"],
 )
-def test_client_last_seen_sensor_is_exact_datetime_text(
+def test_client_last_seen_sensor_is_a_timestamp(
     class_name: str,
 ) -> None:
     assignments = _class_assignments(
@@ -96,5 +96,5 @@ def test_client_last_seen_sensor_is_exact_datetime_text(
         class_name,
     )
 
-    assert assignments.get("_attr_device_class") == "None"
+    assert assignments.get("_attr_device_class") == "SensorDeviceClass.TIMESTAMP"
     assert "_attr_state_class" not in assignments

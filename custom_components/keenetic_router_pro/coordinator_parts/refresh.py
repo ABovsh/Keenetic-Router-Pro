@@ -110,8 +110,9 @@ def build_batch_tree(
     add("show/ip/neighbour")
     if needs_clients:
         add("show/ip/hotspot")
-    if plan.medium_refresh:
-        add("show/ping-check")
+    # WAN state is rebuilt every tick; the ping check decides whether a WAN
+    # has internet, so it rides along at no extra request.
+    add("show/ping-check")
     if plan.ipsec_status_refresh:
         add("show/ipsec")
     if plan.slow_refresh and include_mesh:

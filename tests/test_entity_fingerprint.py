@@ -111,7 +111,7 @@ def test_dedicated_last_seen_sensor_fingerprint_includes_last_seen() -> None:
 
 
 def test_last_seen_sensor_returns_exact_datetime_for_offline_client() -> None:
-    """Last Seen should show exact local date/time instead of relative text."""
+    """Last Seen is an exact, zone-aware instant (a TIMESTAMP sensor)."""
     client = {
         "mac": "aa:bb:cc:00:00:01",
         "active": False,
@@ -128,11 +128,9 @@ def test_last_seen_sensor_returns_exact_datetime_for_offline_client() -> None:
 
     value = entity.native_value
 
-    assert isinstance(value, str)
-    assert len(value) == 19
-    assert "." in value
-    parsed = datetime.strptime(value, "%d.%m.%Y %H:%M:%S")
-    assert 20 <= (datetime.now().astimezone().replace(tzinfo=None) - parsed).total_seconds() <= 40
+    assert isinstance(value, datetime)
+    assert value.tzinfo is not None
+    assert 20 <= (datetime.now().astimezone() - value).total_seconds() <= 40
 
 
 def test_last_seen_sensor_is_unavailable_for_online_client() -> None:

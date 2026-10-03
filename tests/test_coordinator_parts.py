@@ -235,9 +235,10 @@ def test_build_batch_tree_includes_only_active_tier_paths() -> None:
             "system": {},
             "interface": {},
             "ip": {"neighbour": {}, "hotspot": {}},
+            # WAN state is rebuilt every tick, so the ping check rides along.
+            "ping-check": {},
         }
     }
-    assert "ping-check" not in fast["show"]
     assert "ipsec" not in fast["show"]
     assert "ping-check" in medium["show"]
     assert "ipsec" not in medium["show"]
