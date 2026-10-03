@@ -223,3 +223,28 @@ def test_duplicate_and_static_entities_start_disabled() -> None:
         KeeneticWanTxSensor,
     ):
         assert cls._attr_entity_registry_enabled_default is False, cls.__name__
+
+
+# ---------- A failing ping check stops writing once it has failed ----------
+
+
+def test_failing_ping_check_counter_stops_at_the_threshold() -> None:
+    """WAN state now refreshes every poll; an outage must not write more."""
+    from custom_components.keenetic_router_pro.binary_sensor import (
+        KeeneticWanConnectedSensor,
+    )
+
+    wan = {
+        "id": "ISP",
+        "ping_check": {"passing": False, "fail_count": 3, "max_fails": 3},
+    }
+    coordinator = SimpleNamespace(
+        data={"wan_interfaces": [wan], "wan_by_id": {"ISP": wan}},
+        last_update_success=True,
+    )
+    sensor = KeeneticWanConnectedSensor(coordinator, _entry(), "ISP")
+    at_threshold = sensor.extra_state_attributes
+
+    for fails in (4, 17, 250):  # the router keeps counting through the outage
+        wan["ping_check"]["fail_count"] = fails
+        assert sensor.extra_state_attributes == at_threshold
