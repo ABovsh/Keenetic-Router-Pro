@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
-import pytest
 
 from custom_components.keenetic_router_pro.coordinator_parts.refresh import (
     build_batch_tree,
@@ -119,28 +118,19 @@ def test_last_seen_is_a_timestamp() -> None:
     assert sensor.native_value.tzinfo is not None
 
 
-def test_last_seen_holds_while_the_router_keeps_seeing_a_dozing_client() -> None:
-    """A phone in Wi-Fi power-save is "offline" yet seen every few seconds."""
+def test_last_seen_is_fixed_for_the_whole_offline_spell() -> None:
+    """One record per disconnect, like Wi-Fi Session's start time.
+
+    A phone in Wi-Fi power-save is "offline" while the router still sees it
+    every few seconds; the value must not follow those sightings.
+    """
     client = {"mac": MAC, "active": False, "last-seen": 5}
     sensor = _last_seen(client)
     first = sensor.native_value
 
-    published = {first}
-    for step in range(1, 9):  # eight polls, one minute apart, still "5 s ago"
-        sensor.clock_offset = step * 60
-        published.add(sensor.native_value)
-
-    assert published == {first}
-
-
-def test_last_seen_moves_after_ten_minutes_of_new_sightings() -> None:
-    client = {"mac": MAC, "active": False, "last-seen": 5}
-    sensor = _last_seen(client)
-    first = sensor.native_value
-
-    sensor.clock_offset = 11 * 60
-
-    assert (sensor.native_value - first).total_seconds() == pytest.approx(660, abs=2)
+    for minutes in (1, 9, 11, 60, 600):
+        sensor.clock_offset = minutes * 60
+        assert sensor.native_value == first
 
 
 # ---------- Long-term statistics that carried nothing useful ----------

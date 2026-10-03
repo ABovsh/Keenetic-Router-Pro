@@ -30,7 +30,7 @@ git log.
   - Internet Downtime updates every five minutes during an outage instead of every poll.
   - WAN Connected `all_ping_check_profiles` no longer carries the per-poll success and fail counters.
   - IPsec VICI OOM Total is disabled by default on new installations.
-  - Last Seen of a client the router still sees (a phone in Wi-Fi power-save) updates at most every ten minutes instead of every minute.
+  - Last Seen is set once when a client goes offline and held until it is back, instead of following the router's counter every poll (a phone in Wi-Fi power-save moved it every minute).
   - WAN Connected `fail_count` stops at the ping check's failure threshold during an outage instead of counting every check.
 - **Fewer duplicate entities on new installations.** Provider, Role and Interface per WAN, the WAN Enabled binary sensor, PPPoE Uptime and the router-level WAN RX/TX start disabled; WAN Connected carries provider, role and interface as attributes, and the Enabled switch shows the same state.
 

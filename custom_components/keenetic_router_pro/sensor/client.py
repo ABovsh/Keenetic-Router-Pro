@@ -217,18 +217,15 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
         return self._session_start
 
 
-# Wide enough to swallow the recompute jitter, far too small to hide a genuine
-# new sighting (which resets the router's counter by minutes or hours).
-_LAST_SEEN_TOLERANCE = timedelta(seconds=15)
-# A phone in Wi-Fi power-save is "offline" while the router still sees it
-# every few seconds; following each sighting wrote a row a minute all night
-# (measured live, 2026-10-03). Within one offline spell a later sighting is
-# published only once it is this much newer.
-_LAST_SEEN_STEP = timedelta(minutes=10)
-
-
 class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
-    """When the router last saw the offline client."""
+    """When the router last saw the client before it went offline.
+
+    Worked out once per offline spell, from the router's elapsed counter at
+    the first offline poll, and held until the client is online again: one
+    record per disconnect. Following the counter instead wobbled by a second
+    per poll, and a phone in Wi-Fi power-save (offline, yet seen every few
+    seconds) moved it every minute all night.
+    """
     _attr_has_entity_name = True
     _attr_icon = "mdi:clock"
     _attr_device_class = SensorDeviceClass.TIMESTAMP
@@ -278,20 +275,13 @@ class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
             # A new offline spell starts from its own first sighting.
             self._seen_at = None
             return None
-        seconds = coerce_seconds(client.get("last-seen"), default=None)
-        if seconds is None:
-            return None
-        seen_at = (self._now() - timedelta(seconds=seconds)).replace(microsecond=0)
-        # Measured live: this recomputation wobbles by a second between polls
-        # (the router's counter and our clock round differently), which wrote a
-        # recorder row per tick for a client that had not been seen in hours.
-        # Hold the previous instant unless the sighting really moved.
-        if (
-            self._seen_at is None
-            or self._seen_at - seen_at > _LAST_SEEN_TOLERANCE
-            or seen_at - self._seen_at >= _LAST_SEEN_STEP
-        ):
-            self._seen_at = seen_at
+        if self._seen_at is None:
+            seconds = coerce_seconds(client.get("last-seen"), default=None)
+            if seconds is None:
+                return None
+            self._seen_at = (self._now() - timedelta(seconds=seconds)).replace(
+                microsecond=0
+            )
         return self._seen_at
 
 
