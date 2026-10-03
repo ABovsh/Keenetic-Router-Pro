@@ -34,6 +34,7 @@ git log.
 - VPN switches that older versions created for interfaces that are now WAN uplinks are removed. Nothing updated them, so they stayed unavailable.
 - IPsec VICI OOM Total compares router log times with Home Assistant's time zone. On installations whose system clock runs in UTC, new events were counted hours late or not at all.
 - A mesh node no longer shows an empty available firmware version for one poll when the controller briefly reports it blank.
+- Bandwidth Limit shows the client's download limit as the router reports it. A limit set or removed in the router's web interface was not shown; the entity kept the last value it had written itself.
 
 ### Improvements
 
