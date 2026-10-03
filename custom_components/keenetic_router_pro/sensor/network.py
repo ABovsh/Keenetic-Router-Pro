@@ -36,6 +36,7 @@ from ..utils import (
 
 _ICON_ETHERNET = "mdi:ethernet"
 _ICON_IP_NETWORK = "mdi:ip-network"
+_ICON_WEB_OFF = "mdi:web-off"
 
 
 class KeeneticWanStatusSensor(ControllerEntity, SensorEntity):
@@ -62,7 +63,7 @@ class KeeneticWanStatusSensor(ControllerEntity, SensorEntity):
             return "mdi:web-check"
         if status == WAN_STATUS_LINK_UP:
             return "mdi:web-remove"
-        return "mdi:web-off"
+        return _ICON_WEB_OFF
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
@@ -729,7 +730,7 @@ class KeeneticWanDowntimeSensor(
 
     _attr_has_entity_name = True
     _attr_translation_key = "wan_downtime"
-    _attr_icon = "mdi:web-off"
+    _attr_icon = _ICON_WEB_OFF
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_native_unit_of_measurement = UnitOfTime.SECONDS
@@ -781,7 +782,7 @@ class KeeneticWanLinkDowntimeSensor(
     disabled.
     """
 
-    _attr_icon = "mdi:web-off"
+    _attr_icon = _ICON_WEB_OFF
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_native_unit_of_measurement = UnitOfTime.SECONDS

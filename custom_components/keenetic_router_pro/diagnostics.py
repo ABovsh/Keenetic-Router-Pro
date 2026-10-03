@@ -21,6 +21,9 @@ from .utils import normalize_mac
 
 # Keys whose values should NEVER appear in a diagnostics dump.
 # Matching is case-insensitive (HA's redactor lower-cases keys).
+# The marker async_redact_data writes; used for the fields it cannot reach.
+_REDACTED = "**REDACTED**"
+
 TO_REDACT: set[str] = {
     CONF_PASSWORD,
     CONF_USERNAME,
@@ -157,7 +160,7 @@ def _strip_mac_keyed_indexes(data: Any) -> Any:
             "ttp": {
                 **ttp,
                 "tunnel": [
-                    {**t, "client": "**REDACTED**"} if isinstance(t, dict) and "client" in t else t
+                    {**t, "client": _REDACTED} if isinstance(t, dict) and "client" in t else t
                     for t in tunnels
                 ],
             },
@@ -177,7 +180,7 @@ def _redact_mesh_node_ids(node: Any) -> Any:
     redacted = dict(node)
     for key in ("id", "cid"):
         if normalize_mac(redacted.get(key)):
-            redacted[key] = "**REDACTED**"
+            redacted[key] = _REDACTED
     return redacted
 
 
@@ -195,7 +198,7 @@ def _redact_tracked_client_names(data: dict[str, Any]) -> dict[str, Any]:
     return {
         **data,
         CONF_TRACKED_CLIENTS: [
-            {**c, "name": "**REDACTED**"} if isinstance(c, dict) and "name" in c else c
+            {**c, "name": _REDACTED} if isinstance(c, dict) and "name" in c else c
             for c in tracked
         ],
     }
