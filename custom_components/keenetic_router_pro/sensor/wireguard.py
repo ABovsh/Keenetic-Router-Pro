@@ -50,7 +50,7 @@ class _BaseWgSensor(ControllerEntity, SensorEntity):
 
 
 class KeeneticWgUptimeSensor(UptimeMixin, _BaseWgSensor):
-    """WireGuard tunnel uptime, published hourly (see ``UptimeMixin``).
+    """WireGuard tunnel uptime, as the time it started (see ``UptimeMixin``).
 
     Unavailable while the profile is down: there is no session to time.
     """

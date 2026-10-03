@@ -113,7 +113,7 @@ class KeeneticWanIpSensor(ControllerEntity, SensorEntity):
 
 
 class KeeneticPppoeUptimeSensor(UptimeMixin, ControllerEntity, SensorEntity):
-    """Uplink session uptime, published hourly (see ``UptimeMixin``)."""
+    """Uplink session uptime, as the time it started (see ``UptimeMixin``)."""
     _attr_has_entity_name = True
     _attr_translation_key = "pppoe_uptime"
     _attr_icon = "mdi:timer-outline"
@@ -448,7 +448,7 @@ class KeeneticWanPublicIpSensor(_WanSensorBase):
 
 
 class KeeneticWanUptimeSensor(UptimeMixin, _WanSensorBase):
-    """Session uptime for the WAN, published hourly (see ``UptimeMixin``)."""
+    """Session uptime for the WAN, as the time it started (see ``UptimeMixin``)."""
     _attr_icon = "mdi:timer-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     # native_value derives from wan["uptime"]; the WanEntity base ignores it

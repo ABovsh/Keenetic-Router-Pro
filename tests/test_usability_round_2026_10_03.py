@@ -238,3 +238,133 @@ def test_failing_ping_check_counter_stops_at_the_threshold() -> None:
     for fails in (4, 17, 250):  # the router keeps counting through the outage
         wan["ping_check"]["fail_count"] = fails
         assert sensor.extra_state_attributes == at_threshold
+
+
+# ---------- Uptime and Wi-Fi Session: a start time, set once per session ----------
+
+_BASE = datetime(2026, 10, 3, 12, 0).astimezone()
+
+
+def _clocked(sensor):
+    sensor.clock_offset = 0
+    sensor._now = lambda: _BASE + timedelta(seconds=sensor.clock_offset)
+    return sensor
+
+
+def _router_uptime(data: dict):
+    from custom_components.keenetic_router_pro.sensor.system import (
+        KeeneticUptimeSensor,
+    )
+
+    coordinator = SimpleNamespace(data=data, last_update_success=True)
+    return _clocked(KeeneticUptimeSensor(coordinator, _entry()))
+
+
+def test_uptime_is_the_boot_time() -> None:
+    from homeassistant.components.sensor import SensorDeviceClass
+
+    sensor = _router_uptime({"system": {"uptime": 3600}})
+
+    assert sensor._attr_device_class == SensorDeviceClass.TIMESTAMP
+    assert sensor._attr_state_class is None
+    assert sensor.native_value == _BASE - timedelta(hours=1)
+
+
+def test_uptime_boot_time_is_set_once_per_boot() -> None:
+    """The router's counter and HA's clock drift apart; the boot time does not."""
+    data = {"system": {"uptime": 3600}}
+    sensor = _router_uptime(data)
+    booted = sensor.native_value
+
+    for minutes, counter in ((1, 3661), (30, 5350), (600, 39500)):
+        sensor.clock_offset = minutes * 60
+        data["system"]["uptime"] = counter
+        assert sensor.native_value == booted
+
+
+def test_uptime_moves_on_a_reboot() -> None:
+    data = {"system": {"uptime": 86_400}}
+    sensor = _router_uptime(data)
+    sensor.native_value
+
+    sensor.clock_offset = 600
+    data["system"]["uptime"] = 120
+
+    assert sensor.native_value == _BASE + timedelta(seconds=480)
+
+
+def test_uptime_is_unknown_without_a_reading() -> None:
+    sensor = _router_uptime({"system": {}})
+
+    assert sensor.native_value is None
+
+
+def test_every_uptime_sensor_is_a_start_time() -> None:
+    from homeassistant.components.sensor import SensorDeviceClass
+
+    from custom_components.keenetic_router_pro.sensor.mesh import (
+        KeeneticMeshUptimeSensor,
+    )
+    from custom_components.keenetic_router_pro.sensor.network import (
+        KeeneticPppoeUptimeSensor,
+        KeeneticWanUptimeSensor,
+    )
+    from custom_components.keenetic_router_pro.sensor.wireguard import (
+        KeeneticWgUptimeSensor,
+    )
+
+    for cls in (
+        KeeneticMeshUptimeSensor,
+        KeeneticPppoeUptimeSensor,
+        KeeneticWanUptimeSensor,
+        KeeneticWgUptimeSensor,
+    ):
+        assert cls._attr_device_class == SensorDeviceClass.TIMESTAMP, cls.__name__
+        assert cls._attr_state_class is None, cls.__name__
+
+
+def _wifi_session(client: dict):
+    from custom_components.keenetic_router_pro.sensor.client import (
+        KeeneticClientUptimeSensor,
+    )
+
+    coordinator = SimpleNamespace(
+        data={"clients_by_mac": {MAC: client}}, last_update_success=True
+    )
+    return _clocked(KeeneticClientUptimeSensor(coordinator, _entry(), MAC, "Phone"))
+
+
+def test_wifi_session_start_is_set_once_per_session() -> None:
+    client = {"mac": MAC, "active": True, "link": "up", "uptime": 600}
+    sensor = _wifi_session(client)
+    started = sensor.native_value
+
+    # The counter runs slow (start drifts later) or jumps ahead (earlier):
+    # neither is a new session.
+    for minutes, counter in ((35, 2610), (60, 4500)):
+        sensor.clock_offset = minutes * 60
+        client["uptime"] = counter
+        assert sensor.native_value == started
+
+
+def test_wifi_session_start_moves_on_a_reconnect() -> None:
+    client = {"mac": MAC, "active": True, "link": "up", "uptime": 600}
+    sensor = _wifi_session(client)
+    sensor.native_value
+
+    sensor.clock_offset = 120
+    client["uptime"] = 30
+
+    assert sensor.native_value == _BASE + timedelta(seconds=90)
+
+
+def test_uptime_zero_is_no_session_not_a_start() -> None:
+    """A down tunnel reports 0; its start is when the counter starts moving."""
+    data = {"system": {"uptime": 0}}
+    sensor = _router_uptime(data)
+    assert sensor.native_value is None
+
+    sensor.clock_offset = 3600
+    data["system"]["uptime"] = 120
+
+    assert sensor.native_value == _BASE + timedelta(seconds=3480)

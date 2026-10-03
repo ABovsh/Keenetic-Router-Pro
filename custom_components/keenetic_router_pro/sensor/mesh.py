@@ -104,13 +104,13 @@ class KeeneticMeshSystemStateSensor(ControllerEntity, SensorEntity):
 
 
 class KeeneticMeshUptimeSensor(UptimeMixin, MeshEntity, SensorEntity):
-    """Mesh node uptime, published hourly (see ``UptimeMixin``)."""
+    """Mesh node uptime, as the time it started (see ``UptimeMixin``)."""
     _attr_has_entity_name = True
     _attr_translation_key = "uptime"
     _attr_icon = "mdi:timer-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     # native_value derives from node["uptime"], which MeshEntity ignores for
-    # write suppression; opt out so the hourly value actually reaches HA.
+    # write suppression; opt out so a reboot reaches HA.
     _FINGERPRINT_IGNORE = frozenset()
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry, node_cid: str) -> None:

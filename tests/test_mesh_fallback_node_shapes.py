@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from conftest import elapsed_seconds
+
 from types import SimpleNamespace
 
 from custom_components.keenetic_router_pro.sensor.mesh import (
@@ -96,10 +98,9 @@ def test_mesh_node_value_sensors_read_fallback_node_payload() -> None:
     node_id = "AA:BB:CC:00:00:01"
 
     values = {
-        "uptime_unit": KeeneticMeshUptimeSensor(
-            coordinator, entry, node_id
-        ).native_unit_of_measurement,
-        "uptime": KeeneticMeshUptimeSensor(coordinator, entry, node_id).native_value,
+        "uptime": elapsed_seconds(
+            KeeneticMeshUptimeSensor(coordinator, entry, node_id).native_value
+        ),
         "clients": KeeneticMeshClientsSensor(
             coordinator, entry, node_id
         ).native_value,
@@ -120,7 +121,6 @@ def test_mesh_node_value_sensors_read_fallback_node_payload() -> None:
     }
 
     assert values == {
-        "uptime_unit": "seconds",
         "uptime": 120,
         "clients": 3,
         "client_attrs": {

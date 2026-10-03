@@ -213,10 +213,10 @@ Home Assistant writes a history row whenever an entity's state **or any of its
 attributes** changes, so an attribute that moves every poll costs a row every
 poll even when the entity itself has not changed. Nothing here publishes one:
 counters that only ever go up live on their own sensors, gauges are rounded and
-published on a slower tier than they are polled, uptime sensors update once
-an hour without long-term statistics, the Wi-Fi session sensor reports
-when the session started rather than counting seconds, and Last Seen is set
-once when a client goes offline. Traffic
+published on a slower tier than they are polled, uptime and Wi-Fi session
+sensors report when the session started rather than counting seconds (one row
+per reboot or reconnect), and Last Seen is set once when a client goes
+offline. Traffic
 counters, throughput and the connection-count gauge each hold their last
 published value until it moves by a meaningful amount, so a busy link does not
 write a row per poll for a change no graph can render. The counters of a WAN

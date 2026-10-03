@@ -16,7 +16,7 @@ git log.
 
 ### ⚠️ Breaking
 
-- **Uptime sensors update hourly and no longer keep long-term statistics.** Router, mesh-node, WAN, PPPoE and WireGuard uptime are shown in days and update at once after a reboot or reconnect. WireGuard uptime is unavailable while the profile is down instead of 0.
+- **Uptime sensors show when the router, mesh node, WAN, PPPoE or WireGuard session started**, as a timestamp ("3 days ago"), and no longer keep long-term statistics. One row per reboot or reconnect; templates that read seconds need updating. WireGuard uptime is unavailable while the profile is down instead of 0.
 - **WAN Downtime is renamed Internet Downtime and counts lost internet, not only a lost default route.** The entity ID is unchanged. Time when the router could not be read, and its first five minutes after a boot, are no longer counted.
 - **Last Seen is a timestamp.** Dashboards show it as "2 hours ago" in your language and automations can compare it; templates that parsed the `03.10.2026 09:26:16` text need updating.
 - **Five counters no longer keep long-term statistics:** Disconnected Clients, DNS Proxy Failed Requests, IPsec VICI OOM Total, LAN RX and LAN TX. WireGuard RX/TX of a profile that is also a WAN uplink drop theirs too; the WAN's RX/TX Bytes sensors keep the same counter. Home Assistant shows a one-time Repairs notice for each.
@@ -30,7 +30,7 @@ git log.
   - Internet Downtime updates every five minutes during an outage instead of every poll.
   - WAN Connected `all_ping_check_profiles` no longer carries the per-poll success and fail counters.
   - IPsec VICI OOM Total is disabled by default on new installations.
-  - Last Seen is set once when a client goes offline and held until it is back, instead of following the router's counter every poll (a phone in Wi-Fi power-save moved it every minute).
+  - Last Seen is set once when a client goes offline, and Wi-Fi Session once per connection, instead of following the router's counters (a phone in Wi-Fi power-save moved Last Seen every minute).
   - WAN Connected `fail_count` stops at the ping check's failure threshold during an outage instead of counting every check.
 - **Fewer duplicate entities on new installations.** Provider, Role and Interface per WAN, the WAN Enabled binary sensor, PPPoE Uptime and the router-level WAN RX/TX start disabled; WAN Connected carries provider, role and interface as attributes, and the Enabled switch shows the same state.
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from conftest import elapsed_seconds
+
 import pytest
 
 from types import SimpleNamespace
@@ -37,7 +39,7 @@ def test_wireguard_sensors_use_profile_labels_and_byte_counters() -> None:
 
     assert uptime.unique_id == "entry_123_wg_Wireguard0_uptime"
     assert uptime.name == "WireGuard Zurich Uptime"
-    assert uptime.native_value == 123
+    assert elapsed_seconds(uptime.native_value) == pytest.approx(123, abs=2)
     assert rx.name == "WireGuard Zurich RX"
     assert rx.native_value == pytest.approx(2.0)
     assert tx.name == "WireGuard Zurich TX"

@@ -564,3 +564,10 @@ def keenetic_coordinator_factory():
         )
 
     return _factory
+
+
+def elapsed_seconds(started) -> int:
+    """Seconds from an uptime sensor's start time to now (start-time sensors)."""
+    from datetime import datetime
+
+    return round((datetime.now().astimezone() - started).total_seconds())

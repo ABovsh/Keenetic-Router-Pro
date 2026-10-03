@@ -1,9 +1,9 @@
 """Base entity classes for Keenetic Router Pro."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Any
 from homeassistant.components.sensor import SensorDeviceClass
-from homeassistant.const import UnitOfTime
 from homeassistant.core import callback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -127,37 +127,42 @@ class LinkActiveMixin:
 
 
 class UptimeMixin:
-    """An uptime duration published once an hour, and at once on a restart.
+    """Uptime published as the moment it started, set once per session.
 
-    Uptime advances on every poll, so publishing it as read writes a recorder
-    row a minute per sensor, and its long-term statistics say nothing a
-    history graph does not. Holding the value for an hour keeps it readable in
-    days with two decimals while costing 24 rows a day; a counter that went
-    back (reboot, reconnect) is published immediately.
+    The router reports elapsed seconds, which as a state is a clock: a row on
+    every poll, or 24 a day even when held for an hour. The start time is the
+    same fact in HA's native form (the frontend shows "3 days ago", like HA's
+    own Uptime sensor) and costs one row per reboot or reconnect. It is worked
+    out at the first reading and held: the router's counter and HA's clock
+    drift apart, and following them would move it on every poll. A counter
+    that went back is a new session and sets a new start.
     """
 
-    _attr_device_class = SensorDeviceClass.DURATION
-    _attr_suggested_unit_of_measurement = UnitOfTime.DAYS
-    _attr_suggested_display_precision = 2
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_state_class = None
-    _UPTIME_STEP = 3600
 
-    @property
-    def native_unit_of_measurement(self) -> str:
-        return UnitOfTime.SECONDS
+    @staticmethod
+    def _now() -> datetime:
+        return datetime.now().astimezone()
 
-    def _publish_uptime(self, seconds: int | None) -> int | None:
+    def _publish_uptime(self, seconds: int | None) -> datetime | None:
+        if seconds is not None and seconds <= 0:
+            # A down tunnel reports 0: no session yet, not one starting now.
+            seconds = None
+        previous = getattr(self, "_uptime_seconds", None)
+        self._uptime_seconds = seconds
         if seconds is None:
-            self._uptime_published = None
+            self._up_since = None
             return None
-        previous = getattr(self, "_uptime_published", None)
         if (
-            previous is None
+            getattr(self, "_up_since", None) is None
+            or previous is None
             or seconds < previous
-            or seconds - previous >= self._UPTIME_STEP
         ):
-            self._uptime_published = seconds
-        return self._uptime_published
+            self._up_since = (self._now() - timedelta(seconds=seconds)).replace(
+                microsecond=0
+            )
+        return self._up_since
 
 
 class ThroughputDeadbandMixin:

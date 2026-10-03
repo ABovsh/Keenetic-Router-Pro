@@ -6,6 +6,8 @@ the live recorder database, and failed before its fix.
 
 from __future__ import annotations
 
+from conftest import elapsed_seconds
+
 from typing import Any
 from unittest.mock import AsyncMock
 
@@ -694,7 +696,7 @@ def test_mesh_uptime_is_unknown_without_a_reading(
     assert sensor.native_value is None
 
     data["mesh_nodes"][0]["uptime"] = "86400"
-    assert sensor.native_value == 86400
+    assert elapsed_seconds(sensor.native_value) == pytest.approx(86400, abs=2)
 
 
 # ---------- Interface toggles survive a router reboot ----------
@@ -893,39 +895,7 @@ def test_policy_select_reports_registration_from_the_hotspot_row(
     assert select.extra_state_attributes["is_registered"] is True
 
 
-# ---------- Uptime: hourly duration, immediate on restart ----------
-
-
-def test_uptime_publishes_hourly_and_at_once_on_a_restart(
-    keenetic_entry, keenetic_coordinator_factory
-) -> None:
-    from custom_components.keenetic_router_pro.sensor.system import KeeneticUptimeSensor
-
-    data = {"system": {"uptime": 600_000}}
-    sensor = KeeneticUptimeSensor(keenetic_coordinator_factory(data), keenetic_entry)
-    assert sensor.native_value == 600_000
-
-    data["system"]["uptime"] = 600_000 + 3_540
-    assert sensor.native_value == 600_000
-
-    data["system"]["uptime"] = 600_000 + 3_600
-    assert sensor.native_value == 603_600
-
-    data["system"]["uptime"] = 45  # reboot
-    assert sensor.native_value == 45
-
-
-def test_wan_uptime_follows_the_same_hourly_rule(
-    keenetic_entry, keenetic_coordinator_factory
-) -> None:
-    wan = {"id": "ISP", "link_state": "up", "uptime": 10_000}
-    data = {"wan_interfaces": [wan], "wan_by_id": {"ISP": wan}}
-    from custom_components.keenetic_router_pro.sensor.network import KeeneticWanUptimeSensor
-
-    sensor = KeeneticWanUptimeSensor(keenetic_coordinator_factory(data), keenetic_entry, "ISP")
-    assert sensor.native_value == 10_000
-    wan["uptime"] = 10_060
-    assert sensor.native_value == 10_000
+# ---------- Uptime ----------
 
 
 def test_wireguard_uptime_is_unavailable_while_the_profile_is_down(
@@ -940,7 +910,7 @@ def test_wireguard_uptime_is_unavailable_while_the_profile_is_down(
 
     profile.update(enabled=True, state="up", uptime=120)
     assert sensor.available is True
-    assert sensor.native_value == 120
+    assert elapsed_seconds(sensor.native_value) == pytest.approx(120, abs=2)
 
 
 def test_pppoe_uptime_is_unknown_without_a_reading(

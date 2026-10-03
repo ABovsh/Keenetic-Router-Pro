@@ -110,7 +110,7 @@ class KeeneticMemoryUsageSensor(DeadbandMixin, ControllerEntity, SensorEntity):
 
 
 class KeeneticUptimeSensor(UptimeMixin, ControllerEntity, SensorEntity):
-    """Router uptime, published hourly (see ``UptimeMixin``)."""
+    """Router uptime, as the time it started (see ``UptimeMixin``)."""
     _attr_has_entity_name = True
     _attr_translation_key = "uptime"
     _attr_icon = "mdi:timer-outline"

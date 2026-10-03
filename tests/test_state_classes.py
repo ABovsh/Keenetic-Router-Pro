@@ -37,11 +37,11 @@ def _class_assignments(path: pathlib.Path, class_name: str) -> dict[str, str]:
         "sensor.mesh.KeeneticMeshUptimeSensor",
     ],
 )
-def test_uptime_sensors_are_hourly_durations_without_statistics(class_path: str) -> None:
+def test_uptime_sensors_are_start_times_without_statistics(class_path: str) -> None:
     """Uptime long-term statistics answer nothing a history graph does not.
 
-    The sensors are durations published once an hour (and at once on a
-    restart), with no state_class, so they cost one row an hour each.
+    The sensors publish when the session started, set once per session, so
+    they cost one row per reboot or reconnect.
     """
     import importlib
 
@@ -53,8 +53,7 @@ def test_uptime_sensors_are_hourly_durations_without_statistics(class_path: str)
         class_name,
     )
     assert getattr(cls, "_attr_state_class", None) is None
-    assert cls._attr_device_class == SensorDeviceClass.DURATION
-    assert cls._UPTIME_STEP == 3600
+    assert cls._attr_device_class == SensorDeviceClass.TIMESTAMP
 
 
 def test_client_session_uptime_is_a_timestamp() -> None:

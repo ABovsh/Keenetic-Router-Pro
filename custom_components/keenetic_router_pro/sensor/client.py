@@ -138,13 +138,6 @@ class KeeneticClientIpSensor(ClientEntity, SensorEntity):
         return self.ip_address
 
 
-# A recomputed session start drifts by a second or two between polls because the
-# router's uptime counter and our clock are not locked together. Anything inside
-# this window is the same session start, and re-publishing it would cost a
-# recorder row on every tick.
-_SESSION_START_TOLERANCE = timedelta(seconds=90)
-
-
 class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
     """When the client's current Wi-Fi session began.
 
@@ -190,6 +183,10 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
     def available(self) -> bool:
         return super().available and _client_has_live_session(self._client)
 
+    @staticmethod
+    def _now() -> datetime:
+        return datetime.now().astimezone()
+
     @property
     def native_value(self) -> datetime | None:
         client = self._client
@@ -201,18 +198,15 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
             self._last_uptime = None
             return None
 
-        computed = datetime.now().astimezone() - timedelta(seconds=seconds)
+        # Set once per session. The router's per-client counter runs a few
+        # percent slow (measured live: +90 s every ~35 min), so recomputing it
+        # each poll published a creeping start and a row each time. A counter
+        # that went back is a reconnect.
         reconnected = self._last_uptime is not None and seconds < self._last_uptime
-        # Within one session the start can only be refined EARLIER. The
-        # router's per-client counter runs a few percent slow (measured live:
-        # +90 s every ~35 min), so a later recomputation is drift, not news —
-        # following it published a creeping start and a row each time.
-        if (
-            self._session_start is None
-            or reconnected
-            or self._session_start - computed > _SESSION_START_TOLERANCE
-        ):
-            self._session_start = computed
+        if self._session_start is None or reconnected:
+            self._session_start = (
+                self._now() - timedelta(seconds=seconds)
+            ).replace(microsecond=0)
         self._last_uptime = seconds
         return self._session_start
 

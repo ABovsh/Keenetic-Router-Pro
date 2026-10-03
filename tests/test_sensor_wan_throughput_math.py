@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from conftest import elapsed_seconds
+
 import pytest
 
 from conftest import TEST_HOST
@@ -95,7 +97,9 @@ def test_wan_identity_and_counter_sensors_read_current_wan_data() -> None:
     assert KeeneticWanInterfaceSensor(coordinator, entry, "PPPoE0").native_value == "GigabitEthernet1"
     assert KeeneticWanUptimeSensor(coordinator, entry, "PPPoE0").unique_id == "entry_123_wan_PPPoE0_uptime"
     assert KeeneticWanUptimeSensor(coordinator, entry, "PPPoE0").name == "Uptime"
-    assert KeeneticWanUptimeSensor(coordinator, entry, "PPPoE0").native_value == 120
+    assert elapsed_seconds(
+        KeeneticWanUptimeSensor(coordinator, entry, "PPPoE0").native_value
+    ) == pytest.approx(120, abs=2)
     assert KeeneticWanRxBytesSensor(coordinator, entry, "PPPoE0").unique_id == "entry_123_wan_PPPoE0_rx_bytes"
     assert KeeneticWanRxBytesSensor(coordinator, entry, "PPPoE0").name == "RX Bytes"
     assert KeeneticWanRxBytesSensor(coordinator, entry, "PPPoE0").native_value == 1000
@@ -167,8 +171,7 @@ def test_wan_ip_and_pppoe_uptime_sensors_read_wan_status() -> None:
         "status": WAN_STATUS_CONNECTED,
     }
     assert uptime_sensor.unique_id == "entry_123_pppoe_uptime"
-    assert uptime_sensor.native_unit_of_measurement == "seconds"
-    assert uptime_sensor.native_value == 3600
+    assert elapsed_seconds(uptime_sensor.native_value) == pytest.approx(3600, abs=2)
     assert uptime_sensor.extra_state_attributes == {
         "interface": "PPPoE0",
         "type": "pppoe",
