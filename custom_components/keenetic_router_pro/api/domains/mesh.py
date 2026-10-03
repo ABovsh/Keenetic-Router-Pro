@@ -67,13 +67,13 @@ class MeshMixin:
             self._mws_member_supported = True
 
             if not data:
-                return fallback_nodes
+                return self._mesh_fallback(fallback_nodes)
 
             members = _nested_dict_items(data, "member", "members", "mws")
             if not members and isinstance(data, list):
                 members = _dict_items(data)
             if not members:
-                return fallback_nodes
+                return self._mesh_fallback(fallback_nodes)
 
             for member in members:
                 cid = member.get("cid")
@@ -158,7 +158,25 @@ class MeshMixin:
             _LOGGER.debug("Error getting mesh nodes from mws/member: %s", err)
             raise
 
-        return nodes or fallback_nodes
+        if nodes:
+            self._mws_members_seen = True
+            return nodes
+        return self._mesh_fallback(fallback_nodes)
+
+    def _mesh_fallback(
+        self, fallback_nodes: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Return the hotspot-derived nodes, unless CID members were seen.
+
+        Once this controller has listed its members by CID, an empty list is
+        a glitch (e.g. MWS restarting with the router), not a new topology.
+        The MAC-keyed fallback would then create a second set of devices and
+        strand the CID-keyed ones, so raise and let the coordinator keep its
+        snapshot instead.
+        """
+        if getattr(self, "_mws_members_seen", False):
+            raise KeeneticApiError("MWS controller returned no members")
+        return fallback_nodes
 
     async def _get_mesh_nodes_from_clients(
         self, clients: List[Dict[str, Any]] | None = None

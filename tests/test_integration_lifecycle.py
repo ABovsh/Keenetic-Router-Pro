@@ -330,8 +330,11 @@ def test_unload_entry_clears_http_repair_issue_only_after_platform_unload(
 
     assert asyncio.run(async_unload_entry(hass, entry)) is True
     assert hass.config_entries.unloaded == [(entry, PLATFORMS)]
+    # Both entry-scoped issues go: a removed entry must not leave its
+    # "unsupported features" notice behind in Repairs.
     assert deleted == [
         (hass, DOMAIN, f"{ISSUE_INSECURE_HTTP}_{entry.entry_id}"),
+        (hass, DOMAIN, f"unsupported_features_{entry.entry_id}"),
     ]
 
     deleted.clear()

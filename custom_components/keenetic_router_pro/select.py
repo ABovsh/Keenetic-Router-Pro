@@ -9,7 +9,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .api import KeeneticClient
 from .coordinator import KeeneticCoordinator
 from .entity import ClientEntity
-from .utils import iter_tracked_clients
+from .utils import coerce_bool, iter_tracked_clients
 
 # Serialize select writes so we don't hammer the router with concurrent commands.
 PARALLEL_UPDATES = 1
@@ -239,7 +239,9 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
             "policy_description": current_policy_desc,
             "access": host_info.get("access"),
             "available_policies": list(self._policies.values()),
-            "is_registered": host_info.get("registered", False),
+            # Registration lives on the hotspot row; host_policies only
+            # carries policy and access.
+            "is_registered": coerce_bool((self._client or {}).get("registered")),
         }
 
     @property

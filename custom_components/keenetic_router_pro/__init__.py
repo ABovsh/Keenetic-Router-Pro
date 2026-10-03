@@ -691,5 +691,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return False
 
     ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_INSECURE_HTTP}_{entry.entry_id}")
+    ir.async_delete_issue(
+        hass, DOMAIN, f"{ISSUE_UNSUPPORTED_FEATURES}_{entry.entry_id}"
+    )
 
     return True

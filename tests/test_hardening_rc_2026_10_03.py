@@ -844,3 +844,62 @@ async def test_diagnostics_redacts_identifiers_found_in_live_payloads() -> None:
     assert "2001:db8" not in dumped
     assert "0677779709" not in dumped
     assert "yahny" not in dumped
+
+
+# ---------- Mesh members: no MAC-keyed fallback once CIDs are known ----------
+
+_EXTENDER_CLIENTS = [
+    {"mac": "aa:bb:cc:00:00:01", "system-mode": "extender", "active": True, "name": "Giga"}
+]
+
+
+async def test_mesh_nodes_do_not_fall_back_to_mac_ids_after_cids_were_seen() -> None:
+    """A blank member list from a known MWS controller is a glitch, not a topology.
+
+    Publishing the MAC-keyed fallback then would add a second, MAC-keyed set
+    of devices/entities next to the CID-keyed ones and mark those unavailable.
+    """
+    client = _client()
+    client._rci_get = AsyncMock(
+        side_effect=[
+            {"member": [{"cid": "60ea4b5e-0ea5", "mac": "aa:bb:cc:00:00:01", "fw": "5.1.6"}]},
+            {},
+        ]
+    )
+
+    first = await client.async_get_mesh_nodes(clients=_EXTENDER_CLIENTS)
+    assert [n["id"] for n in first] == ["60ea4b5e-0ea5"]
+
+    with pytest.raises(KeeneticApiError):
+        await client.async_get_mesh_nodes(clients=_EXTENDER_CLIENTS)
+
+
+async def test_mesh_fallback_still_serves_a_controller_without_members() -> None:
+    client = _client()
+    client._rci_get = AsyncMock(return_value={})
+
+    nodes = await client.async_get_mesh_nodes(clients=_EXTENDER_CLIENTS)
+
+    assert [n["id"] for n in nodes] == ["aa:bb:cc:00:00:01"]
+
+
+# ---------- Connection policy select ----------
+
+
+def test_policy_select_reports_registration_from_the_hotspot_row(
+    keenetic_entry, keenetic_coordinator_factory
+) -> None:
+    """host_policies only carries policy/access, so is_registered was always False."""
+    from custom_components.keenetic_router_pro.select import KeeneticClientPolicySelect
+
+    mac = "aa:bb:cc:dd:ee:ff"
+    data = {
+        "clients_by_mac": {mac: {"mac": mac, "registered": True, "active": True}},
+        "host_policies": {mac: {"policy": "Policy0", "access": "permit"}},
+        "policies": {"Policy0": "VPN"},
+    }
+    select = KeeneticClientPolicySelect(
+        keenetic_coordinator_factory(data), keenetic_entry, None, mac, "Phone", None, {"Policy0": "VPN"}
+    )
+
+    assert select.extra_state_attributes["is_registered"] is True

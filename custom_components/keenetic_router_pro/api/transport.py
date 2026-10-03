@@ -60,6 +60,9 @@ class _Transport:
         # device/firmware (skip future calls to avoid router-side log spam),
         # True -> endpoint works. Pattern mirrors `_mws_member_supported`.
         self._mws_member_supported: bool | None = None
+        # Session fact, not a capability latch (a router reboot must not clear
+        # it): the controller has listed its mesh members by CID before.
+        self._mws_members_seen: bool = False
         self._crypto_map_supported: bool | None = None
         self._dns_proxy_supported: bool | None = None
         self._ping_check_supported: bool | None = None
