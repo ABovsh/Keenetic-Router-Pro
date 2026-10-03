@@ -470,7 +470,10 @@ def test_downtime_does_not_close_an_outage_on_an_unreachable_router() -> None:
     coordinator.last_update_success = True
     coordinator.data["active_wan"] = None
     sensor._handle_coordinator_update()  # t=220, still down
-    assert sensor.native_value == 120
+    # The unreadable stretch is not billed here (Router Downtime owns it);
+    # the clock restarts at the first fresh "down" observation.
+    assert sensor.native_value == 0
+    assert sensor._down_since == 220.0
 
 
 # --------------------------------------------------------------------------

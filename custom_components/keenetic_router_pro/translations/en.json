@@ -142,7 +142,10 @@
         "name": "WAN Failover Count"
       },
       "wan_downtime": {
-        "name": "WAN Downtime"
+        "name": "Internet Downtime"
+      },
+      "router_downtime": {
+        "name": "Router Downtime"
       }
     },
     "button": {
