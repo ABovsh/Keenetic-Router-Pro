@@ -75,10 +75,11 @@ An actively maintained, hardened fork of the original Keenetic Router Pro integr
 - **Useful diagnostics, not just raw counters.** The fork adds DNS proxy
   health and failed-request sensors, IPsec VICI out-of-memory diagnostics,
   ping-check aware WAN interpretation, WireGuard/IPsec state sensors, and
-  downtime totals: Router Downtime (switched off or rebooting, dated from the
-  router's own uptime), Internet Downtime (no WAN with internet) and an
-  optional Downtime per WAN. They keep long-term statistics, so a
-  statistics card shows the total for any week, month or year.
+  downtime totals: Downtime per WAN (the provider's link was lost, or it was
+  up without internet) and Internet Downtime (no WAN with internet). Time
+  the router itself could not be read is never counted. They keep long-term
+  statistics, so a statistics card shows the total for any week, month or
+  year and which provider was the most reliable.
 - **Presence and client controls are less noisy.** Client lookups use a
   precomputed MAC index, per-client entities skip no-op state writes, selected
   client presence is based on Keenetic's own link/active state, and

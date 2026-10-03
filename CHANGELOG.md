@@ -13,7 +13,7 @@ git log.
 ### ⚠️ Breaking
 
 - Router, mesh-node, WAN, PPPoE and WireGuard uptime sensors update once an hour (immediately after a reboot or reconnect), are shown in days and no longer record long-term statistics. WireGuard uptime is unavailable while the profile is down instead of 0.
-- WAN Downtime is renamed Internet Downtime (the entity ID is unchanged). It now counts time when no WAN has internet access (the ping check, where configured), not only time when no WAN holds the default route. Time when the router could not be read is no longer counted; time the router was off is counted by the new Router Downtime.
+- WAN Downtime is renamed Internet Downtime (the entity ID is unchanged). It now counts time when no WAN has internet access (the ping check, where configured), not only time when no WAN holds the default route. Time when the router could not be read, and its first five minutes after a boot, are no longer counted.
 
 ### Security
 
@@ -37,9 +37,8 @@ git log.
 
 ### Improvements
 
-- New Router Downtime sensor: total time the router was switched off or rebooting. It is dated from the router's own uptime, so it stays correct when Home Assistant was down at the same time, and a router that was only unreachable is not counted.
-- New per-WAN Downtime sensor: total time an enabled uplink had no internet access. It is disabled by default because every one records long-term statistics.
-- Downtime sensors keep long-term statistics, so a statistics card shows the total for any day, week, month or year.
+- New Downtime sensor per WAN: total time that provider was down — its link was lost, or the link was up but there was no internet (the router's ping check, where configured). A WAN switched off on purpose, a router that cannot be read and the router's first five minutes after a boot are not counted. It is disabled by default for WireGuard and OpenVPN tunnels.
+- Downtime sensors keep long-term statistics, so a statistics card shows the total for any day, week, month or year and lets you compare providers.
 - Each update now usually needs one request instead of about twenty. The neighbour table is read from the combined request instead of a separate command, and mesh members are included on the slow tier.
 - Traffic counters and throughput of a WAN without link, of a site-to-site tunnel that is not established, and of a WireGuard profile that is down are unavailable instead of 0. This removes their long-term statistics rows while the link is down.
 - WAN Connected `all_ping_check_profiles` lists each profile's name, status and hosts; the per-poll success and fail counters were removed from it.
