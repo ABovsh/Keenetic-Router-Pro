@@ -1413,3 +1413,34 @@ def test_bandwidth_limit_falls_back_to_its_own_value_without_router_data() -> No
     entity._limit_kbps = 768
 
     assert entity.native_value == 768
+
+
+async def test_downtime_restore_reads_the_state_in_its_display_unit(
+    keenetic_entry, keenetic_coordinator_factory
+) -> None:
+    """HA stores the state in the suggested unit (hours), not in seconds."""
+    from types import SimpleNamespace
+
+    wan = {"id": "ISP2", "enabled": True, "link_state": "up"}
+    _, _, sensor = _wan_downtime(keenetic_entry, keenetic_coordinator_factory, wan)
+
+    async def last_state():
+        return SimpleNamespace(state="1.5", attributes={"unit_of_measurement": "h"})
+
+    sensor.async_get_last_state = last_state
+    await sensor.async_added_to_hass()
+
+    assert sensor.native_value == 5400
+
+
+def test_bandwidth_limit_ignores_a_poll_that_read_the_router_before_the_write() -> None:
+    import asyncio
+
+    entity, host = _shape_number({"rx": 0, "tx": 0, "mode": "mac"})
+    asyncio.run(entity.async_set_native_value(4096))
+    entity._handle_coordinator_update()          # tick already in flight: still 0
+    assert entity.native_value == 4096
+
+    host["traffic-shape"] = {"rx": 4096, "tx": 4096, "mode": "mac"}
+    entity._handle_coordinator_update()
+    assert entity.native_value == 4096

@@ -70,9 +70,10 @@ class KeeneticClientRateLimitNumber(ClientEntity, NumberEntity, RestoreEntity):
         ClientEntity.__init__(self, coordinator, entry.entry_id, entry.title, mac, label)
         self._api_client = client
         self._limit_kbps: float = 0
-        # True from a write until the next poll, which is the first one that
-        # can show it: the router applies the shape before answering.
-        self._awaiting_poll = False
+        # Polls left before the router's value wins over a write. A tick
+        # already in flight during the write still carries the old shape, so
+        # wait for the router to echo the value, or for two polls at most.
+        self._pending_polls = 0
 
     @property
     def unique_id(self) -> str:
@@ -96,12 +97,16 @@ class KeeneticClientRateLimitNumber(ClientEntity, NumberEntity, RestoreEntity):
     @property
     def native_value(self) -> float:
         router = self._router_limit
-        if router is None or self._awaiting_poll:
+        if router is None or self._pending_polls:
             return self._limit_kbps
         return router
 
     def _handle_coordinator_update(self) -> None:
-        self._awaiting_poll = False
+        if self._pending_polls:
+            if self._router_limit == self._limit_kbps:
+                self._pending_polls = 0
+            else:
+                self._pending_polls -= 1
         super()._handle_coordinator_update()
 
     async def async_added_to_hass(self) -> None:
@@ -122,5 +127,5 @@ class KeeneticClientRateLimitNumber(ClientEntity, NumberEntity, RestoreEntity):
         kbps = int(value)
         await self._api_client.async_set_client_rate_limit(self._mac, kbps)
         self._limit_kbps = kbps
-        self._awaiting_poll = True
+        self._pending_polls = 2
         self.async_write_ha_state()

@@ -637,6 +637,10 @@ class KeeneticWanFailoverCountSensor(ControllerEntity, SensorEntity, RestoreEnti
         super()._handle_coordinator_update()
 
 
+# HA's duration unit strings, in seconds.
+_SECONDS_PER_UNIT = {"ms": 0.001, "s": 1, "min": 60, "h": 3600, "d": 86400, "w": 604800}
+
+
 class _DowntimeClockMixin:
     """Accrue seconds between two observations when the earlier one was down.
 
@@ -692,8 +696,12 @@ class _DowntimeClockMixin:
     async def _async_restore_seconds(self) -> None:
         last = await self.async_get_last_state()
         if last is not None and last.state not in (None, "unknown", "unavailable"):
+            # The state is stored in the display unit (hours by default, or
+            # whatever the user picked), not in native seconds.
+            attributes = getattr(last, "attributes", None) or {}
+            unit = attributes.get("unit_of_measurement") or UnitOfTime.SECONDS
             try:
-                self._seconds = float(last.state)
+                self._seconds = float(last.state) * _SECONDS_PER_UNIT.get(str(unit), 1)
             except (TypeError, ValueError):
                 self._seconds = 0.0
         self._published = int(self._seconds)
