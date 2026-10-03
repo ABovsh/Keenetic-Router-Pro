@@ -25,7 +25,7 @@ from custom_components.keenetic_router_pro.api import KeeneticApiError, Keenetic
         # Large sample but failure rate <5% -> ok.
         ({"proxy-status": [{"proxy-name": "main", "proxy-config": "server https://dns.example/id", "proxy-stat": "1.1.1.1 53 200 198 0 5ms 6ms 10", "proxy-https": {"server-https": {"uri": "https://dns.example/private/path"}}}]}, "ok", 1),
         # Traffic flowing but zero answers -> down.
-        ({"proxy-status": [{"proxy-name": "main", "proxy-config": "server https://dns.example/id", "proxy-stat": "1.1.1.1 53 10 0 0 5ms 6ms 10", "proxy-https": {"server-https": {"uri": "https://dns.example/private/path"}}}]}, "down", 1),
+        ({"proxy-status": [{"proxy-name": "main", "proxy-config": "server https://dns.example/id", "proxy-stat": "1.1.1.1 53 25 0 0 5ms 6ms 10", "proxy-https": {"server-https": {"uri": "https://dns.example/private/path"}}}]}, "down", 1),
         ({"proxy-status": []}, "unknown", 0),
         # Malformed (non-list/dict) proxy-status degrades to "no proxies".
         ({"proxy-status": "bad"}, "unknown", 0),
@@ -49,11 +49,22 @@ async def test_async_get_dns_proxy_status_normalizes_shapes(
 
 
 @pytest.mark.parametrize("exc", [KeeneticApiError("boom"), aiohttp.ClientError("boom"), asyncio.TimeoutError(), ValueError("bad json")])
-async def test_async_get_dns_proxy_status_errors_return_empty(exc: Exception) -> None:
+async def test_async_get_dns_proxy_status_transient_errors_reach_the_coordinator(exc: Exception) -> None:
+    """The coordinator keeps its previous snapshot; an empty one read as unknown."""
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
     client._rci_get = AsyncMock(side_effect=exc)
 
+    with pytest.raises(type(exc)):
+        await client.async_get_dns_proxy_status()
+    assert client._dns_proxy_supported is None
+
+
+async def test_async_get_dns_proxy_status_missing_endpoint_returns_empty() -> None:
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    client._rci_get = AsyncMock(side_effect=KeeneticApiError("HTTP error 404", status=404))
+
     assert await client.async_get_dns_proxy_status() == {}
+    assert client._dns_proxy_supported is False
 
 
 

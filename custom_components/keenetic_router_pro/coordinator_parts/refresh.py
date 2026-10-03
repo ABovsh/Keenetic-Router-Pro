@@ -53,18 +53,52 @@ def refresh_plan(*, first_refresh: bool, refresh_count: int) -> RefreshPlan:
     )
 
 
+# Batch paths guarded by a capability latch, keyed by the client attribute
+# that holds it. A path the router does not have is answered in place inside
+# the batch, but the router still writes a "not found" line to its system log
+# for it — the very line each latch exists to stop.
+_LATCHED_BATCH_PATHS: dict[str, str] = {
+    "_ping_check_supported": "show/ping-check",
+    "_crypto_map_supported": "show/ipsec",
+    "_ndns_supported": "show/ndns",
+    "_dns_proxy_supported": "show/dns-proxy",
+}
+
+
+def unsupported_batch_paths(client: Any) -> frozenset[str]:
+    """Return batch paths the router has already answered "not found" for."""
+    paths = {
+        path
+        for attr, path in _LATCHED_BATCH_PATHS.items()
+        if getattr(client, attr, None) is False
+    }
+    if "show/ip/hotspot/host" in (getattr(client, "_hotspot_subpath_skip", None) or ()):
+        paths.add("show/ip/hotspot")
+    return frozenset(paths)
+
+
 def build_batch_tree(
-    plan: RefreshPlan, *, needs_clients: bool = True
+    plan: RefreshPlan,
+    *,
+    needs_clients: bool = True,
+    unsupported: frozenset[str] = frozenset(),
+    include_mesh: bool = False,
 ) -> dict[str, Any]:
     """Build the composite RCI tree requested at the start of a tick.
 
     ``needs_clients`` drops ``show/ip/hotspot`` — by a wide margin the largest
     payload of the tick — when every entity derived from it is disabled. There
     is no point parsing a hundred hosts nothing will ever read.
+
+    ``unsupported`` names paths the router already refused (see
+    ``unsupported_batch_paths``). ``include_mesh`` adds ``show/mws/member`` on
+    the slow tier once the controller is known to serve it.
     """
     batch_tree: dict[str, Any] = {}
 
     def add(path: str) -> None:
+        if path in unsupported:
+            return
         node = batch_tree
         parts = path.strip("/").split("/")
         for part in parts[:-1]:
@@ -80,6 +114,8 @@ def build_batch_tree(
         add("show/ping-check")
     if plan.ipsec_status_refresh:
         add("show/ipsec")
+    if plan.slow_refresh and include_mesh:
+        add("show/mws/member")
     if plan.very_slow_refresh:
         add("show/version")
         add("show/ndns")

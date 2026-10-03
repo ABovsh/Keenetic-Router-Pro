@@ -38,6 +38,13 @@ from ..parsers.ipsec import (
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.api.vpn")
 
 
+def _crypto_map_config_entries(data: Any) -> Dict[str, Dict[str, Any]]:
+    """Return the per-map dicts of a ``crypto/map`` config payload."""
+    if not isinstance(data, dict):
+        return {}
+    return {name: cfg for name, cfg in data.items() if isinstance(cfg, dict)}
+
+
 class VpnMixin:
     async def async_get_wireguard_status(
         self,
@@ -304,11 +311,7 @@ class VpnMixin:
         except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError) as err:
             _LOGGER.debug("crypto/map config unavailable: %s", err)
             return {}
-        if not isinstance(data, dict):
-            return {}
-        return {
-            name: cfg for name, cfg in data.items() if isinstance(cfg, dict)
-        }
+        return _crypto_map_config_entries(data)
 
     async def async_get_ipsec_status(self) -> Dict[str, Dict[str, Any]]:
         """Return site-to-site IPsec tunnels via the safe stroke path.
@@ -328,12 +331,20 @@ class VpnMixin:
         automations that guard on the switch reading ``"on"``). Both reads
         run in parallel.
 
+        A transient failure of either read is raised, not merged: half a
+        picture publishes every established tunnel as down (or makes it
+        vanish) for a whole slow tick, while the coordinator can keep its
+        previous snapshot. "Not found" from both reads means the router has
+        no IPsec component; that is latched like the other capabilities.
+
         Output shape matches ``async_get_crypto_maps`` so downstream
         sensors/binary_sensors keep working unchanged.
         """
+        if self._crypto_map_supported is False:
+            return {}
         status_data, config = await asyncio.gather(
             self._rci_get("show/ipsec"),
-            self.async_get_crypto_map_config(),
+            self._rci_get("crypto/map"),
             return_exceptions=True,
         )
 
@@ -342,19 +353,27 @@ class VpnMixin:
         if isinstance(config, asyncio.CancelledError):
             raise config
 
+        status_missing = isinstance(status_data, BaseException) and _is_endpoint_missing(status_data)
+        config_missing = isinstance(config, BaseException) and _is_endpoint_missing(config)
+        if status_missing and config_missing:
+            self._crypto_map_supported = False
+            _LOGGER.debug("No IPsec component on this router; not polling it again")
+            return {}
+        for result in (status_data, config):
+            if isinstance(result, BaseException) and not _is_endpoint_missing(result):
+                raise result
+        self._crypto_map_supported = True
+
         status: Dict[str, Dict[str, Any]] = {}
         if isinstance(status_data, dict):
             text = status_data.get("ipsec_statusall")
             if isinstance(text, str) and text:
                 status = self._parse_ipsec_statusall(text)
-        elif isinstance(status_data, BaseException):
-            _LOGGER.debug("show/ipsec unavailable: %s", status_data)
 
-        if isinstance(config, BaseException):
-            _LOGGER.debug("crypto/map config unavailable: %s", config)
-            config = {}
-
-        return merge_crypto_map_config(status, config)
+        return merge_crypto_map_config(
+            status,
+            {} if isinstance(config, BaseException) else _crypto_map_config_entries(config),
+        )
 
     async def async_get_crypto_maps(self) -> Dict[str, Dict[str, Any]]:
         """Return site-to-site IPsec tunnels (`crypto map` entries).

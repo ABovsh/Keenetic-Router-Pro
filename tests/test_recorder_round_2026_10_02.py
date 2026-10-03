@@ -139,5 +139,5 @@ async def test_family_filter_answering_only_nxdomain_is_not_down() -> None:
 
 
 async def test_no_answers_at_all_is_still_down() -> None:
-    stat = "127.0.0.1  40500  10  0  0  0ms  0ms  4"
+    stat = "127.0.0.1  40500  30  0  0  0ms  0ms  4"
     assert await _status(stat) == "down"

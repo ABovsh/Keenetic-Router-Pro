@@ -105,6 +105,25 @@ class SourceFreshnessMixin:
         )
 
 
+class LinkActiveMixin:
+    """Report a traffic counter unavailable while its link is not up.
+
+    A down link's counter is not a measurement. Publishing its frozen value
+    still buys a full long-term-statistics quota (a short-term row every five
+    minutes, an hourly row forever) and hides the difference between "moved
+    no bytes" and "there is no link"; ``unavailable`` records nothing. Gate on
+    the link, never on the value: an idle standby uplink that is up reads a
+    true zero and stays available.
+    """
+
+    def _link_active(self) -> bool:
+        raise NotImplementedError
+
+    @property
+    def available(self) -> bool:
+        return bool(getattr(super(), "available", True)) and self._link_active()
+
+
 class ThroughputDeadbandMixin:
     """Quantize a byte/s counter to bit/s and hold it until it really moves.
 
@@ -493,6 +512,14 @@ class CryptoMapEntity(_FingerprintedCoordinatorEntity):
     @property
     def _fingerprint_source(self) -> dict[str, Any] | None:
         return self._cmap
+
+    @property
+    def available(self) -> bool:
+        # Failed reads keep the last snapshot for a short grace window only;
+        # after that the tunnel's state is unknown, not "as last seen".
+        return super().available and bool(
+            (self.coordinator.data or {}).get("crypto_maps_fresh", True)
+        )
 
     @property
     def _cmap(self) -> dict[str, Any] | None:

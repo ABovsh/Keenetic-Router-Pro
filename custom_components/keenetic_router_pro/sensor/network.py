@@ -21,6 +21,7 @@ from ..entity import (
     ControllerEntity,
     CounterDeadbandMixin,
     DeadbandMixin,
+    LinkActiveMixin,
     SourceFreshnessMixin,
     ThroughputDeadbandMixin,
     WanEntity,
@@ -28,6 +29,7 @@ from ..entity import (
 from ..utils import (
     apply_relative_deadband,
     coerce_byte_count,
+    coerce_int,
     coerce_seconds,
 )
 
@@ -176,15 +178,16 @@ class KeeneticActiveConnectionsSensor(DeadbandMixin, ControllerEntity, SensorEnt
         return f"{self._entry_id}_active_connections"
 
     @property
-    def native_value(self) -> int:
+    def native_value(self) -> int | None:
         sys = self.coordinator.data.get("system", {}) or {}
-        conntotal = sys.get("conntotal", 0)
-        connfree = sys.get("connfree", 0)
-        try:
-            # OverflowError: int(float("inf")) on a non-finite firmware value.
-            used = max(0, int(conntotal) - int(connfree))
-        except (TypeError, ValueError, OverflowError):
-            return 0
+        # No reading is unknown, not zero: a fake 0 is a valid-looking
+        # measurement in long-term statistics.
+        conntotal = coerce_int(sys.get("conntotal"), None)
+        connfree = coerce_int(sys.get("connfree"), None)
+        if conntotal is None or connfree is None:
+            self._deadband_published = None
+            return None
+        used = max(0, conntotal - connfree)
         published = apply_relative_deadband(
             used,
             getattr(self, "_deadband_published", None),
@@ -201,12 +204,11 @@ class KeeneticActiveConnectionsSensor(DeadbandMixin, ControllerEntity, SensorEnt
         # every tick the deadband held the state the attributes moved anyway
         # and HA wrote a row carrying nothing — 116 such rows in three hours,
         # measured after 1.12.0 shipped the deadband without this.
-        sys = self.coordinator.data.get("system", {}) or {}
-        try:
-            conntotal = int(sys.get("conntotal", 0))
-        except (TypeError, ValueError, OverflowError):
-            conntotal = 0
         used = self.native_value
+        if used is None:
+            return None
+        sys = self.coordinator.data.get("system", {}) or {}
+        conntotal = coerce_int(sys.get("conntotal"), 0)
         return {
             "total_capacity": conntotal,
             "free": max(0, conntotal - used),
@@ -479,8 +481,22 @@ class KeeneticWanUptimeSensor(_WanSensorBase):
         return coerce_seconds(wan.get("uptime"), default=None)
 
 
+class _WanLinkActiveMixin(LinkActiveMixin):
+    """Gate a WAN traffic sensor on the uplink's physical link."""
+
+    def _link_active(self) -> bool:
+        wan = self._wan
+        if not wan or wan.get("link_state") != LINK_STATE_UP:
+            return False
+        # ``link_state`` is the configured state; a standby uplink whose modem
+        # or cable is absent reports state "up" with link "down".
+        raw = wan.get("raw")
+        link = raw.get("link") if isinstance(raw, dict) else None
+        return link is None or str(link).lower() == LINK_STATE_UP
+
+
 class _WanBytesBase(
-    SourceFreshnessMixin, CounterDeadbandMixin, _WanSensorBase
+    _WanLinkActiveMixin, SourceFreshnessMixin, CounterDeadbandMixin, _WanSensorBase
 ):
     """Shared RX/TX byte counter base."""
     _attr_device_class = SensorDeviceClass.DATA_SIZE
@@ -535,7 +551,7 @@ class KeeneticWanTxBytesSensor(_WanBytesBase):
 
 
 class _WanThroughputBase(
-    SourceFreshnessMixin, ThroughputDeadbandMixin, _WanSensorBase
+    _WanLinkActiveMixin, SourceFreshnessMixin, ThroughputDeadbandMixin, _WanSensorBase
 ):
     _attr_device_class = SensorDeviceClass.DATA_RATE
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -649,6 +665,8 @@ class KeeneticWanDowntimeSensor(ControllerEntity, SensorEntity, RestoreEntity):
 
     _attr_has_entity_name = True
     _attr_translation_key = "wan_downtime"
+    # Zero on a healthy router, yet a full statistics row stream; opt in.
+    _attr_entity_registry_enabled_default = False
     _attr_icon = "mdi:timer-alert-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_device_class = SensorDeviceClass.DURATION

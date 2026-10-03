@@ -216,44 +216,44 @@ async def test_vpn_error_paths_return_empty(exc: Exception) -> None:
     assert await client.async_get_ipsec_diagnostics() == {}
 
 
-async def test_ipsec_status_falls_back_to_config_when_show_ipsec_fails() -> None:
-    """A failed status read must still leave a disabled tunnel available/off.
+async def test_ipsec_status_raises_when_show_ipsec_times_out() -> None:
+    """A failed status read must not be merged into "every tunnel is down".
 
-    If this path returned nothing, every crypto-map entity would go
-    ``unavailable`` on a transient timeout and strand recovery automations
-    that guard on the switch reading ``"on"``.
+    The coordinator keeps its previous snapshot for a raised read, so a
+    disabled tunnel stays available/off and an established one stays on.
     """
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
-    client._rci_get = AsyncMock(side_effect=asyncio.TimeoutError())
-    client.async_get_crypto_map_config = AsyncMock(
-        return_value={"Office": {"enabled": False, "remote_endpoint": "198.51.100.1"}}
-    )
 
-    result = await client.async_get_ipsec_status()
+    async def _get(subpath: str, **_kw):
+        if subpath == "show/ipsec":
+            raise KeeneticApiError("Timeout for /rci/show/ipsec")
+        return {"Office": {"enable": False}}
 
-    assert "Office" in result
-    assert result["Office"]["enabled"] is False
+    client._rci_get = AsyncMock(side_effect=_get)
+
+    with pytest.raises(KeeneticApiError):
+        await client.async_get_ipsec_status()
 
 
-async def test_ipsec_status_uses_status_alone_when_crypto_map_config_fails() -> None:
-    """A failed config read must not discard an established tunnel's status."""
+async def test_ipsec_status_raises_when_crypto_map_config_times_out() -> None:
+    """A failed config read must not drop disabled tunnels for a tick."""
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
-    client._rci_get = AsyncMock(
-        return_value={
+
+    async def _get(subpath: str, **_kw):
+        if subpath == "crypto/map":
+            raise KeeneticApiError("Timeout for /rci/crypto/map")
+        return {
             "ipsec_statusall": (
                 "Security Associations (1 up, 0 connecting):\n"
                 "        Office[1]: ESTABLISHED 10 seconds ago, "
                 "192.0.2.1[192.0.2.1]...198.51.100.1[198.51.100.1]\n"
             )
         }
-    )
-    client.async_get_crypto_map_config = AsyncMock(
-        side_effect=KeeneticApiError("crypto/map unavailable")
-    )
 
-    result = await client.async_get_ipsec_status()
+    client._rci_get = AsyncMock(side_effect=_get)
 
-    assert "Office" in result
+    with pytest.raises(KeeneticApiError):
+        await client.async_get_ipsec_status()
 
 
 async def test_ipsec_status_propagates_cancellation_from_either_read() -> None:

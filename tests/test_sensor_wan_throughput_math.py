@@ -193,12 +193,8 @@ def test_active_connections_sensor_clamps_bad_and_negative_values() -> None:
     assert sensor.native_value == 0
 
     coordinator.data["system"] = {"conntotal": "bad", "connfree": None}
-    assert sensor.native_value == 0
-    assert sensor.extra_state_attributes == {
-        "total_capacity": 0,
-        "free": 0,
-        "used_percent": 0,
-    }
+    assert sensor.native_value is None
+    assert sensor.extra_state_attributes is None
 
 
 def test_local_ip_and_main_port_sensors_expose_current_port_state() -> None:

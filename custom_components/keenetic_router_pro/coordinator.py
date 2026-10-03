@@ -42,6 +42,7 @@ from .coordinator_parts.payloads import (
 from .coordinator_parts.refresh import (
     build_batch_tree,
     refresh_plan,
+    unsupported_batch_paths,
 )
 from .utils import coerce_int, normalize_mac
 
@@ -348,7 +349,13 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # in the ``finally`` block below.
         try:
             if self.client._rci_batch_supported is not False:
-                batch_tree = build_batch_tree(plan, needs_clients=needs_clients)
+                batch_tree = build_batch_tree(
+                    plan,
+                    needs_clients=needs_clients,
+                    unsupported=unsupported_batch_paths(self.client),
+                    include_mesh=getattr(self.client, "_mws_member_supported", None)
+                    is True,
+                )
                 try:
                     await self.client.prefetch_tick(batch_tree)
                 except asyncio.CancelledError:
@@ -473,6 +480,14 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # so an absent endpoint doesn't produce a warning on every tick —
             # the api layer already debug-logs the reason. When the slow tier
             # is skipped, keep the previous snapshot instead of rebuilding it.
+            crypto_maps_failed = ipsec_status_refresh and isinstance(
+                crypto_maps, BaseException
+            )
+            crypto_maps_fresh = self._source_is_fresh(
+                "crypto_maps",
+                attempted=ipsec_status_refresh,
+                failed=crypto_maps_failed,
+            )
             if slow_refresh:
                 # On a transient fetch failure keep the previous snapshot —
                 # an empty default would flap every IPsec entity unavailable
@@ -493,8 +508,16 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 crypto_maps = _prev.get("crypto_maps", {})
             # DNS proxy is diagnostic-only and intentionally slow-cadence;
             # routers without the endpoint should not warn every refresh.
+            # A transient failure keeps the previous snapshot (an empty one
+            # read as "unknown" for a whole 15-minute tier); repeated failures
+            # mark the source stale through ``dns_proxy_fresh``.
+            dns_proxy_fresh = self._source_is_fresh(
+                "dns_proxy",
+                attempted=very_slow_refresh,
+                failed=very_slow_refresh and isinstance(dns_proxy, BaseException),
+            )
             dns_proxy = dict_or_empty(
-                _ok("dns_proxy", dns_proxy, {}, silent=True)
+                _ok("dns_proxy", dns_proxy, _prev.get("dns_proxy", {}), silent=True)
             )
             # IPsec diagnostics read recent router log lines on the same
             # very-slow cadence as DNS diagnostics. Missing log access is
@@ -809,11 +832,13 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # to absurd negative values on those events.
             if slow_refresh:
                 now_ts = asyncio.get_running_loop().time()
+                # A failed read re-publishes the previous snapshot, which has
+                # no new sample: carry its rates over instead of computing 0.
                 enrich_crypto_maps(
                     crypto_maps,
                     self.data.get("crypto_maps") if self.data else None,
                     now_ts,
-                    ipsec_status_refresh,
+                    ipsec_status_refresh and not crypto_maps_failed,
                 )
 
             if slow_refresh:
@@ -958,7 +983,9 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "ping_check_status": ping_check_status,
                 "_iface_fingerprint": iface_fp,
                 "crypto_maps": crypto_maps,
+                "crypto_maps_fresh": crypto_maps_fresh,
                 "dns_proxy": dns_proxy,
+                "dns_proxy_fresh": dns_proxy_fresh,
                 "ipsec_diagnostics": ipsec_diagnostics,
                 "new_clients": new_macs,
                 "online_clients": online_macs,

@@ -14,7 +14,7 @@ from homeassistant.const import UnitOfInformation, UnitOfTime, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
 from ..const import COUNTER_DEADBAND_BYTES
-from ..entity import ControllerEntity, CounterDeadbandMixin
+from ..entity import ControllerEntity, CounterDeadbandMixin, LinkActiveMixin
 from ..utils import bytes_to_mib, coerce_byte_count, coerce_seconds
 
 
@@ -82,7 +82,14 @@ class KeeneticWgUptimeSensor(_BaseWgSensor):
         return 0
 
 
-class KeeneticWgRxSensor(CounterDeadbandMixin, _BaseWgSensor):
+class _WgLinkActiveMixin(LinkActiveMixin):
+    """Gate a WireGuard traffic sensor on the profile being up."""
+
+    def _link_active(self) -> bool:
+        return bool(self._wg.get("enabled"))
+
+
+class KeeneticWgRxSensor(_WgLinkActiveMixin, CounterDeadbandMixin, _BaseWgSensor):
     """WireGuard RX (received traffic) sensor."""
     _attr_has_entity_name = True
     # RX bytes is a cumulative counter that resets when the tunnel restarts —
@@ -116,7 +123,7 @@ class KeeneticWgRxSensor(CounterDeadbandMixin, _BaseWgSensor):
         return self._publish_counter(None)
 
 
-class KeeneticWgTxSensor(CounterDeadbandMixin, _BaseWgSensor):
+class KeeneticWgTxSensor(_WgLinkActiveMixin, CounterDeadbandMixin, _BaseWgSensor):
     """WireGuard TX (sent traffic) sensor."""
     _attr_has_entity_name = True
     # See KeeneticWgRxSensor: cumulative counter → TOTAL_INCREASING.

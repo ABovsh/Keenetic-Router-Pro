@@ -33,6 +33,8 @@ class KeeneticIpsecViciOomTotalSensor(ControllerEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_name = "IPsec VICI OOM Total"
     _attr_icon = "mdi:counter"
+    # Zero on a healthy router, yet a full statistics row stream; opt in.
+    _attr_entity_registry_enabled_default = False
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_suggested_display_precision = 0
