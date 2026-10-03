@@ -44,7 +44,6 @@ from .network import (
     KeeneticWanTxThroughputSensor,
     KeeneticWanFailoverCountSensor,
     KeeneticWanDowntimeSensor,
-    KeeneticRouterDowntimeSensor,
     KeeneticWanLinkDowntimeSensor,
 )
 from .clients import (
@@ -118,7 +117,6 @@ async def async_setup_entry(
     entities.append(KeeneticCpuLoadSensor(coordinator, entry))
     entities.append(KeeneticWanFailoverCountSensor(coordinator, entry))
     entities.append(KeeneticWanDowntimeSensor(coordinator, entry))
-    entities.append(KeeneticRouterDowntimeSensor(coordinator, entry))
     entities.append(KeeneticMemoryUsageSensor(coordinator, entry))
     entities.append(KeeneticUptimeSensor(coordinator, entry))
     entities.append(KeeneticFirmwareVersionSensor(coordinator, entry))

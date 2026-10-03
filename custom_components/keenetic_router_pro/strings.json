@@ -143,9 +143,6 @@
       },
       "wan_downtime": {
         "name": "Internet Downtime"
-      },
-      "router_downtime": {
-        "name": "Router Downtime"
       }
     },
     "button": {

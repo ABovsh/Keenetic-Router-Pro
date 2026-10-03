@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from time import monotonic, time
+from time import monotonic
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -11,7 +11,7 @@ from homeassistant.components.sensor import (
     SensorDeviceClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.const import UnitOfTime, UnitOfInformation, UnitOfDataRate, EntityCategory
 
 from ..const import LINK_STATE_DOWN, LINK_STATE_UP, WAN_STATUS_CONNECTED, WAN_STATUS_LINK_UP
@@ -641,13 +641,15 @@ class _DowntimeClockMixin:
     """Accrue seconds between two observations when the earlier one was down.
 
     ``down`` is True/False for a fresh observation and None when the state is
-    unknown (the router could not be read): the clock then stops without
-    billing, so time the router itself was off is never counted twice — that
-    belongs to Router Downtime.
+    unknown: the clock then stops without billing. That covers a router HA
+    cannot read (it says nothing about the providers behind it) and the first
+    minutes after the router boots, while it brings its own uplinks up.
     """
 
     _seconds: float = 0.0
     _down_since: float | None = None
+    # PPPoE and LTE uplinks can take a few minutes to come up after a boot.
+    _BOOT_GRACE = 300
 
     @staticmethod
     def _now() -> float:
@@ -663,6 +665,14 @@ class _DowntimeClockMixin:
         if self._down_since is not None:
             self._seconds += max(0.0, now - self._down_since)
         self._down_since = now if down else None
+
+    def _router_settled(self) -> bool:
+        """Return True when the router answered and is past its boot."""
+        if not self.coordinator.last_update_success:
+            return False
+        system = (self.coordinator.data or {}).get("system") or {}
+        uptime = coerce_seconds(system.get("uptime"), default=None)
+        return uptime is None or uptime >= self._BOOT_GRACE
 
     async def _async_restore_seconds(self) -> None:
         last = await self.async_get_last_state()
@@ -722,105 +732,20 @@ class KeeneticWanDowntimeSensor(
     def _handle_coordinator_update(self) -> None:
         # A failed tick leaves the PREVIOUS payload in place; we genuinely do
         # not know the WAN state, so stop the clock instead of reading it.
-        self._accrue(
-            self._internet_down() if self.coordinator.last_update_success else None
-        )
-        super()._handle_coordinator_update()
-
-
-class _LastAliveData(ExtraStoredData):
-    """Restore payload: when the router was last seen running."""
-
-    def __init__(self, last_alive: float | None) -> None:
-        self.last_alive = last_alive
-
-    def as_dict(self) -> dict[str, Any]:
-        return {"last_alive": self.last_alive}
-
-
-class KeeneticRouterDowntimeSensor(ControllerEntity, SensorEntity, RestoreEntity):
-    """Cumulative seconds the router was switched off or rebooting.
-
-    Dated by the router itself: when it answers again, ``now - uptime`` is
-    when it booted, and everything between the last answer before and that
-    boot was downtime. That stays right when Home Assistant was down too, and
-    an unreachable router that kept running (a broken path from HA) counts
-    nothing. The last answer is kept in HA's restore data, not the recorder.
-    """
-
-    _attr_has_entity_name = True
-    _attr_translation_key = "router_downtime"
-    _attr_icon = "mdi:power-plug-off"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_device_class = SensorDeviceClass.DURATION
-    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
-    _attr_suggested_unit_of_measurement = UnitOfTime.HOURS
-    _attr_suggested_display_precision = 2
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    # Boot time is HA's clock minus the router's counter; ignore the few
-    # seconds those two disagree by.
-    _BOOT_TOLERANCE = 30.0
-
-    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
-        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
-        self._seconds = 0.0
-        self._last_alive: float | None = None
-
-    @staticmethod
-    def _wall() -> float:
-        return time()
-
-    @property
-    def unique_id(self) -> str:
-        return f"{self._entry_id}_router_downtime"
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        last = await self.async_get_last_state()
-        if last is not None and last.state not in (None, "unknown", "unavailable"):
-            try:
-                self._seconds = float(last.state)
-            except (TypeError, ValueError):
-                self._seconds = 0.0
-        extra = await self.async_get_last_extra_data()
-        if extra is not None:
-            try:
-                value = extra.as_dict().get("last_alive")
-                self._last_alive = float(value) if value is not None else None
-            except (AttributeError, TypeError, ValueError):
-                self._last_alive = None
-
-    @property
-    def extra_restore_state_data(self) -> ExtraStoredData:
-        return _LastAliveData(self._last_alive)
-
-    @property
-    def native_value(self) -> int:
-        return int(self._seconds)
-
-    def _handle_coordinator_update(self) -> None:
-        if self.coordinator.last_update_success:
-            system = (self.coordinator.data or {}).get("system") or {}
-            uptime = coerce_seconds(system.get("uptime"), default=None)
-            if uptime is not None:
-                now = self._wall()
-                boot = now - uptime
-                if (
-                    self._last_alive is not None
-                    and boot - self._last_alive > self._BOOT_TOLERANCE
-                ):
-                    self._seconds += boot - self._last_alive
-                self._last_alive = now
+        self._accrue(self._internet_down() if self._router_settled() else None)
         super()._handle_coordinator_update()
 
 
 class KeeneticWanLinkDowntimeSensor(
     _DowntimeClockMixin, _WanSensorBase, RestoreEntity
 ):
-    """Cumulative seconds this uplink was enabled but had no internet.
+    """Cumulative seconds this provider was down: link lost, or no internet.
 
-    One per WAN, so disabled by default: each one keeps long-term statistics.
-    A WAN switched off on purpose is not an outage.
+    "No internet" is the router's ping check where one is configured, else
+    the link-up-with-an-address heuristic. A WAN switched off on purpose is
+    not an outage, and nothing is counted while the router itself cannot be
+    read. VPN tunnels are WANs too but not providers, so theirs start
+    disabled.
     """
 
     _attr_icon = "mdi:web-off"
@@ -830,7 +755,7 @@ class KeeneticWanLinkDowntimeSensor(
     _attr_suggested_unit_of_measurement = UnitOfTime.HOURS
     _attr_suggested_display_precision = 2
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_entity_registry_enabled_default = False
+    _TUNNEL_TYPES = frozenset({"wireguard", "openvpn"})
 
     def __init__(
         self, coordinator: KeeneticCoordinator, entry: ConfigEntry, wan_id: str
@@ -838,6 +763,9 @@ class KeeneticWanLinkDowntimeSensor(
         _WanSensorBase.__init__(self, coordinator, entry, wan_id)
         self._seconds = 0.0
         self._down_since = None
+        wan_type = str((self._wan or {}).get("type") or "").lower()
+        if wan_type in self._TUNNEL_TYPES:
+            self._attr_entity_registry_enabled_default = False
 
     @property
     def unique_id(self) -> str:
@@ -861,15 +789,20 @@ class KeeneticWanLinkDowntimeSensor(
     def native_value(self) -> int:
         return int(self._seconds)
 
+    @staticmethod
+    def _provider_down(wan: dict[str, Any]) -> bool:
+        if not wan.get("enabled"):
+            return False
+        raw = wan.get("raw") if isinstance(wan.get("raw"), dict) else {}
+        link_up = wan.get("link_state") == LINK_STATE_UP and str(
+            raw.get("link") or LINK_STATE_UP
+        ).lower() == LINK_STATE_UP
+        return not link_up or wan.get("internet_access") is False
+
     def _handle_coordinator_update(self) -> None:
         before = int(self._seconds)
-        wan = self._wan if self.coordinator.last_update_success else None
-        if wan is None:
-            self._accrue(None)
-        else:
-            self._accrue(
-                bool(wan.get("enabled")) and wan.get("internet_access") is False
-            )
+        wan = self._wan if self._router_settled() else None
+        self._accrue(None if wan is None else self._provider_down(wan))
         if int(self._seconds) != before:
             self.async_write_ha_state()
             return

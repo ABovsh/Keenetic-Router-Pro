@@ -1049,7 +1049,7 @@ async def test_coordinator_carries_mesh_firmware_available() -> None:
     assert data["mesh_nodes"][0]["firmware_available"] == "2"
 
 
-# ---------- Downtime: router off, internet down, per uplink ----------
+# ---------- Downtime: per provider, never while the router is unreachable ----------
 
 
 def _downtime_coordinator(keenetic_coordinator_factory, data):
@@ -1058,99 +1058,27 @@ def _downtime_coordinator(keenetic_coordinator_factory, data):
     return coordinator
 
 
-def test_router_downtime_counts_the_gap_before_a_reboot(
-    keenetic_entry, keenetic_coordinator_factory
-) -> None:
-    """Power cut at Yakhny: the router's own uptime dates the outage.
-
-    It works even when Home Assistant was down too, because the boot time
-    comes from the router, not from HA watching the outage.
-    """
+def _wan_downtime(keenetic_entry, keenetic_coordinator_factory, wan, *, uptime=86_400):
     from custom_components.keenetic_router_pro.sensor.network import (
-        KeeneticRouterDowntimeSensor,
+        KeeneticWanLinkDowntimeSensor,
     )
 
-    data = {"system": {"uptime": 500_000}}
+    data = {
+        "system": {"uptime": uptime},
+        "wan_interfaces": [wan],
+        "wan_by_id": {wan["id"]: wan},
+    }
     coordinator = _downtime_coordinator(keenetic_coordinator_factory, data)
-    sensor = KeeneticRouterDowntimeSensor(coordinator, keenetic_entry)
+    sensor = KeeneticWanLinkDowntimeSensor(coordinator, keenetic_entry, wan["id"])
     sensor.async_write_ha_state = lambda: None
-    clock = {"now": 1_000_000.0}
-    sensor._wall = lambda: clock["now"]
-
-    sensor._handle_coordinator_update()
-    assert sensor.native_value == 0
-
-    # Router unreachable for a while: nothing is known, nothing is counted.
-    clock["now"] += 600
-    coordinator.last_update_success = False
-    sensor._handle_coordinator_update()
-    assert sensor.native_value == 0
-
-    # Back after 1 h; it has been up for 50 min, so it was off for 10 min.
-    clock["now"] = 1_000_000.0 + 3_600
-    coordinator.last_update_success = True
-    data["system"]["uptime"] = 3_000
-    sensor._handle_coordinator_update()
-    assert sensor.native_value == 600
-
-    # Next ordinary poll adds nothing.
-    clock["now"] += 60
-    data["system"]["uptime"] = 3_060
-    sensor._handle_coordinator_update()
-    assert sensor.native_value == 600
+    return coordinator, data, sensor
 
 
-def test_router_downtime_ignores_an_unreachable_router_that_stayed_up(
-    keenetic_entry, keenetic_coordinator_factory
-) -> None:
-    from custom_components.keenetic_router_pro.sensor.network import (
-        KeeneticRouterDowntimeSensor,
-    )
+def test_router_downtime_sensor_is_gone() -> None:
+    """Only provider downtime is wanted; router-off time is not a provider fault."""
+    from custom_components.keenetic_router_pro.sensor import network
 
-    data = {"system": {"uptime": 1_000}}
-    coordinator = _downtime_coordinator(keenetic_coordinator_factory, data)
-    sensor = KeeneticRouterDowntimeSensor(coordinator, keenetic_entry)
-    sensor.async_write_ha_state = lambda: None
-    clock = {"now": 10_000.0}
-    sensor._wall = lambda: clock["now"]
-    sensor._handle_coordinator_update()
-
-    clock["now"] += 1_800
-    data["system"]["uptime"] = 2_800
-    sensor._handle_coordinator_update()
-
-    assert sensor.native_value == 0
-
-
-async def test_router_downtime_survives_a_home_assistant_restart(
-    keenetic_entry, keenetic_coordinator_factory
-) -> None:
-    from types import SimpleNamespace
-
-    from custom_components.keenetic_router_pro.sensor.network import (
-        KeeneticRouterDowntimeSensor,
-    )
-
-    data = {"system": {"uptime": 120}}
-    coordinator = _downtime_coordinator(keenetic_coordinator_factory, data)
-    sensor = KeeneticRouterDowntimeSensor(coordinator, keenetic_entry)
-    sensor.async_write_ha_state = lambda: None
-    sensor._wall = lambda: 50_000.0
-
-    async def last_state():
-        return SimpleNamespace(state="300")
-
-    async def last_extra():
-        return SimpleNamespace(as_dict=lambda: {"last_alive": 49_000.0})
-
-    sensor.async_get_last_state = last_state
-    sensor.async_get_last_extra_data = last_extra
-    await sensor.async_added_to_hass()
-
-    # Booted at 49 880, last seen alive at 49 000: off for 880 s.
-    sensor._handle_coordinator_update()
-    assert sensor.native_value == 300 + 880
-    assert sensor.extra_restore_state_data.as_dict() == {"last_alive": 50_000.0}
+    assert not hasattr(network, "KeeneticRouterDowntimeSensor")
 
 
 def test_internet_downtime_counts_wans_without_internet_not_just_no_gateway(
@@ -1176,7 +1104,7 @@ def test_internet_downtime_counts_wans_without_internet_not_just_no_gateway(
 def test_internet_downtime_does_not_bill_an_unreachable_router(
     keenetic_entry, keenetic_coordinator_factory
 ) -> None:
-    """Router-off time belongs to Router Downtime; counting it twice inflates both."""
+    """An unreachable router says nothing about the providers behind it."""
     wan = {"id": "ISP", "enabled": True, "internet_access": False}
     data = {"wan_interfaces": [wan]}
     coordinator = _downtime_coordinator(keenetic_coordinator_factory, data)
@@ -1194,37 +1122,149 @@ def test_internet_downtime_does_not_bill_an_unreachable_router(
     assert sensor.native_value == 60
 
 
-def test_per_wan_downtime_counts_only_an_enabled_uplink_without_internet(
+def test_per_wan_downtime_counts_a_link_that_is_down(
     keenetic_entry, keenetic_coordinator_factory
 ) -> None:
-    from custom_components.keenetic_router_pro.sensor.network import (
-        KeeneticWanLinkDowntimeSensor,
-    )
+    """Cable or radio link lost: the provider is down whatever else is known."""
+    wan = {"id": "ISP2", "enabled": True, "link_state": "down"}
+    _, _, sensor = _wan_downtime(keenetic_entry, keenetic_coordinator_factory, wan)
+    clock = iter([0.0, 120.0])
+    sensor._now = lambda: next(clock)
 
-    wan = {"id": "LTE", "enabled": True, "internet_access": False}
-    data = {"wan_interfaces": [wan], "wan_by_id": {"LTE": wan}}
-    coordinator = _downtime_coordinator(keenetic_coordinator_factory, data)
-    sensor = KeeneticWanLinkDowntimeSensor(coordinator, keenetic_entry, "LTE")
-    sensor.async_write_ha_state = lambda: None
+    sensor._handle_coordinator_update()
+    sensor._handle_coordinator_update()
+
+    assert sensor.native_value == 120
+
+
+def test_per_wan_downtime_counts_a_physical_link_down_under_an_up_interface(
+    keenetic_entry, keenetic_coordinator_factory
+) -> None:
+    """SimNet at NH: interface ``state`` up, port ``link`` down, no address."""
+    wan = {
+        "id": "GigabitEthernet0/Vlan6",
+        "enabled": True,
+        "link_state": "up",
+        "internet_access": None,
+        "raw": {"state": "up", "link": "down"},
+    }
+    _, _, sensor = _wan_downtime(keenetic_entry, keenetic_coordinator_factory, wan)
+    clock = iter([0.0, 120.0])
+    sensor._now = lambda: next(clock)
+
+    sensor._handle_coordinator_update()
+    sensor._handle_coordinator_update()
+
+    assert sensor.native_value == 120
+
+
+def test_per_wan_downtime_counts_a_failing_ping_check_on_an_up_link(
+    keenetic_entry, keenetic_coordinator_factory
+) -> None:
+    wan = {
+        "id": "ISP1",
+        "enabled": True,
+        "link_state": "up",
+        "internet_access": False,
+        "internet_access_source": "ping_check",
+        "raw": {"state": "up", "link": "up"},
+    }
+    _, _, sensor = _wan_downtime(keenetic_entry, keenetic_coordinator_factory, wan)
+    clock = iter([0.0, 120.0, 240.0])
+    sensor._now = lambda: next(clock)
+
+    sensor._handle_coordinator_update()
+    sensor._handle_coordinator_update()          # +120
+    wan["internet_access"] = True
+    sensor._handle_coordinator_update()          # +120, then the clock stops
+
+    assert sensor.native_value == 240
+
+
+def test_per_wan_downtime_skips_a_wan_switched_off_on_purpose(
+    keenetic_entry, keenetic_coordinator_factory
+) -> None:
+    wan = {"id": "LTE", "enabled": True, "link_state": "up", "internet_access": False}
+    _, _, sensor = _wan_downtime(keenetic_entry, keenetic_coordinator_factory, wan)
     clock = iter([0.0, 60.0, 120.0, 180.0])
     sensor._now = lambda: next(clock)
 
     sensor._handle_coordinator_update()          # t=0 down
     sensor._handle_coordinator_update()          # t=60, +60
     wan["enabled"] = False
+    wan["link_state"] = "down"
     sensor._handle_coordinator_update()          # t=120 seen off: bills 60..120
     sensor._handle_coordinator_update()          # t=180 off: nothing
 
     assert sensor.native_value == 120
-    assert KeeneticWanLinkDowntimeSensor._attr_entity_registry_enabled_default is False
     assert sensor.unique_id == "entry_123_wan_LTE_downtime"
 
 
+def test_per_wan_downtime_does_not_bill_an_unreachable_router(
+    keenetic_entry, keenetic_coordinator_factory
+) -> None:
+    wan = {"id": "ISP1", "enabled": True, "link_state": "down"}
+    coordinator, _, sensor = _wan_downtime(
+        keenetic_entry, keenetic_coordinator_factory, wan
+    )
+    clock = iter([0.0, 3_600.0, 3_660.0])
+    sensor._now = lambda: next(clock)
+
+    sensor._handle_coordinator_update()          # t=0, down
+    coordinator.last_update_success = False
+    sensor._handle_coordinator_update()          # unreachable: nothing known
+    coordinator.last_update_success = True
+    sensor._handle_coordinator_update()          # t=3600, down again
+    sensor._handle_coordinator_update()          # t=3660
+
+    assert sensor.native_value == 60
+
+
+@pytest.mark.parametrize("uptime", [30, 299])
+def test_downtime_ignores_uplinks_still_coming_up_after_a_router_boot(
+    keenetic_entry, keenetic_coordinator_factory, uptime
+) -> None:
+    """A rebooted router brings its links up in its own time; not a provider fault."""
+    wan = {"id": "ISP1", "enabled": True, "link_state": "down"}
+    coordinator, data, sensor = _wan_downtime(
+        keenetic_entry, keenetic_coordinator_factory, wan, uptime=uptime
+    )
+    internet = KeeneticWanDowntimeSensor(coordinator, keenetic_entry)
+    internet.async_write_ha_state = lambda: None
+    clock = iter([0.0, 60.0, 600.0, 660.0])
+    sensor._now = lambda: next(clock)
+    clock2 = iter([0.0, 60.0, 600.0, 660.0])
+    internet._now = lambda: next(clock2)
+
+    for entity in (sensor, internet):
+        entity._handle_coordinator_update()
+        entity._handle_coordinator_update()
+    assert sensor.native_value == 0
+    assert internet.native_value == 0
+
+    data["system"]["uptime"] = 900               # settled: a real outage again
+    for entity in (sensor, internet):
+        entity._handle_coordinator_update()
+        entity._handle_coordinator_update()
+    assert sensor.native_value == 60
+    assert internet.native_value == 60
+
+
 @pytest.mark.parametrize(
-    "sensor_name", ["KeeneticRouterDowntimeSensor", "KeeneticWanDowntimeSensor"]
+    ("wan_type", "enabled"),
+    [("GigabitEthernet", True), ("Vlan", True), ("PPPoE", True), ("Wireguard", False), ("OpenVPN", False)],
 )
-def test_router_and_internet_downtime_are_on_by_default(sensor_name) -> None:
+def test_per_wan_downtime_is_on_for_providers_and_off_for_vpn_tunnels(
+    keenetic_entry, keenetic_coordinator_factory, wan_type, enabled
+) -> None:
+    wan = {"id": "W", "type": wan_type, "enabled": True, "link_state": "up"}
+    _, _, sensor = _wan_downtime(keenetic_entry, keenetic_coordinator_factory, wan)
+
+    assert getattr(sensor, "_attr_entity_registry_enabled_default", True) is enabled
+
+
+def test_internet_downtime_is_on_by_default() -> None:
     from custom_components.keenetic_router_pro.sensor import network
 
-    cls = getattr(network, sensor_name)
+    cls = network.KeeneticWanDowntimeSensor
     assert getattr(cls, "_attr_entity_registry_enabled_default", True) is True
