@@ -1340,3 +1340,76 @@ async def test_downtime_restores_the_published_total(
     sensor._handle_coordinator_update()
 
     assert sensor.native_value == 7200
+
+
+# ---------- Bandwidth Limit reads the router's traffic-shape ----------
+
+
+class _ShapeApi:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int]] = []
+
+    async def async_set_client_rate_limit(self, mac: str, value: int) -> None:
+        self.calls.append((mac, value))
+
+
+def _shape_number(shape: dict[str, Any] | None):
+    from types import SimpleNamespace
+
+    from custom_components.keenetic_router_pro.number import (
+        KeeneticClientRateLimitNumber,
+    )
+
+    host = {"mac": "aa:bb:cc:dd:ee:ff", "active": True}
+    if shape is not None:
+        host["traffic-shape"] = shape
+    coordinator = SimpleNamespace(
+        data={"clients_by_mac": {"aa:bb:cc:dd:ee:ff": host}},
+        last_update_success=True,
+    )
+    entity = KeeneticClientRateLimitNumber(
+        coordinator,
+        SimpleNamespace(entry_id="entry", title="Router"),
+        _ShapeApi(),
+        "aa:bb:cc:dd:ee:ff",
+        "Laptop",
+    )
+    entity.async_write_ha_state = lambda: None
+    return entity, host
+
+
+def test_bandwidth_limit_shows_a_limit_set_in_the_router_web_ui() -> None:
+    """KeeneticOS reports the download cap as ``tx`` (router to client)."""
+    entity, _ = _shape_number({"rx": 512, "tx": 1024, "mode": "mac", "schedule": ""})
+
+    assert entity.native_value == 1024
+
+
+def test_bandwidth_limit_shows_zero_once_the_router_drops_the_limit() -> None:
+    entity, host = _shape_number({"rx": 2048, "tx": 2048, "mode": "mac"})
+    entity._limit_kbps = 2048                    # restored from before
+
+    host["traffic-shape"] = {"rx": 0, "tx": 0, "mode": "mac", "schedule": ""}
+
+    assert entity.native_value == 0
+
+
+def test_bandwidth_limit_keeps_the_written_value_until_the_next_poll() -> None:
+    import asyncio
+
+    entity, host = _shape_number({"rx": 0, "tx": 0, "mode": "mac"})
+    asyncio.run(entity.async_set_native_value(4096))
+    assert entity.native_value == 4096           # the router has it; HA has not polled yet
+
+    host["traffic-shape"] = {"rx": 4096, "tx": 4096, "mode": "mac"}
+    entity._handle_coordinator_update()
+    host["traffic-shape"] = {"rx": 0, "tx": 0, "mode": "mac"}    # removed in the web UI
+    entity._handle_coordinator_update()
+    assert entity.native_value == 0
+
+
+def test_bandwidth_limit_falls_back_to_its_own_value_without_router_data() -> None:
+    entity, _ = _shape_number(None)
+    entity._limit_kbps = 768
+
+    assert entity.native_value == 768
