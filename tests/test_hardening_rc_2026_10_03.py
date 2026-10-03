@@ -528,3 +528,90 @@ def test_wireguard_uptime_is_not_gated(
 )
 def test_zero_on_healthy_counters_are_disabled_by_default(sensor_cls) -> None:
     assert sensor_cls._attr_entity_registry_enabled_default is False
+
+
+# ---------- show/log on KeeneticOS 5.x ----------
+
+# Shape of ``POST /rci/ {"show": {"log": ...}}`` on KeeneticOS 5.1.6 (OP Titan,
+# 2026-10-03): records keyed by ascending id, oldest first; the text is nested
+# one level down and the time lives in ``timestamp`` on the outer record.
+_LIVE_LOG = {
+    "show": {
+        "log": {
+            "4216": {
+                "message": {"level": "Info", "label": "I", "message": "DHCPREQUEST received. "},
+                "timestamp": "Oct  3 09:50:01",
+                "ident": "ndhcps",
+                "id": 4216,
+            },
+            "4217": {
+                "message": {
+                    "level": "Critical",
+                    "label": "C",
+                    "message": "IpSec::Vici::Stats: out of memory [0xcffe02b0]. ",
+                },
+                "timestamp": "Oct  3 09:56:28",
+                "ident": "ndm",
+                "id": 4217,
+            },
+            "4218": {
+                "message": {
+                    "level": "Critical",
+                    "label": "C",
+                    "message": "IpSec::Vici::Stats: out of memory [0xcffe0300]. ",
+                },
+                "timestamp": "Oct  3 10:06:28",
+                "ident": "ndm",
+                "id": 4218,
+            },
+        }
+    }
+}
+
+
+def test_log_entries_carry_the_time_of_keeneticos_5_records() -> None:
+    from custom_components.keenetic_router_pro.api.helpers import _extract_log_entries
+
+    entries = _extract_log_entries(_LIVE_LOG)
+
+    assert [e["time"] for e in entries] == [
+        "Oct  3 10:06:28",
+        "Oct  3 09:56:28",
+        "Oct  3 09:50:01",
+    ]
+    assert entries[0]["module"] == "ndm"
+    assert entries[0]["level"] == "Critical"
+
+
+async def test_ipsec_diagnostics_events_are_timestamped_newest_first() -> None:
+    """Without a time every event was dropped and the OOM total stayed 0."""
+    client = _client()
+    client._rci_post = AsyncMock(return_value=_LIVE_LOG)
+
+    diag = await client.async_get_ipsec_diagnostics()
+
+    assert diag["vici_out_of_memory_count"] == 2
+    assert diag["last_error_code"] == "0xcffe0300"
+    assert [t for t, _ in diag["events"]] == ["Oct  3 10:06:28", "Oct  3 09:56:28"]
+
+
+def test_oom_total_counts_live_shaped_events() -> None:
+    from datetime import datetime
+
+    from custom_components.keenetic_router_pro.api.helpers import _extract_log_entries
+    from custom_components.keenetic_router_pro.api.parsers.ipsec import (
+        parse_ipsec_vici_diagnostics,
+    )
+    from custom_components.keenetic_router_pro.coordinator_parts.oom import (
+        advance_oom_state,
+    )
+
+    events = parse_ipsec_vici_diagnostics([], entries=_extract_log_entries(_LIVE_LOG))["events"]
+    state = advance_oom_state(
+        {"last_seen_iso": None, "last_seen_count": 0, "total": 0},
+        events,
+        now=datetime(2026, 10, 3, 11, 0, 0),
+    )
+
+    assert state["total"] == 2
+    assert state["last_seen_iso"] == "2026-10-03T10:06:28"

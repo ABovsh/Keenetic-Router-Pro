@@ -193,12 +193,18 @@ def _extract_log_entries(data: Any) -> List[dict]:
     def _walk(v: Any) -> None:
         if isinstance(v, dict):
             msg = v.get("message")
-            if isinstance(msg, str):
+            # KeeneticOS 5.x nests the text one level down
+            # ({"message": {"level", "message"}, "timestamp", "ident", "id"});
+            # the record's time and source stay on the outer dict.
+            inner = msg if isinstance(msg, dict) and isinstance(msg.get("message"), str) else None
+            text = inner["message"] if inner is not None else msg
+            if isinstance(text, str):
                 entries.append({
-                    "time": v.get("time"),
-                    "level": v.get("level"),
+                    "time": v.get("time") or v.get("timestamp"),
+                    "level": v.get("level") or (inner or {}).get("level"),
                     "module": v.get("module") or v.get("service") or v.get("ident"),
-                    "message": msg,
+                    "message": text,
+                    "_id": v.get("id"),
                 })
                 return
             for nested in v.values():
@@ -208,6 +214,13 @@ def _extract_log_entries(data: Any) -> List[dict]:
                 _walk(item)
 
     _walk(data)
+    # KeeneticOS 5.x returns records keyed by ascending id, i.e. oldest first;
+    # callers rely on newest first. Order by id whenever every record has one.
+    ids = [entry["_id"] for entry in entries]
+    if ids and all(isinstance(i, int) and not isinstance(i, bool) for i in ids):
+        entries.sort(key=lambda entry: entry["_id"], reverse=True)
+    for entry in entries:
+        del entry["_id"]
     return entries
 
 
