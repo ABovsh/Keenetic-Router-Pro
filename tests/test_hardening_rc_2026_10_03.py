@@ -1119,7 +1119,7 @@ def test_internet_downtime_does_not_bill_an_unreachable_router(
     coordinator.last_update_success = True
     sensor._handle_coordinator_update()          # t=5000, still down
     sensor._handle_coordinator_update()          # t=5060
-    assert sensor.native_value == 60
+    assert int(sensor._seconds) == 60
 
 
 def test_per_wan_downtime_counts_a_link_that_is_down(
@@ -1134,7 +1134,7 @@ def test_per_wan_downtime_counts_a_link_that_is_down(
     sensor._handle_coordinator_update()
     sensor._handle_coordinator_update()
 
-    assert sensor.native_value == 120
+    assert int(sensor._seconds) == 120
 
 
 def test_per_wan_downtime_counts_a_physical_link_down_under_an_up_interface(
@@ -1155,7 +1155,7 @@ def test_per_wan_downtime_counts_a_physical_link_down_under_an_up_interface(
     sensor._handle_coordinator_update()
     sensor._handle_coordinator_update()
 
-    assert sensor.native_value == 120
+    assert int(sensor._seconds) == 120
 
 
 def test_per_wan_downtime_counts_a_failing_ping_check_on_an_up_link(
@@ -1217,7 +1217,7 @@ def test_per_wan_downtime_does_not_bill_an_unreachable_router(
     sensor._handle_coordinator_update()          # t=3600, down again
     sensor._handle_coordinator_update()          # t=3660
 
-    assert sensor.native_value == 60
+    assert int(sensor._seconds) == 60
 
 
 @pytest.mark.parametrize("uptime", [30, 299])
@@ -1239,15 +1239,15 @@ def test_downtime_ignores_uplinks_still_coming_up_after_a_router_boot(
     for entity in (sensor, internet):
         entity._handle_coordinator_update()
         entity._handle_coordinator_update()
-    assert sensor.native_value == 0
-    assert internet.native_value == 0
+    assert int(sensor._seconds) == 0
+    assert int(internet._seconds) == 0
 
     data["system"]["uptime"] = 900               # settled: a real outage again
     for entity in (sensor, internet):
         entity._handle_coordinator_update()
         entity._handle_coordinator_update()
-    assert sensor.native_value == 60
-    assert internet.native_value == 60
+    assert int(sensor._seconds) == 60
+    assert int(internet._seconds) == 60
 
 
 @pytest.mark.parametrize(
@@ -1268,3 +1268,75 @@ def test_internet_downtime_is_on_by_default() -> None:
 
     cls = network.KeeneticWanDowntimeSensor
     assert getattr(cls, "_attr_entity_registry_enabled_default", True) is True
+
+
+def test_per_wan_downtime_writes_every_five_minutes_during_a_long_outage(
+    keenetic_entry, keenetic_coordinator_factory
+) -> None:
+    """A dead backup uplink must not cost a states row every minute."""
+    wan = {"id": "ISP2", "enabled": True, "link_state": "down"}
+    _, _, sensor = _wan_downtime(keenetic_entry, keenetic_coordinator_factory, wan)
+    writes = []
+
+    def write():
+        # HA stores a states row only when the value changes.
+        if not writes or writes[-1] != sensor.native_value:
+            writes.append(sensor.native_value)
+
+    sensor.async_write_ha_state = write
+    ticks = [float(60 * i) for i in range(12)]   # 0 .. 660 s, one per minute
+    clock = iter(ticks + [690.0])
+    sensor._now = lambda: next(clock)
+
+    for _ in ticks:
+        sensor._handle_coordinator_update()
+    assert writes == [0, 300, 600]
+
+    wan["link_state"] = "up"                     # recovered at 690 s
+    wan["internet_access"] = True
+    sensor._handle_coordinator_update()
+    assert writes == [0, 300, 600, 690]
+    assert sensor.native_value == 690
+
+
+def test_internet_downtime_holds_its_value_between_five_minute_steps(
+    keenetic_entry, keenetic_coordinator_factory
+) -> None:
+    wan = {"id": "ISP", "enabled": True, "internet_access": False}
+    data = {"wan_interfaces": [wan]}
+    coordinator = _downtime_coordinator(keenetic_coordinator_factory, data)
+    sensor = KeeneticWanDowntimeSensor(coordinator, keenetic_entry)
+    sensor.async_write_ha_state = lambda: None
+    clock = iter([0.0, 60.0, 120.0, 310.0, 400.0])
+    sensor._now = lambda: next(clock)
+
+    seen = []
+    for _ in range(4):
+        sensor._handle_coordinator_update()
+        seen.append(sensor.native_value)
+    assert seen == [0, 0, 0, 310]
+
+    coordinator.last_update_success = False      # router lost: publish what we have
+    sensor._handle_coordinator_update()
+    assert sensor.native_value == 310
+
+
+async def test_downtime_restores_the_published_total(
+    keenetic_entry, keenetic_coordinator_factory
+) -> None:
+    from types import SimpleNamespace
+
+    wan = {"id": "ISP2", "enabled": True, "link_state": "down"}
+    _, _, sensor = _wan_downtime(keenetic_entry, keenetic_coordinator_factory, wan)
+
+    async def last_state():
+        return SimpleNamespace(state="7200")
+
+    sensor.async_get_last_state = last_state
+    await sensor.async_added_to_hass()
+    clock = iter([0.0, 60.0])
+    sensor._now = lambda: next(clock)
+    sensor._handle_coordinator_update()
+    sensor._handle_coordinator_update()
+
+    assert sensor.native_value == 7200

@@ -648,8 +648,13 @@ class _DowntimeClockMixin:
 
     _seconds: float = 0.0
     _down_since: float | None = None
+    _published: int = 0
     # PPPoE and LTE uplinks can take a few minutes to come up after a boot.
     _BOOT_GRACE = 300
+    # While an outage runs, publish the total every five minutes (the
+    # recorder's statistics period) instead of every poll; the exact total
+    # is published as soon as it ends.
+    _PUBLISH_STEP = 300
 
     @staticmethod
     def _now() -> float:
@@ -666,6 +671,16 @@ class _DowntimeClockMixin:
             self._seconds += max(0.0, now - self._down_since)
         self._down_since = now if down else None
 
+    def _settle_published(self) -> bool:
+        """Move the published total forward when due; True when it moved."""
+        seconds = int(self._seconds)
+        if seconds == self._published:
+            return False
+        if self._down_since is None or seconds - self._published >= self._PUBLISH_STEP:
+            self._published = seconds
+            return True
+        return False
+
     def _router_settled(self) -> bool:
         """Return True when the router answered and is past its boot."""
         if not self.coordinator.last_update_success:
@@ -681,6 +696,7 @@ class _DowntimeClockMixin:
                 self._seconds = float(last.state)
             except (TypeError, ValueError):
                 self._seconds = 0.0
+        self._published = int(self._seconds)
 
 
 class KeeneticWanDowntimeSensor(
@@ -720,7 +736,7 @@ class KeeneticWanDowntimeSensor(
 
     @property
     def native_value(self) -> int:
-        return int(self._seconds)
+        return self._published
 
     def _internet_down(self) -> bool:
         data = self.coordinator.data or {}
@@ -733,6 +749,7 @@ class KeeneticWanDowntimeSensor(
         # A failed tick leaves the PREVIOUS payload in place; we genuinely do
         # not know the WAN state, so stop the clock instead of reading it.
         self._accrue(self._internet_down() if self._router_settled() else None)
+        self._settle_published()
         super()._handle_coordinator_update()
 
 
@@ -787,7 +804,7 @@ class KeeneticWanLinkDowntimeSensor(
 
     @property
     def native_value(self) -> int:
-        return int(self._seconds)
+        return self._published
 
     @staticmethod
     def _provider_down(wan: dict[str, Any]) -> bool:
@@ -800,10 +817,9 @@ class KeeneticWanLinkDowntimeSensor(
         return not link_up or wan.get("internet_access") is False
 
     def _handle_coordinator_update(self) -> None:
-        before = int(self._seconds)
         wan = self._wan if self._router_settled() else None
         self._accrue(None if wan is None else self._provider_down(wan))
-        if int(self._seconds) != before:
+        if self._settle_published():
             self.async_write_ha_state()
             return
         super()._handle_coordinator_update()

@@ -286,7 +286,8 @@ def test_downtime_accrues_only_while_every_wan_is_down() -> None:
     assert sensor.native_value == 0  # nothing accrued yet, outage just started
 
     sensor._handle_coordinator_update()  # t=220, still down for 60 s
-    assert sensor.native_value == 60
+    assert int(sensor._seconds) == 60
+    assert sensor.native_value == 0  # published in five-minute steps
 
     coordinator.data["active_wan"] = "LTE"
     sensor._handle_coordinator_update()  # t=280, recovered
