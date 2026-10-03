@@ -10,9 +10,29 @@ git log.
 
 ## Unreleased
 
+### Security
+
+- Downloaded diagnostics no longer contain client MAC addresses (they were still present under `via`), client IPv6 addresses, the public endpoints of WireGuard, IPsec and KeenDNS tunnels, the KeenDNS name, or interface descriptions (free text that may hold a contract or phone number).
+
 ### Bug fixes
 
 - The combined data request now goes to `/rci/`. It was sent to `/rci`, which the router rejects with HTTP 405, so every update fell back to separate requests. On routers reached through a KeenDNS address with authentication, each rejected request also added a `Lockout … invalid address '127.0.0.1'` line to the router's system log.
+- IPsec VICI OOM Total now counts events on KeeneticOS 5.x. The router's log format changed and every event was read without a time, so the counter stayed at 0.
+- Wi-Fi, WAN and VPN switches now save the router configuration. Before, the router undid the change at its next reboot.
+- A single failed IPsec status read no longer shows site-to-site tunnels as down with 0 bytes, or makes their entities unavailable, for three minutes. The last known state is kept; after three failed reads in a row the entities become unavailable.
+- A single failed DNS proxy read no longer shows DNS Proxy Status as unknown for 15 minutes. DNS Proxy Status reports down only when at least 20 queries went unanswered, not after a few queries still in flight.
+- Wi-Fi Session no longer moves forward by about 90 seconds every half hour during one session.
+- A mesh node is no longer added a second time, under its MAC address, when the controller briefly returns an empty member list.
+- Router and mesh-node uptime, and Active Connections, show unknown instead of 0 when the router reports no value.
+- Connection Policy `is_registered` now shows the router's registration flag; it was always false.
+- Removing an entry also removes its "unsupported features" notice from Repairs.
+
+### Improvements
+
+- Each update now usually needs one request instead of about twenty. The neighbour table is read from the combined request instead of a separate command, and mesh members are included on the slow tier.
+- Traffic counters and throughput of a WAN without link, of a site-to-site tunnel that is not established, and of a WireGuard profile that is down are unavailable instead of 0. This removes their long-term statistics rows while the link is down.
+- WAN Connected `all_ping_check_profiles` lists each profile's name, status and hosts; the per-poll success and fail counters were removed from it.
+- IPsec VICI OOM Total and WAN Downtime are disabled by default on new installations. Existing entities are not changed.
 
 ## 1.18.0
 

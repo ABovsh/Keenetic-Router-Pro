@@ -113,7 +113,8 @@ implemented here as of 1.9.0 — see **Bandwidth Limit** under Entities.
 - IPsec VICI OOM Total: a monotonic counter of
   `IpSec::Vici::Stats: out of memory` events from the router log,
   persisted across HA restarts and HA-Statistics-friendly for
-  `events/hour` graphs.
+  `events/hour` graphs. Disabled by default on new installations, like
+  WAN Downtime: both stay at 0 on a healthy router.
 - WAN and IPsec throughput shown in Mbit/s with automatic unit conversion (kbit/s ↔ Mbit/s ↔ Gbit/s) in the HA entity UI.
 - WAN interface devices group status, public IP, role, traffic counters,
   throughput and enable/disable control for each uplink.
@@ -213,7 +214,10 @@ published on a slower tier than they are polled, and the Wi-Fi session sensor
 reports when the session started rather than counting seconds. Traffic
 counters, throughput and the connection-count gauge each hold their last
 published value until it moves by a meaningful amount, so a busy link does not
-write a row per poll for a change no graph can render.
+write a row per poll for a change no graph can render. The counters of a WAN
+without link, a site-to-site tunnel that is not established or a WireGuard
+profile that is down are unavailable rather than 0, which records no
+long-term statistics while the link is down.
 
 If you want to cut it further:
 
