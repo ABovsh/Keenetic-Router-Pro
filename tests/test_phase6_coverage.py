@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from conftest import elapsed_seconds
+
 from datetime import datetime
 
 from conftest import (
@@ -314,7 +316,7 @@ def test_system_and_wifi_sensors_cover_alternate_payload_shapes() -> None:
     entry = _entry()
 
     assert KeeneticMemoryUsageSensor(coordinator, entry).native_value == pytest.approx(75.0)
-    assert KeeneticUptimeSensor(coordinator, entry).native_value == 42
+    assert elapsed_seconds(KeeneticUptimeSensor(coordinator, entry).native_value) == pytest.approx(42, abs=2)
     firmware = KeeneticFirmwareVersionSensor(coordinator, entry)
     assert firmware.native_value == "4.2.1"
     assert firmware.extra_state_attributes == {
@@ -763,7 +765,9 @@ async def test_wan_network_vpn_wifi_domain_branches_pin_router_shapes() -> None:
     await client.async_set_wireguard_enabled("Wireguard0", True)
     assert [call.args[0] for call in client._rci_parse.await_args_list] == [
         "interface WifiMaster0/AccessPoint0 down",
+        "system configuration save",
         "interface Wireguard0 up",
+        "system configuration save",
     ]
 
 

@@ -13,7 +13,7 @@ from .const import FIELD_CONNECTED, LINK_STATE_UP
 from .coordinator import KeeneticCoordinator
 from .entity import MeshEntity, ControllerEntity, WanEntity, CryptoMapEntity
 from .entity_setup import DynamicEntityTracker, register_dynamic_entities
-from .utils import iter_new_items
+from .utils import coerce_int, iter_new_items
 
 # Read-only coordinator-driven platform: no writes to serialize, no limit needed.
 PARALLEL_UPDATES = 0
@@ -195,8 +195,14 @@ class KeeneticWanConnectedSensor(WanEntity, BinarySensorEntity):
             # was 96 of the 104 rows/day this entity wrote. While the check is
             # passing the count is noise; once it is failing it is the whole
             # diagnostic story, so publish it only then.
-            if pc.get("passing") is False and pc.get("fail_count") is not None:
-                attrs["fail_count"] = pc.get("fail_count")
+            # Past ``max_fails`` the router keeps counting for the whole
+            # outage; capped there, a failing check writes no row per poll.
+            fail_count = coerce_int(pc.get("fail_count"), None)
+            max_fails = coerce_int(pc.get("max_fails"), None)
+            if fail_count is not None and max_fails:
+                fail_count = min(fail_count, max_fails)
+            if pc.get("passing") is False and fail_count is not None:
+                attrs["fail_count"] = fail_count
             if pc.get("max_fails") is not None:
                 attrs["max_fails"] = pc.get("max_fails")
             if pc.get("update_interval") is not None:
@@ -207,8 +213,8 @@ class KeeneticWanConnectedSensor(WanEntity, BinarySensorEntity):
             # free-form reason string, so we synthesise one from the
             # counters when the check is failing.
             if pc.get("passing") is False:
-                fc = pc.get("fail_count") or 0
-                mf = pc.get("max_fails")
+                fc = fail_count or 0
+                mf = max_fails
                 if mf:
                     attrs["failure_reason"] = (
                         f"ping check failing ({fc}/{mf} consecutive failures"
@@ -222,8 +228,18 @@ class KeeneticWanConnectedSensor(WanEntity, BinarySensorEntity):
             ignored = pc.get("all_profiles")
             if ignored and len(ignored) > 1:
                 # Surface all observed profiles for debugging when more
-                # than one is touching this interface.
-                attrs["all_ping_check_profiles"] = ignored
+                # than one is touching this interface — without their
+                # success/fail counters, which advance on every poll and
+                # wrote a recorder row each medium tick.
+                attrs["all_ping_check_profiles"] = [
+                    {
+                        "profile": profile.get("profile"),
+                        "status": profile.get("status"),
+                        "check_hosts": list(profile.get("check_hosts") or []),
+                    }
+                    for profile in ignored
+                    if isinstance(profile, dict)
+                ]
 
         layers = wan.get("summary_layers") or {}
         if layers:
@@ -242,6 +258,8 @@ class KeeneticWanEnabledSensor(WanEntity, BinarySensorEntity):
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:toggle-switch-variant"
+    # The WAN's Enabled switch shows the same state; new installs opt in.
+    _attr_entity_registry_enabled_default = False
 
     def __init__(
         self,

@@ -229,6 +229,8 @@ class NetworkMixin:
             cmd,
         )
         await self._rci_parse(cmd)
+        # Without a save the router undoes the toggle on its next boot.
+        await self._async_save_configuration(f"Interface {interface_name} up/down")
 
     async def async_get_traffic_stats(
         self,

@@ -168,7 +168,6 @@ def test_is_ranked_wan_string_false_global() -> None:
     [
         ("sensor/clients.py", "KeeneticConnectedClientsSensor"),
         ("sensor/clients.py", "KeeneticRouterClientsSensor"),
-        ("sensor/clients.py", "KeeneticDisconnectedClientsSensor"),
         ("sensor/mesh.py", "KeeneticMeshClientsSensor"),
     ],
 )

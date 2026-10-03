@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 
@@ -33,8 +33,11 @@ class KeeneticIpsecViciOomTotalSensor(ControllerEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_name = "IPsec VICI OOM Total"
     _attr_icon = "mdi:counter"
+    # Zero on a healthy router, yet a full statistics row stream; opt in.
+    _attr_entity_registry_enabled_default = False
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    # Zero on a healthy router; the state is the whole story.
+    _attr_state_class = None
     _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:

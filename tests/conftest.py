@@ -312,9 +312,18 @@ class _RestoreEntity:
     async def async_get_last_state(self):
         return None
 
+    async def async_get_last_extra_data(self):
+        return None
+
+
+class _ExtraStoredData:
+    def as_dict(self):
+        raise NotImplementedError
+
 
 restore_state = types.ModuleType("homeassistant.helpers.restore_state")
 restore_state.RestoreEntity = _RestoreEntity
+restore_state.ExtraStoredData = _ExtraStoredData
 helpers.restore_state = restore_state
 sys.modules["homeassistant.helpers.restore_state"] = restore_state
 
@@ -555,3 +564,10 @@ def keenetic_coordinator_factory():
         )
 
     return _factory
+
+
+def elapsed_seconds(started) -> int:
+    """Seconds from an uptime sensor's start time to now (start-time sensors)."""
+    from datetime import datetime
+
+    return round((datetime.now().astimezone() - started).total_seconds())

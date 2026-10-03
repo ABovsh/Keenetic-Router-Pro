@@ -102,11 +102,13 @@ def test_last_seen_ignores_one_second_recompute_jitter() -> None:
 
 
 def test_last_seen_moves_when_the_client_is_seen_again() -> None:
-    """A real new sighting resets the elapsed counter and must be published."""
+    """A new offline spell, after the client was online, is published."""
     client = {"mac": MAC, "active": False, "last-seen": 3600}
     coordinator = _coordinator({"clients_by_mac": {MAC: client}})
     sensor = KeeneticClientLastSeenSensor(coordinator, _entry(), MAC, "Laptop")
 
     old = sensor.native_value
-    client["last-seen"] = 30
+    client.update(active=True, **{"last-seen": 0})
+    assert sensor.native_value is None
+    client.update(active=False, **{"last-seen": 30})
     assert sensor.native_value != old

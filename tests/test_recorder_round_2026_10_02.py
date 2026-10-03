@@ -18,7 +18,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from homeassistant.components.sensor import SensorStateClass
 
 from conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
 from unittest.mock import AsyncMock
@@ -48,9 +47,11 @@ def test_fixed_wan_counters_publish_no_statistics() -> None:
         assert cls._attr_state_class is None
 
 
-def test_lan_counters_keep_their_statistics() -> None:
+def test_lan_counters_keep_no_statistics() -> None:
+    # Dropped in the 2026-10-03 usability round: one LAN-wide total whose
+    # history nobody reads.
     for cls in (KeeneticLanRxSensor, KeeneticLanTxSensor):
-        assert cls._attr_state_class == SensorStateClass.TOTAL_INCREASING
+        assert cls._attr_state_class is None
 
 
 # --- 2. Router memory holds within two percentage points ---
@@ -139,5 +140,5 @@ async def test_family_filter_answering_only_nxdomain_is_not_down() -> None:
 
 
 async def test_no_answers_at_all_is_still_down() -> None:
-    stat = "127.0.0.1  40500  10  0  0  0ms  0ms  4"
+    stat = "127.0.0.1  40500  30  0  0  0ms  0ms  4"
     assert await _status(stat) == "down"

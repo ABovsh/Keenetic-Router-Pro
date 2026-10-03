@@ -136,7 +136,9 @@ async def test_async_set_interface_enabled_emits_up_down_commands() -> None:
 
     assert [call.args[0] for call in client._rci_parse.await_args_list] == [
         "interface PPPoE0 up",
+        "system configuration save",
         "interface PPPoE0 down",
+        "system configuration save",
     ]
 
 

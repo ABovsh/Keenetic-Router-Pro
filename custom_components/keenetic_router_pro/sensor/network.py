@@ -21,13 +21,16 @@ from ..entity import (
     ControllerEntity,
     CounterDeadbandMixin,
     DeadbandMixin,
+    LinkActiveMixin,
     SourceFreshnessMixin,
     ThroughputDeadbandMixin,
+    UptimeMixin,
     WanEntity,
 )
 from ..utils import (
     apply_relative_deadband,
     coerce_byte_count,
+    coerce_int,
     coerce_seconds,
 )
 
@@ -109,19 +112,14 @@ class KeeneticWanIpSensor(ControllerEntity, SensorEntity):
         }
 
 
-class KeeneticPppoeUptimeSensor(ControllerEntity, SensorEntity):
-    """PPPoE connection uptime sensor.
-
-    Uses ``TOTAL_INCREASING`` so long-term statistics record the
-    monotonic counter cleanly and reset to zero on reconnect, instead
-    of a sawtooth gauge graph.
-    """
+class KeeneticPppoeUptimeSensor(UptimeMixin, ControllerEntity, SensorEntity):
+    """Uplink session uptime, as the time it started (see ``UptimeMixin``)."""
     _attr_has_entity_name = True
     _attr_translation_key = "pppoe_uptime"
     _attr_icon = "mdi:timer-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_suggested_display_precision = 0
+    # Each WAN has its own Uptime sensor; new installs opt in to this copy.
+    _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -131,13 +129,9 @@ class KeeneticPppoeUptimeSensor(ControllerEntity, SensorEntity):
         return f"{self._entry_id}_pppoe_uptime"
 
     @property
-    def native_unit_of_measurement(self) -> str:
-        return UnitOfTime.SECONDS
-
-    @property
-    def native_value(self) -> int:
-        wan = self.coordinator.data.get("wan_status", {})
-        return coerce_seconds(wan.get("uptime"), default=0) or 0
+    def native_value(self) -> int | None:
+        wan = self.coordinator.data.get("wan_status", {}) or {}
+        return self._publish_uptime(coerce_seconds(wan.get("uptime"), default=None))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
@@ -176,15 +170,16 @@ class KeeneticActiveConnectionsSensor(DeadbandMixin, ControllerEntity, SensorEnt
         return f"{self._entry_id}_active_connections"
 
     @property
-    def native_value(self) -> int:
+    def native_value(self) -> int | None:
         sys = self.coordinator.data.get("system", {}) or {}
-        conntotal = sys.get("conntotal", 0)
-        connfree = sys.get("connfree", 0)
-        try:
-            # OverflowError: int(float("inf")) on a non-finite firmware value.
-            used = max(0, int(conntotal) - int(connfree))
-        except (TypeError, ValueError, OverflowError):
-            return 0
+        # No reading is unknown, not zero: a fake 0 is a valid-looking
+        # measurement in long-term statistics.
+        conntotal = coerce_int(sys.get("conntotal"), None)
+        connfree = coerce_int(sys.get("connfree"), None)
+        if conntotal is None or connfree is None:
+            self._deadband_published = None
+            return None
+        used = max(0, conntotal - connfree)
         published = apply_relative_deadband(
             used,
             getattr(self, "_deadband_published", None),
@@ -201,12 +196,11 @@ class KeeneticActiveConnectionsSensor(DeadbandMixin, ControllerEntity, SensorEnt
         # every tick the deadband held the state the attributes moved anyway
         # and HA wrote a row carrying nothing — 116 such rows in three hours,
         # measured after 1.12.0 shipped the deadband without this.
-        sys = self.coordinator.data.get("system", {}) or {}
-        try:
-            conntotal = int(sys.get("conntotal", 0))
-        except (TypeError, ValueError, OverflowError):
-            conntotal = 0
         used = self.native_value
+        if used is None:
+            return None
+        sys = self.coordinator.data.get("system", {}) or {}
+        conntotal = coerce_int(sys.get("conntotal"), 0)
         return {
             "total_capacity": conntotal,
             "free": max(0, conntotal - used),
@@ -330,6 +324,8 @@ class _WanSensorBase(WanEntity, SensorEntity):
 class KeeneticWanProviderSensor(_WanSensorBase):
     """Provider / description shown as the entity name."""
     _attr_icon = "mdi:web"
+    # Static text, also the WAN Connected ``description`` attribute; opt in.
+    _attr_entity_registry_enabled_default = False
 
     @property
     def unique_id(self) -> str:
@@ -351,6 +347,8 @@ class KeeneticWanRoleSensor(_WanSensorBase):
     """Routing role: Default connection / Backup connection N."""
     _attr_icon = "mdi:sort-numeric-ascending"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Also the WAN Connected ``role_label`` attribute; opt in.
+    _attr_entity_registry_enabled_default = False
 
     @property
     def unique_id(self) -> str:
@@ -383,6 +381,8 @@ class KeeneticWanInterfaceSensor(_WanSensorBase):
     """Underlying interface id (e.g. GigabitEthernet1/Vlan35)."""
     _attr_icon = "mdi:ethernet-cable"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Static, also the WAN Connected ``underlying`` attribute; opt in.
+    _attr_entity_registry_enabled_default = False
 
     @property
     def unique_id(self) -> str:
@@ -447,14 +447,10 @@ class KeeneticWanPublicIpSensor(_WanSensorBase):
         }
 
 
-class KeeneticWanUptimeSensor(_WanSensorBase):
-    """Session uptime for the WAN, in seconds."""
+class KeeneticWanUptimeSensor(UptimeMixin, _WanSensorBase):
+    """Session uptime for the WAN, as the time it started (see ``UptimeMixin``)."""
     _attr_icon = "mdi:timer-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_device_class = SensorDeviceClass.DURATION
-    # Same statistics contract as the PPPoE/mesh uptime sensors.
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_suggested_display_precision = 0
     # native_value derives from wan["uptime"]; the WanEntity base ignores it
     # for write-suppression, so opt out of dedup here.
     _FINGERPRINT_IGNORE = frozenset()
@@ -468,19 +464,29 @@ class KeeneticWanUptimeSensor(_WanSensorBase):
         return "Uptime"
 
     @property
-    def native_unit_of_measurement(self) -> str:
-        return UnitOfTime.SECONDS
-
-    @property
     def native_value(self) -> int | None:
         wan = self._wan
         if not wan:
-            return None
-        return coerce_seconds(wan.get("uptime"), default=None)
+            return self._publish_uptime(None)
+        return self._publish_uptime(coerce_seconds(wan.get("uptime"), default=None))
+
+
+class _WanLinkActiveMixin(LinkActiveMixin):
+    """Gate a WAN traffic sensor on the uplink's physical link."""
+
+    def _link_active(self) -> bool:
+        wan = self._wan
+        if not wan or wan.get("link_state") != LINK_STATE_UP:
+            return False
+        # ``link_state`` is the configured state; a standby uplink whose modem
+        # or cable is absent reports state "up" with link "down".
+        raw = wan.get("raw")
+        link = raw.get("link") if isinstance(raw, dict) else None
+        return link is None or str(link).lower() == LINK_STATE_UP
 
 
 class _WanBytesBase(
-    SourceFreshnessMixin, CounterDeadbandMixin, _WanSensorBase
+    _WanLinkActiveMixin, SourceFreshnessMixin, CounterDeadbandMixin, _WanSensorBase
 ):
     """Shared RX/TX byte counter base."""
     _attr_device_class = SensorDeviceClass.DATA_SIZE
@@ -535,7 +541,7 @@ class KeeneticWanTxBytesSensor(_WanBytesBase):
 
 
 class _WanThroughputBase(
-    SourceFreshnessMixin, ThroughputDeadbandMixin, _WanSensorBase
+    _WanLinkActiveMixin, SourceFreshnessMixin, ThroughputDeadbandMixin, _WanSensorBase
 ):
     _attr_device_class = SensorDeviceClass.DATA_RATE
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -639,26 +645,28 @@ class KeeneticWanFailoverCountSensor(ControllerEntity, SensorEntity, RestoreEnti
         super()._handle_coordinator_update()
 
 
-class KeeneticWanDowntimeSensor(ControllerEntity, SensorEntity, RestoreEntity):
-    """Cumulative seconds with no working WAN at all.
+# HA's duration unit strings, in seconds.
+_SECONDS_PER_UNIT = {"ms": 0.001, "s": 1, "min": 60, "h": 3600, "d": 86400, "w": 604800}
 
-    Only accrues while every WAN is down, so on a healthy router it writes
-    nothing. That makes it both cheap and exactly the number you want when
-    arguing with an ISP.
+
+class _DowntimeClockMixin:
+    """Accrue seconds between two observations when the earlier one was down.
+
+    ``down`` is True/False for a fresh observation and None when the state is
+    unknown: the clock then stops without billing. That covers a router HA
+    cannot read (it says nothing about the providers behind it) and the first
+    minutes after the router boots, while it brings its own uplinks up.
     """
 
-    _attr_has_entity_name = True
-    _attr_translation_key = "wan_downtime"
-    _attr_icon = "mdi:timer-alert-outline"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_device_class = SensorDeviceClass.DURATION
-    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-
-    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
-        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
-        self._seconds = 0.0
-        self._down_since: float | None = None
+    _seconds: float = 0.0
+    _down_since: float | None = None
+    _published: int = 0
+    # PPPoE and LTE uplinks can take a few minutes to come up after a boot.
+    _BOOT_GRACE = 300
+    # While an outage runs, publish the total every five minutes (the
+    # recorder's statistics period) instead of every poll; the exact total
+    # is published as soon as it ends.
+    _PUBLISH_STEP = 300
 
     @staticmethod
     def _now() -> float:
@@ -666,39 +674,168 @@ class KeeneticWanDowntimeSensor(ControllerEntity, SensorEntity, RestoreEntity):
         # erase an outage.
         return monotonic()
 
+    def _accrue(self, down: bool | None) -> None:
+        if down is None:
+            self._down_since = None
+            return
+        now = self._now()
+        if self._down_since is not None:
+            self._seconds += max(0.0, now - self._down_since)
+        self._down_since = now if down else None
+
+    def _settle_published(self) -> bool:
+        """Move the published total forward when due; True when it moved."""
+        seconds = int(self._seconds)
+        if seconds == self._published:
+            return False
+        if self._down_since is None or seconds - self._published >= self._PUBLISH_STEP:
+            self._published = seconds
+            return True
+        return False
+
+    def _router_settled(self) -> bool:
+        """Return True when the router answered and is past its boot."""
+        if not self.coordinator.last_update_success:
+            return False
+        system = (self.coordinator.data or {}).get("system") or {}
+        uptime = coerce_seconds(system.get("uptime"), default=None)
+        return uptime is None or uptime >= self._BOOT_GRACE
+
+    async def _async_restore_seconds(self) -> None:
+        last = await self.async_get_last_state()
+        if last is not None and last.state not in (None, "unknown", "unavailable"):
+            # The state is stored in the display unit (hours by default, or
+            # whatever the user picked), not in native seconds.
+            attributes = getattr(last, "attributes", None) or {}
+            unit = attributes.get("unit_of_measurement") or UnitOfTime.SECONDS
+            try:
+                self._seconds = float(last.state) * _SECONDS_PER_UNIT.get(str(unit), 1)
+            except (TypeError, ValueError):
+                self._seconds = 0.0
+        self._published = int(self._seconds)
+
+
+class KeeneticWanDowntimeSensor(
+    _DowntimeClockMixin, ControllerEntity, SensorEntity, RestoreEntity
+):
+    """Cumulative seconds the router was up but had no internet on any WAN.
+
+    A WAN counts as working when the router reports internet access on it
+    (ping check where configured), not merely while it holds the default
+    route: a failing ping check keeps the route. Writes a state row only while
+    an outage is running; long-term statistics give the total for any week,
+    month or year.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "wan_downtime"
+    _attr_icon = "mdi:web-off"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_suggested_unit_of_measurement = UnitOfTime.HOURS
+    _attr_suggested_display_precision = 2
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
+        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
+        self._seconds = 0.0
+        self._down_since = None
+
     @property
     def unique_id(self) -> str:
         return f"{self._entry_id}_wan_downtime"
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-        last = await self.async_get_last_state()
-        if last is not None and last.state not in (None, "unknown", "unavailable"):
-            try:
-                self._seconds = float(last.state)
-            except (TypeError, ValueError):
-                self._seconds = 0.0
+        await self._async_restore_seconds()
 
     @property
     def native_value(self) -> int:
-        return int(self._seconds)
+        return self._published
+
+    def _internet_down(self) -> bool:
+        data = self.coordinator.data or {}
+        wans = [w for w in data.get("wan_interfaces") or [] if isinstance(w, dict)]
+        if wans:
+            return not any(w.get("internet_access") for w in wans)
+        return not data.get("active_wan")
 
     def _handle_coordinator_update(self) -> None:
-        if not self.coordinator.last_update_success:
-            # A failed tick leaves the PREVIOUS payload in place, which still
-            # names a working WAN. Reading that as "recovered" meant the worst
-            # outages — the router itself unreachable — recorded zero downtime.
-            # We genuinely do not know the WAN state here, so hold everything.
-            super()._handle_coordinator_update()
+        # A failed tick leaves the PREVIOUS payload in place; we genuinely do
+        # not know the WAN state, so stop the clock instead of reading it.
+        self._accrue(self._internet_down() if self._router_settled() else None)
+        self._settle_published()
+        super()._handle_coordinator_update()
+
+
+class KeeneticWanLinkDowntimeSensor(
+    _DowntimeClockMixin, _WanSensorBase, RestoreEntity
+):
+    """Cumulative seconds this provider was down: link lost, or no internet.
+
+    "No internet" is the router's ping check where one is configured, else
+    the link-up-with-an-address heuristic. A WAN switched off on purpose is
+    not an outage, and nothing is counted while the router itself cannot be
+    read. VPN tunnels are WANs too but not providers, so theirs start
+    disabled.
+    """
+
+    _attr_icon = "mdi:web-off"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
+    _attr_suggested_unit_of_measurement = UnitOfTime.HOURS
+    _attr_suggested_display_precision = 2
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _TUNNEL_TYPES = frozenset({"wireguard", "openvpn"})
+
+    def __init__(
+        self, coordinator: KeeneticCoordinator, entry: ConfigEntry, wan_id: str
+    ) -> None:
+        _WanSensorBase.__init__(self, coordinator, entry, wan_id)
+        self._seconds = 0.0
+        self._down_since = None
+        wan_type = str((self._wan or {}).get("type") or "").lower()
+        if wan_type in self._TUNNEL_TYPES:
+            self._attr_entity_registry_enabled_default = False
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self._entry_id}_wan_{self._wan_id}_downtime"
+
+    @property
+    def name(self) -> str:
+        return "Downtime"
+
+    @property
+    def available(self) -> bool:
+        # The counter is a history, not a reading of this tick: keep it
+        # visible while the WAN is briefly missing from the payload.
+        return bool(getattr(self.coordinator, "last_update_success", True))
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        await self._async_restore_seconds()
+
+    @property
+    def native_value(self) -> int:
+        return self._published
+
+    @staticmethod
+    def _provider_down(wan: dict[str, Any]) -> bool:
+        if not wan.get("enabled"):
+            return False
+        raw = wan.get("raw") if isinstance(wan.get("raw"), dict) else {}
+        link_up = wan.get("link_state") == LINK_STATE_UP and str(
+            raw.get("link") or LINK_STATE_UP
+        ).lower() == LINK_STATE_UP
+        return not link_up or wan.get("internet_access") is False
+
+    def _handle_coordinator_update(self) -> None:
+        wan = self._wan if self._router_settled() else None
+        self._accrue(None if wan is None else self._provider_down(wan))
+        if self._settle_published():
+            self.async_write_ha_state()
             return
-        now = self._now()
-        down = not (self.coordinator.data or {}).get("active_wan")
-        if down:
-            if self._down_since is not None:
-                self._seconds += now - self._down_since
-            self._down_since = now
-        else:
-            if self._down_since is not None:
-                self._seconds += now - self._down_since
-            self._down_since = None
         super()._handle_coordinator_update()

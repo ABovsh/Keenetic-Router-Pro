@@ -10,11 +10,11 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfInformation, UnitOfTime, EntityCategory
+from homeassistant.const import UnitOfInformation, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
 from ..const import COUNTER_DEADBAND_BYTES
-from ..entity import ControllerEntity, CounterDeadbandMixin
+from ..entity import ControllerEntity, CounterDeadbandMixin, LinkActiveMixin, UptimeMixin
 from ..utils import bytes_to_mib, coerce_byte_count, coerce_seconds
 
 
@@ -49,17 +49,12 @@ class _BaseWgSensor(ControllerEntity, SensorEntity):
         return self._wg_name
 
 
-class KeeneticWgUptimeSensor(_BaseWgSensor):
-    """WireGuard tunnel uptime sensor.
+class KeeneticWgUptimeSensor(UptimeMixin, _BaseWgSensor):
+    """WireGuard tunnel uptime, as the time it started (see ``UptimeMixin``).
 
-    Override the base ``MEASUREMENT`` default with ``TOTAL_INCREASING``:
-    uptime resets to zero when the tunnel reconnects, which is exactly
-    the semantics ``TOTAL_INCREASING`` expects, and avoids the sawtooth
-    long-term-statistics graph that ``MEASUREMENT`` would produce.
+    Unavailable while the profile is down: there is no session to time.
     """
     _attr_has_entity_name = True
-    _attr_suggested_display_precision = 0
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     @property
     def unique_id(self) -> str:
@@ -70,19 +65,43 @@ class KeeneticWgUptimeSensor(_BaseWgSensor):
         return f"WireGuard {self._wg_label} Uptime"
 
     @property
-    def native_unit_of_measurement(self) -> str:
-        return UnitOfTime.SECONDS
+    def available(self) -> bool:
+        return super().available and bool(self._wg.get("enabled"))
 
     @property
-    def native_value(self) -> int:
+    def native_value(self) -> int | None:
         for key in ("uptime", "uptime_sec", "uptime_seconds"):
             seconds = coerce_seconds(self._wg.get(key), default=None)
             if seconds is not None:
-                return seconds
-        return 0
+                return self._publish_uptime(seconds)
+        return self._publish_uptime(None)
 
 
-class KeeneticWgRxSensor(CounterDeadbandMixin, _BaseWgSensor):
+class _WgLinkActiveMixin(LinkActiveMixin):
+    """Gate a WireGuard traffic sensor on the profile being up."""
+
+    def _link_active(self) -> bool:
+        return bool(self._wg.get("enabled"))
+
+
+class _WgUplinkStatisticsMixin:
+    """Leave a WAN uplink's traffic statistics to its WAN RX/TX Bytes sensor.
+
+    A profile used as an uplink is also a WAN, whose own byte sensors record
+    the same counter; two statistics streams for one counter double the rows.
+    """
+
+    @property
+    def state_class(self) -> SensorStateClass | None:
+        wans = (self.coordinator.data or {}).get("wan_interfaces") or []
+        if any(isinstance(w, dict) and w.get("id") == self._wg_name for w in wans):
+            return None
+        return self._attr_state_class
+
+
+class KeeneticWgRxSensor(
+    _WgUplinkStatisticsMixin, _WgLinkActiveMixin, CounterDeadbandMixin, _BaseWgSensor
+):
     """WireGuard RX (received traffic) sensor."""
     _attr_has_entity_name = True
     # RX bytes is a cumulative counter that resets when the tunnel restarts —
@@ -116,7 +135,9 @@ class KeeneticWgRxSensor(CounterDeadbandMixin, _BaseWgSensor):
         return self._publish_counter(None)
 
 
-class KeeneticWgTxSensor(CounterDeadbandMixin, _BaseWgSensor):
+class KeeneticWgTxSensor(
+    _WgUplinkStatisticsMixin, _WgLinkActiveMixin, CounterDeadbandMixin, _BaseWgSensor
+):
     """WireGuard TX (sent traffic) sensor."""
     _attr_has_entity_name = True
     # See KeeneticWgRxSensor: cumulative counter → TOTAL_INCREASING.

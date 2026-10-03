@@ -60,6 +60,9 @@ class _Transport:
         # device/firmware (skip future calls to avoid router-side log spam),
         # True -> endpoint works. Pattern mirrors `_mws_member_supported`.
         self._mws_member_supported: bool | None = None
+        # Session fact, not a capability latch (a router reboot must not clear
+        # it): the controller has listed its mesh members by CID before.
+        self._mws_members_seen: bool = False
         self._crypto_map_supported: bool | None = None
         self._dns_proxy_supported: bool | None = None
         self._ping_check_supported: bool | None = None
@@ -330,6 +333,24 @@ class _Transport:
                 raise KeeneticApiError(error_marker)
         return result
 
+    async def _async_save_configuration(self, change: str) -> None:
+        """Persist the running config so a change survives a router reboot.
+
+        Best effort: the change itself already took effect, so a failed save
+        is logged rather than reported as a failed command.
+        """
+        try:
+            await self._rci_parse("system configuration save")
+        except asyncio.CancelledError:
+            raise
+        except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError) as err:
+            _LOGGER.warning(
+                "%s applied, but saving the router configuration failed: %s — "
+                "the change will be lost on the next reboot",
+                change,
+                err,
+            )
+
     async def _rci_batch(self, tree: Dict[str, Any]) -> Dict[str, Any] | None:
         """Send a composite RCI tree request in a single HTTP round-trip.
 
@@ -355,7 +376,10 @@ class _Transport:
             return None
         if self._rci_batch_supported is False:
             return None
-        path = RCI_ROOT
+        # The tree endpoint is ``/rci/``: KeeneticOS answers ``POST /rci``
+        # with 405, and behind a KeenDNS proxy with ``auth`` each 405 also
+        # logs a Lockout "invalid address '127.0.0.1'" record.
+        path = f"{RCI_ROOT}/"
         try:
             result = await self._request("POST", path, json=tree)
         except asyncio.CancelledError:
@@ -364,7 +388,7 @@ class _Transport:
             _LOGGER.debug(
                 "RCI batch POST failed: %s", err
             )
-            if _is_endpoint_missing(err):
+            if _is_endpoint_missing(err) or getattr(err, "status", None) == 405:
                 self._rci_batch_supported = False
             return None
         except (aiohttp.ClientError, asyncio.TimeoutError) as err:

@@ -135,6 +135,8 @@ class _FixedTrafficSensor(_TrafficSensorBase):
 class KeeneticLanRxSensor(_FixedTrafficSensor):
     """LAN (GigabitEthernet0) RX sensor."""
 
+    # One total for the whole LAN; its history is rarely read.
+    _attr_state_class = None
     _attr_icon = _ICON_DOWNLOAD
     _direction = "rx"
     _fixed_iface_name = "GigabitEthernet0"
@@ -145,6 +147,7 @@ class KeeneticLanRxSensor(_FixedTrafficSensor):
 class KeeneticLanTxSensor(_FixedTrafficSensor):
     """LAN (GigabitEthernet0) TX sensor."""
 
+    _attr_state_class = None
     _attr_icon = _ICON_UPLOAD
     _direction = "tx"
     _fixed_iface_name = "GigabitEthernet0"
@@ -157,8 +160,10 @@ class KeeneticWanRxSensor(_FixedTrafficSensor):
 
     # The per-WAN "RX Bytes" sensor already records long-term statistics for
     # this uplink; a second copy doubled the rows (and on routers whose main
-    # WAN is not GigabitEthernet1 it recorded the wrong uplink).
+    # WAN is not GigabitEthernet1 it recorded the wrong uplink). New installs
+    # opt in to this copy.
     _attr_state_class = None
+    _attr_entity_registry_enabled_default = False
     _attr_icon = _ICON_DOWNLOAD
     _direction = "rx"
     _fixed_iface_name = "GigabitEthernet1"
@@ -171,6 +176,7 @@ class KeeneticWanTxSensor(_FixedTrafficSensor):
 
     # See KeeneticWanRxSensor: the per-WAN "TX Bytes" sensor keeps the stats.
     _attr_state_class = None
+    _attr_entity_registry_enabled_default = False
     _attr_icon = _ICON_UPLOAD
     _direction = "tx"
     _fixed_iface_name = "GigabitEthernet1"

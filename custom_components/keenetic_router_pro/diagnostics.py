@@ -78,6 +78,24 @@ TO_REDACT: set[str] = {
     "default-gateway",
     "fqdn",
     "domain",
+    # Found in a live dump (2026-10-03): every hotspot/neighbour row names its
+    # MAC again under "via"; clients carry IPv6 addresses; WireGuard, IPsec
+    # and KeenDNS expose public endpoints; the KeenDNS name is "booked"; MWS
+    # bridge ids embed a MAC; and interface descriptions are free text that
+    # users fill with contract or phone numbers.
+    "via",
+    "ip6",
+    "address6",
+    "local-endpoint-address",
+    "local_addr",
+    "remote_addr",
+    "target-local",
+    "target-remote",
+    "destination",
+    "booked",
+    "root",
+    "bridge",
+    "description",
 }
 
 
@@ -126,6 +144,24 @@ def _strip_mac_keyed_indexes(data: Any) -> Any:
     # Mesh node ``id``/``cid`` fall back to the node MAC on routers without
     # MWS member data; redact those identifiers (the ``mac`` key is already
     # redacted, but ``id``/``cid`` are not in TO_REDACT).
+    # The KeenDNS tunnel names its public peer under "client" — a key the
+    # diagnostics payload itself uses at the top level, so it cannot go into
+    # TO_REDACT.
+    ndns = stripped.get("ndns")
+    ttp = ndns.get("ttp") if isinstance(ndns, dict) else None
+    if isinstance(ttp, dict) and "tunnel" in ttp:
+        tunnels = ttp["tunnel"]
+        tunnels = tunnels if isinstance(tunnels, list) else [tunnels]
+        stripped["ndns"] = {
+            **ndns,
+            "ttp": {
+                **ttp,
+                "tunnel": [
+                    {**t, "client": "**REDACTED**"} if isinstance(t, dict) and "client" in t else t
+                    for t in tunnels
+                ],
+            },
+        }
     mesh_nodes = stripped.get("mesh_nodes")
     if isinstance(mesh_nodes, list):
         stripped["mesh_nodes"] = [

@@ -32,6 +32,68 @@ def _first_stat_int(stats: dict[str, Any], *keys: str) -> int | None:
         return None
 
 
+def _stamp_ping_check(wan: dict[str, Any], pc: dict[str, Any] | None) -> None:
+    """Let the router's ping check, where configured, decide internet access."""
+    if pc is not None:
+        wan["ping_check"] = pc
+        passing = pc.get("passing")
+        if passing is True or passing is False:
+            wan["internet_access"] = passing
+            wan["internet_access_source"] = "ping_check"
+        else:
+            wan["internet_access_source"] = "heuristic"
+    else:
+        wan["ping_check"] = None
+        wan["internet_access_source"] = "heuristic"
+
+
+# Per-WAN fields that come from ``show/interface/stat`` (medium tier).
+_WAN_SAMPLE_KEYS = (
+    "rx_bytes",
+    "tx_bytes",
+    "rx_packets",
+    "tx_packets",
+    "rx_speed_raw",
+    "tx_speed_raw",
+    "stats_interface",
+    "stats_timestamp",
+    "_sample_ts",
+    "rx_throughput",
+    "tx_throughput",
+)
+
+
+def carry_wan_samples(
+    wan_interfaces: list[dict[str, Any]],
+    ping_check_status: dict[str, Any],
+    prev_wan_interfaces: list[dict[str, Any]] | None,
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Refresh WAN state on a tick that did not re-read interface counters.
+
+    Link, address, default route and ping check are current; counters and
+    rates are carried from the previous sample so the next medium tick
+    computes its rate over the real interval.
+    """
+    prev_wan_by_id = {
+        prev.get("id"): prev
+        for prev in prev_wan_interfaces or []
+        if isinstance(prev, dict) and prev.get("id")
+    }
+    carried: list[dict[str, Any]] = []
+    for wan in wan_interfaces:
+        wan = dict(wan)
+        prev = prev_wan_by_id.get(wan.get("id")) or {}
+        for key in _WAN_SAMPLE_KEYS:
+            if key in prev:
+                wan[key] = prev[key]
+        _stamp_ping_check(wan, ping_check_status.get(wan.get("id")))
+        carried.append(wan)
+    ordered = order_wan_interfaces(carried)
+    return ordered, {
+        w.get("id"): w for w in ordered if isinstance(w, dict) and w.get("id")
+    }
+
+
 def enrich_wan_interfaces(
     wan_interfaces: list[dict[str, Any]],
     interface_stats: dict[str, Any] | None,
@@ -101,18 +163,7 @@ def enrich_wan_interfaces(
         #                    the case the feature request is about)
         #   passing=None  -> no real profile attached / mixed state
         #                    -> keep the heuristic value from api.py
-        pc = ping_check_status.get(wan_id)
-        if pc is not None:
-            wan["ping_check"] = pc
-            passing = pc.get("passing")
-            if passing is True or passing is False:
-                wan["internet_access"] = passing
-                wan["internet_access_source"] = "ping_check"
-            else:
-                wan["internet_access_source"] = "heuristic"
-        else:
-            wan["ping_check"] = None
-            wan["internet_access_source"] = "heuristic"
+        _stamp_ping_check(wan, ping_check_status.get(wan_id))
 
         prev = prev_wan_by_id.get(wan_id)
         if prev and prev.get("_sample_ts"):

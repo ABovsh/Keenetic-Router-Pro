@@ -75,7 +75,12 @@ class ClientsMixin:
     async def async_get_ip_neighbours(self) -> List[Dict[str, Any]]:
         """Return the router's discovered IP neighbours."""
         data = await self._rci_get("show/ip/neighbour")
-        neighbours = _nested_dict_items(data, "neighbour", "neighbours", "items")
+        # KeeneticOS 5.1 answers with the table itself, keyed by row id
+        # ({"1": {...}, "2": {...}}); only the CLI form wraps it in
+        # "neighbour". Missing that shape cost a CLI parse every tick.
+        neighbours = _nested_dict_items(
+            data, "neighbour", "neighbours", "items"
+        ) or _dict_items(data)
         if not neighbours:
             try:
                 data = await self._rci_parse("show ip neighbour")

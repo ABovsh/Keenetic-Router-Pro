@@ -44,6 +44,7 @@ from .network import (
     KeeneticWanTxThroughputSensor,
     KeeneticWanFailoverCountSensor,
     KeeneticWanDowntimeSensor,
+    KeeneticWanLinkDowntimeSensor,
 )
 from .clients import (
     KeeneticConnectedClientsSensor,
@@ -243,6 +244,7 @@ async def async_setup_entry(
             KeeneticWanTxBytesSensor(coordinator, entry, wan_id),
             KeeneticWanRxThroughputSensor(coordinator, entry, wan_id),
             KeeneticWanTxThroughputSensor(coordinator, entry, wan_id),
+            KeeneticWanLinkDowntimeSensor(coordinator, entry, wan_id),
         ]
 
     # Per-crypto-map sensor set: one sub-device per site-to-site

@@ -18,11 +18,13 @@ from .const import DOMAIN, FAST_SCAN_INTERVAL
 from .utils import is_client_online
 from .coordinator_parts.derived import (
     build_clients_by_mac,
+    carry_firmware_available,
     counter_rate_bytes_per_second,
     mesh_associations,
     real_client_macs,
 )
 from .coordinator_parts.enrichment import (
+    carry_wan_samples,
     enrich_crypto_maps,
     enrich_wan_interfaces,
 )
@@ -33,7 +35,7 @@ from .coordinator_parts.fetching import (
     next_backoff_interval,
     ok_or_default,
 )
-from .coordinator_parts.oom import advance_oom_state
+from .coordinator_parts.oom import advance_oom_state, local_now
 from .coordinator_parts.payloads import (
     dict_or_empty,
     list_or_empty,
@@ -42,6 +44,7 @@ from .coordinator_parts.payloads import (
 from .coordinator_parts.refresh import (
     build_batch_tree,
     refresh_plan,
+    unsupported_batch_paths,
 )
 from .utils import coerce_int, normalize_mac
 
@@ -348,7 +351,13 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # in the ``finally`` block below.
         try:
             if self.client._rci_batch_supported is not False:
-                batch_tree = build_batch_tree(plan, needs_clients=needs_clients)
+                batch_tree = build_batch_tree(
+                    plan,
+                    needs_clients=needs_clients,
+                    unsupported=unsupported_batch_paths(self.client),
+                    include_mesh=getattr(self.client, "_mws_member_supported", None)
+                    is True,
+                )
                 try:
                     await self.client.prefetch_tick(batch_tree)
                 except asyncio.CancelledError:
@@ -392,7 +401,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _bounded(self.client.async_get_host_policies()) if host_policies_refresh else _resolve(_prev.get("host_policies", {})),
                 _bounded(self.client.async_get_policies()) if very_slow_refresh else _resolve(_prev.get("policies", {})),
                 _bounded(self.client.async_get_ndns_info()) if very_slow_refresh else _resolve(_prev.get("ndns", {})),
-                _bounded(self.client.async_get_ping_check_status()) if medium_refresh else _resolve(_prev.get("ping_check_status", {})),
+                _bounded(self.client.async_get_ping_check_status()),
                 _bounded(self.client.async_get_ipsec_status()) if ipsec_status_refresh else _resolve(_prev.get("crypto_maps", {})),
                 _bounded(self.client.async_get_dns_proxy_status()) if very_slow_refresh else _resolve(_prev.get("dns_proxy", {})),
                 _bounded(self.client.async_get_ipsec_diagnostics()) if very_slow_refresh else _resolve(_prev.get("ipsec_diagnostics", {})),
@@ -450,6 +459,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # the API layer now raises instead of returning MAC-keyed
             # fallback nodes (which used to flip mesh unique_ids).
             mesh_nodes = _ok("mesh_nodes", mesh_nodes, _prev.get("mesh_nodes", []))
+            if slow_refresh and not mesh_nodes_failed and isinstance(mesh_nodes, list):
+                mesh_nodes = carry_firmware_available(
+                    mesh_nodes, _prev.get("mesh_nodes")
+                )
             mesh_nodes_fresh = self._source_is_fresh(
                 "mesh_nodes",
                 attempted=slow_refresh,
@@ -465,14 +478,28 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _ok("policies", policies, _prev.get("policies", {}))
             )
             ndns_info = dict_or_empty(_ok("ndns_info", ndns_info, {}))
+            # Read every tick now: one failed read must not drop every WAN
+            # back to the link heuristic, so keep the last answer.
             ping_check_status = dict_or_empty(
-                _ok("ping_check_status", ping_check_status, {})
+                _ok(
+                    "ping_check_status",
+                    ping_check_status,
+                    _prev.get("ping_check_status", {}),
+                )
             )
             # Crypto maps: not every router/firmware has the IPsec component,
             # so this endpoint may be unavailable. Mark the fetch as silent
             # so an absent endpoint doesn't produce a warning on every tick —
             # the api layer already debug-logs the reason. When the slow tier
             # is skipped, keep the previous snapshot instead of rebuilding it.
+            crypto_maps_failed = ipsec_status_refresh and isinstance(
+                crypto_maps, BaseException
+            )
+            crypto_maps_fresh = self._source_is_fresh(
+                "crypto_maps",
+                attempted=ipsec_status_refresh,
+                failed=crypto_maps_failed,
+            )
             if slow_refresh:
                 # On a transient fetch failure keep the previous snapshot —
                 # an empty default would flap every IPsec entity unavailable
@@ -493,8 +520,16 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 crypto_maps = _prev.get("crypto_maps", {})
             # DNS proxy is diagnostic-only and intentionally slow-cadence;
             # routers without the endpoint should not warn every refresh.
+            # A transient failure keeps the previous snapshot (an empty one
+            # read as "unknown" for a whole 15-minute tier); repeated failures
+            # mark the source stale through ``dns_proxy_fresh``.
+            dns_proxy_fresh = self._source_is_fresh(
+                "dns_proxy",
+                attempted=very_slow_refresh,
+                failed=very_slow_refresh and isinstance(dns_proxy, BaseException),
+            )
             dns_proxy = dict_or_empty(
-                _ok("dns_proxy", dns_proxy, {}, silent=True)
+                _ok("dns_proxy", dns_proxy, _prev.get("dns_proxy", {}), silent=True)
             )
             # IPsec diagnostics read recent router log lines on the same
             # very-slow cadence as DNS diagnostics. Missing log access is
@@ -552,7 +587,9 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # persist that over the real total. Skip the tick; the events are
             # still in the router log when the load succeeds.
             if events and self._oom_state_loaded:
-                next_oom_state = advance_oom_state(self._oom_state, events)
+                next_oom_state = advance_oom_state(
+                    self._oom_state, events, now=local_now()
+                )
                 if next_oom_state != self._oom_state:
                     self._oom_state = next_oom_state
                     self._oom_state_dirty = True
@@ -662,28 +699,30 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 (i.get("id"), i.get("type"), i.get("link"), i.get("state"))
                 for i in iface_list
             )
-            if medium_refresh:
-                # Rebuild the per-WAN payload every medium tick. This is a
-                # CPU-only transform of the already-fetched ``iface_list``
-                # (``async_get_wan_interfaces`` makes no RCI call when
-                # ``iface_list`` is passed), so it is cheap. It must NOT be
-                # cached on the ``(id, type, link, state)`` interface
-                # fingerprint: that fingerprint excludes the volatile
-                # ``uptime`` / ``ip`` fields, so reusing the cached list froze
-                # every WAN-interface uptime sensor at its value from the last
-                # link flap until the next flap. ``iface_fp`` is still emitted
-                # below for diagnostics/contract consumers.
-                try:
-                    wan_interfaces = await _bounded(
-                        self.client.async_get_wan_interfaces(
-                            interfaces=interfaces,
-                            iface_list=iface_list,
-                        )
+            # Rebuild the per-WAN payload EVERY tick: link, address, default
+            # route and ping check are what users alert on, and ``interfaces``
+            # is fetched every tick anyway. This is a
+            # CPU-only transform of the already-fetched ``iface_list``
+            # (``async_get_wan_interfaces`` makes no RCI call when
+            # ``iface_list`` is passed), so it is cheap. It must NOT be
+            # cached on the ``(id, type, link, state)`` interface
+            # fingerprint: that fingerprint excludes the volatile
+            # ``uptime`` / ``ip`` fields, so reusing the cached list froze
+            # every WAN-interface uptime sensor at its value from the last
+            # link flap until the next flap. ``iface_fp`` is still emitted
+            # below for diagnostics/contract consumers.
+            try:
+                wan_interfaces = await _bounded(
+                    self.client.async_get_wan_interfaces(
+                        interfaces=interfaces,
+                        iface_list=iface_list,
                     )
-                except asyncio.CancelledError:
-                    raise
-                except Exception as err:  # noqa: BLE001
-                    wan_interfaces = err
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:  # noqa: BLE001
+                wan_interfaces = err
+            if medium_refresh:
                 (
                     wifi,
                     wireguard,
@@ -731,7 +770,6 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     return_exceptions=True,
                 )
             else:
-                wan_interfaces = _prev.get("wan_interfaces", [])
                 wifi = _prev.get("wifi", [])
                 wireguard = _prev.get("wireguard", [])
                 vpn_tunnels = _prev.get("vpn_tunnels", [])
@@ -767,7 +805,6 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             interface_stats = dict_or_empty(_ok("interface_stats", interface_stats, {}))
             if interface_stats_failed:
                 interface_stats = _prev.get("interface_stats", {})
-                wan_interfaces = _prev.get("wan_interfaces", wan_interfaces)
 
             # Emit a single aggregated warning per tick for any non-critical
             # fetches that fell back to defaults. Keeping this above debug
@@ -800,7 +837,13 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     now_ts,
                 )
             else:
-                wan_by_id = _prev.get("wan_by_id", {})
+                # Fresh state, last counter sample: counters and rates are
+                # only re-read on the medium tier.
+                wan_interfaces, wan_by_id = carry_wan_samples(
+                    wan_interfaces,
+                    ping_check_status,
+                    self.data.get("wan_interfaces", []) if self.data else [],
+                )
 
             # ---------- Crypto map (site-to-site IPsec) enrichment ----------
             # Same delta pattern as the WAN block above. Counters reset to
@@ -809,11 +852,13 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # to absurd negative values on those events.
             if slow_refresh:
                 now_ts = asyncio.get_running_loop().time()
+                # A failed read re-publishes the previous snapshot, which has
+                # no new sample: carry its rates over instead of computing 0.
                 enrich_crypto_maps(
                     crypto_maps,
                     self.data.get("crypto_maps") if self.data else None,
                     now_ts,
-                    ipsec_status_refresh,
+                    ipsec_status_refresh and not crypto_maps_failed,
                 )
 
             if slow_refresh:
@@ -958,7 +1003,9 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "ping_check_status": ping_check_status,
                 "_iface_fingerprint": iface_fp,
                 "crypto_maps": crypto_maps,
+                "crypto_maps_fresh": crypto_maps_fresh,
                 "dns_proxy": dns_proxy,
+                "dns_proxy_fresh": dns_proxy_fresh,
                 "ipsec_diagnostics": ipsec_diagnostics,
                 "new_clients": new_macs,
                 "online_clients": online_macs,

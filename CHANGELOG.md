@@ -8,6 +8,49 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## Unreleased
+
+### ✨ New
+
+- **Downtime per provider.** Each WAN gets a Downtime sensor with long-term statistics: the time its link was lost or it had no internet (the router's ping check, where configured), so a statistics card compares providers by day, week, month or year. A WAN switched off on purpose is not counted; the sensor starts disabled for WireGuard and OpenVPN tunnels.
+
+### ⚠️ Breaking
+
+- **Uptime sensors show when the router, mesh node, WAN, PPPoE or WireGuard session started**, as a timestamp ("3 days ago"), and no longer keep long-term statistics. One row per reboot or reconnect; templates that read seconds need updating. WireGuard uptime is unavailable while the profile is down instead of 0.
+- **WAN Downtime is renamed Internet Downtime and counts lost internet, not only a lost default route.** The entity ID is unchanged. Time when the router could not be read, and its first five minutes after a boot, are no longer counted.
+- **Last Seen is a timestamp.** Dashboards show it as "2 hours ago" in your language and automations can compare it; templates that parsed the `03.10.2026 09:26:16` text need updating.
+- **Five counters no longer keep long-term statistics:** Disconnected Clients, DNS Proxy Failed Requests, IPsec VICI OOM Total, LAN RX and LAN TX. WireGuard RX/TX of a profile that is also a WAN uplink drop theirs too; the WAN's RX/TX Bytes sensors keep the same counter. Home Assistant shows a one-time Repairs notice for each.
+
+### 🔧 Changed
+
+- **WAN outages and failovers show within a minute instead of two.** WAN Connected, link, public IP, ping check and the active WAN update on every poll, at no extra request to the router.
+- **One request to the router per update instead of about twenty.** The combined request now goes to `/rci/`; the router rejected `/rci` with HTTP 405, so every update fell back to separate requests. Behind a KeenDNS address with authentication, this also stops a `Lockout … invalid address '127.0.0.1'` line in the router's log on every update.
+- **Fewer recorder rows.**
+  - Traffic and throughput of a WAN without link, an IPsec tunnel that is not established, or a WireGuard profile that is down are unavailable instead of 0.
+  - Internet Downtime updates every five minutes during an outage instead of every poll.
+  - WAN Connected `all_ping_check_profiles` no longer carries the per-poll success and fail counters.
+  - IPsec VICI OOM Total is disabled by default on new installations.
+  - Last Seen is set once when a client goes offline, and Wi-Fi Session once per connection, instead of following the router's counters (a phone in Wi-Fi power-save moved Last Seen every minute).
+  - WAN Connected `fail_count` stops at the ping check's failure threshold during an outage instead of counting every check.
+- **Fewer duplicate entities on new installations.** Provider, Role and Interface per WAN, the WAN Enabled binary sensor, PPPoE Uptime and the router-level WAN RX/TX start disabled; WAN Connected carries provider, role and interface as attributes, and the Enabled switch shows the same state.
+
+### 🐛 Fixed
+
+- **Wi-Fi, WAN and VPN switch changes survive a router reboot.** The router configuration is now saved after each toggle.
+- **IPsec VICI OOM Total counts events on KeeneticOS 5.x** and on Home Assistant installations whose clock runs in UTC; it stayed at 0 or counted hours late.
+- **A single failed read no longer shows IPsec tunnels as down or DNS Proxy Status as unknown.** The last state is kept; after three failed IPsec reads in a row the tunnel entities become unavailable. DNS Proxy Status reports down only after at least 20 unanswered queries.
+- **Mesh nodes are no longer duplicated** under their MAC address when the controller briefly returns no members, and no longer show a blank available firmware for one poll.
+- **Bandwidth Limit shows the router's own limit**, including one set or removed in the router's web interface.
+- **Wi-Fi Session no longer creeps forward** by about 90 seconds every half hour.
+- **Unknown instead of a fake 0** for router and mesh-node uptime and Active Connections when the router reports no value.
+- **Connection Policy `is_registered` shows the router's registration flag**; it was always false.
+- **Unavailable VPN switches left over for interfaces that are now WAN uplinks are removed.**
+- **Removing the integration clears its "unsupported features" notice in Repairs.**
+
+### 🔒 Privacy
+
+- **Diagnostics no longer contain client MAC and IPv6 addresses, public tunnel endpoints, the KeenDNS name or interface descriptions.** Interface descriptions are free text that may hold a contract or phone number.
+
 ## 1.18.0
 
 ### ⚠️ Breaking

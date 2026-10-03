@@ -249,7 +249,9 @@ async def test_coordinator_pipeline_fixtures_publishes_expected_data_keys() -> N
         "ping_check_status",
         "_iface_fingerprint",
         "crypto_maps",
+    "crypto_maps_fresh",
         "dns_proxy",
+    "dns_proxy_fresh",
         "ipsec_diagnostics",
         "new_clients",
     "online_clients",
@@ -339,7 +341,6 @@ async def test_coordinator_fast_only_tick_skips_medium_slow_and_very_slow_calls(
         "host_policies",
         "policies",
         "ndns",
-        "ping_check",
         "ipsec_status",
         "dns_proxy",
         "ipsec_diagnostics",
@@ -348,14 +349,15 @@ async def test_coordinator_fast_only_tick_skips_medium_slow_and_very_slow_calls(
         "wireguard",
         "vpn_tunnels",
         "wan_status",
-        "wan_interfaces",
         "traffic_stats",
         "port_info",
         "interface_stats",
     ):
         assert client.calls.get(skipped, 0) == 0
-    assert data["wan_interfaces"] is previous["wan_interfaces"]
-    assert data["wan_by_id"] is previous["wan_by_id"]
+    # WAN state (link, address, default route, ping check) is rebuilt every
+    # tick from the interfaces read above, at no extra router request.
+    assert client.calls["ping_check"] == 1
+    assert client.calls["wan_interfaces"] == 1
     assert data["crypto_maps"] is previous["crypto_maps"]
     assert data["mesh_associations"] is previous["mesh_associations"]
     assert data["mesh_nodes_by_cid"] is previous["mesh_nodes_by_cid"]
@@ -669,35 +671,6 @@ async def test_coordinator_fast_only_tick_preserves_wan_throughput_samples() -> 
     assert wan["tx_throughput"] == pytest.approx(11.0)
 
 
-async def test_coordinator_skips_wan_fetch_when_interfaces_fingerprint_unchanged() -> None:
-    """When the interface fingerprint matches the prior tick, `async_get_wan_interfaces`
-    is not called again — saves one RCI round-trip per fast tick on the common path."""
-    client = StageFixtureClient()
-    coordinator = _coordinator(client)
-    coordinator._refresh_count = 1  # not slow, not first_refresh
-
-    await _updated_data(coordinator)  # priming tick — wan fetched
-    coordinator.data = await _updated_data(coordinator)  # build prior fingerprint
-    coordinator._refresh_count = 5  # non-medium tick (5 % 2 != 0)
-
-    call_count = 0
-    original = client.async_get_wan_interfaces
-
-    async def counting_wan(**kwargs: Any):
-        nonlocal call_count
-        call_count += 1
-        return await original(**kwargs)
-
-    client.async_get_wan_interfaces = counting_wan
-
-    data = await _updated_data(coordinator)
-
-    assert call_count == 0, "WAN fetch must be skipped when fingerprint matches"
-    # Cached WAN payload is still returned, with correct shape.
-    assert data["wan_interfaces"]
-    assert data["wan_interfaces"][0]["id"] == coordinator.data["wan_interfaces"][0]["id"]
-
-
 async def test_coordinator_refetches_wan_when_interface_state_changes() -> None:
     """Fingerprint includes link/state — a flap on any iface must trigger refetch."""
     client = StageFixtureClient()
@@ -740,31 +713,6 @@ async def test_coordinator_clients_by_mac_index_is_shared_with_new_mac_diff() ->
     for mac in data["clients_by_mac"]:
         assert mac == mac.lower()
         assert ":" in mac or mac == ""
-
-
-async def test_coordinator_caches_ping_check_status_between_fast_ticks() -> None:
-    """P4: ping_check_status is fetched on medium ticks; fast ticks reuse cache."""
-    client = StageFixtureClient()
-    coordinator = _coordinator(client)
-    await _updated_data(coordinator)  # first refresh = slow
-
-    fetch_count = 0
-    original = client.async_get_ping_check_status
-
-    async def counting_pc() -> dict[str, Any]:
-        nonlocal fetch_count
-        fetch_count += 1
-        return await original()
-
-    client.async_get_ping_check_status = counting_pc
-    coordinator.data = await _updated_data(coordinator)
-    coordinator._refresh_count = 1  # fast tick (not slow, not very_slow)
-
-    fetch_count = 0
-    data = await _updated_data(coordinator)
-
-    assert fetch_count == 0, "ping_check_status must be cached on fast ticks"
-    assert "ping_check_status" in data
 
 
 async def test_coordinator_calls_prefetch_tick_on_each_refresh() -> None:

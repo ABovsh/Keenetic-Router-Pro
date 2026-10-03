@@ -28,23 +28,32 @@ def _class_assignments(path: pathlib.Path, class_name: str) -> dict[str, str]:
 
 
 @pytest.mark.parametrize(
-    ("relative_path", "class_name"),
+    "class_path",
     [
-        ("sensor/system.py", "KeeneticUptimeSensor"),
-        ("sensor/network.py", "KeeneticPppoeUptimeSensor"),
-        ("sensor/wireguard.py", "KeeneticWgUptimeSensor"),
-        ("sensor/mesh.py", "KeeneticMeshUptimeSensor"),
+        "sensor.system.KeeneticUptimeSensor",
+        "sensor.network.KeeneticPppoeUptimeSensor",
+        "sensor.network.KeeneticWanUptimeSensor",
+        "sensor.wireguard.KeeneticWgUptimeSensor",
+        "sensor.mesh.KeeneticMeshUptimeSensor",
     ],
 )
-def test_uptime_sensors_use_total_increasing(
-    relative_path: str,
-    class_name: str,
-) -> None:
-    assignments = _class_assignments(ROOT / relative_path, class_name)
+def test_uptime_sensors_are_start_times_without_statistics(class_path: str) -> None:
+    """Uptime long-term statistics answer nothing a history graph does not.
 
-    assert (
-        assignments.get("_attr_state_class") == "SensorStateClass.TOTAL_INCREASING"
-    ), f"{class_name} must use TOTAL_INCREASING for monotonic uptime"
+    The sensors publish when the session started, set once per session, so
+    they cost one row per reboot or reconnect.
+    """
+    import importlib
+
+    from homeassistant.components.sensor import SensorDeviceClass
+
+    module_name, class_name = class_path.rsplit(".", 1)
+    cls = getattr(
+        importlib.import_module(f"custom_components.keenetic_router_pro.{module_name}"),
+        class_name,
+    )
+    assert getattr(cls, "_attr_state_class", None) is None
+    assert cls._attr_device_class == SensorDeviceClass.TIMESTAMP
 
 
 def test_client_session_uptime_is_a_timestamp() -> None:
@@ -78,7 +87,7 @@ def test_active_connections_sensor_uses_measurement() -> None:
     "class_name",
     ["KeeneticClientLastSeenSensor"],
 )
-def test_client_last_seen_sensor_is_exact_datetime_text(
+def test_client_last_seen_sensor_is_a_timestamp(
     class_name: str,
 ) -> None:
     assignments = _class_assignments(
@@ -86,5 +95,5 @@ def test_client_last_seen_sensor_is_exact_datetime_text(
         class_name,
     )
 
-    assert assignments.get("_attr_device_class") == "None"
+    assert assignments.get("_attr_device_class") == "SensorDeviceClass.TIMESTAMP"
     assert "_attr_state_class" not in assignments

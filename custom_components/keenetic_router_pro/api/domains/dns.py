@@ -154,7 +154,8 @@ class DnsMixin:
                 )
 
             # Status thresholds:
-            #   "down"     — traffic is flowing but no upstream answered any query
+            #   "down"     — a real sample (>= 20 queries) went out and no
+            #                upstream answered any of it
             #   "degraded" — one upstream answers less than half of what it was
             #                sent, on a non-trivial sample. An overall failure
             #                rate cannot be used: the proxy races two upstreams
@@ -163,7 +164,9 @@ class DnsMixin:
             #                2026-10-02), which flipped the status every poll.
             if not proxies or total_servers == 0:
                 status = "unknown"
-            elif active_servers == 0 and sent_requests > 0:
+            elif active_servers == 0 and sent_requests >= _WEAK_UPSTREAM_MIN_SENT:
+                # The stats window is ten seconds (``stat_time``); a handful of
+                # queries still in flight is not an outage.
                 status = "down"
             elif weak_servers:
                 status = "degraded"
@@ -186,7 +189,10 @@ class DnsMixin:
         except asyncio.CancelledError:
             raise
         except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError) as err:
-            if _is_endpoint_missing(err):
-                self._dns_proxy_supported = False
+            if not _is_endpoint_missing(err):
+                # Transient: let the coordinator keep its previous snapshot
+                # instead of publishing an empty (unknown) status for a tier.
+                raise
+            self._dns_proxy_supported = False
             _LOGGER.debug("Error getting DNS proxy status: %s", err)
             return {}

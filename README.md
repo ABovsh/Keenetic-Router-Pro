@@ -75,7 +75,11 @@ An actively maintained, hardened fork of the original Keenetic Router Pro integr
 - **Useful diagnostics, not just raw counters.** The fork adds DNS proxy
   health and failed-request sensors, IPsec VICI out-of-memory diagnostics,
   ping-check aware WAN interpretation, WireGuard/IPsec state sensors, and
-  long-term-statistics-friendly uptime classes.
+  downtime totals: Downtime per WAN (the provider's link was lost, or it was
+  up without internet) and Internet Downtime (no WAN with internet). Time
+  the router itself could not be read is never counted. They keep long-term
+  statistics, so a statistics card shows the total for any week, month or
+  year and which provider was the most reliable.
 - **Presence and client controls are less noisy.** Client lookups use a
   precomputed MAC index, per-client entities skip no-op state writes, selected
   client presence is based on Keenetic's own link/active state, and
@@ -110,10 +114,9 @@ implemented here as of 1.9.0 — see **Bandwidth Limit** under Entities.
 - Wi-Fi, VPN, and client policy controls where supported by the router firmware.
 - Firmware update entities for the controller and mesh nodes.
 - WireGuard and IPsec diagnostic sensors.
-- IPsec VICI OOM Total: a monotonic counter of
-  `IpSec::Vici::Stats: out of memory` events from the router log,
-  persisted across HA restarts and HA-Statistics-friendly for
-  `events/hour` graphs.
+- IPsec VICI OOM Total: a count of `IpSec::Vici::Stats: out of memory`
+  events from the router log, persisted across HA restarts. Disabled by
+  default on new installations: it stays at 0 on a healthy router.
 - WAN and IPsec throughput shown in Mbit/s with automatic unit conversion (kbit/s ↔ Mbit/s ↔ Gbit/s) in the HA entity UI.
 - WAN interface devices group status, public IP, role, traffic counters,
   throughput and enable/disable control for each uplink.
@@ -190,8 +193,9 @@ headers in logs can be decoded.
 
 ## Polling
 
-- Fast tier: every `60s` — link state, client presence, IP neighbours.
-- Medium tier: every `120s` — Wi-Fi, WireGuard, VPN tunnels, WAN status and
+- Fast tier: every `60s` — link state, client presence, IP neighbours, and
+  each WAN's link, address, ping check and failover.
+- Medium tier: every `120s` — Wi-Fi, WireGuard, VPN tunnels, WAN traffic and
   throughput, interface counters, CPU, memory, connection counts.
 - Slow tier: every `180s` — mesh nodes, IPsec tunnels, per-client policies.
 - Very slow tier: every `900s` — firmware version, KeenDNS, DNS proxy.
@@ -209,11 +213,16 @@ Home Assistant writes a history row whenever an entity's state **or any of its
 attributes** changes, so an attribute that moves every poll costs a row every
 poll even when the entity itself has not changed. Nothing here publishes one:
 counters that only ever go up live on their own sensors, gauges are rounded and
-published on a slower tier than they are polled, and the Wi-Fi session sensor
-reports when the session started rather than counting seconds. Traffic
+published on a slower tier than they are polled, uptime and Wi-Fi session
+sensors report when the session started rather than counting seconds (one row
+per reboot or reconnect), and Last Seen is set once when a client goes
+offline. Traffic
 counters, throughput and the connection-count gauge each hold their last
 published value until it moves by a meaningful amount, so a busy link does not
-write a row per poll for a change no graph can render.
+write a row per poll for a change no graph can render. The counters of a WAN
+without link, a site-to-site tunnel that is not established or a WireGuard
+profile that is down are unavailable rather than 0, which records no
+long-term statistics while the link is down.
 
 If you want to cut it further:
 
@@ -276,8 +285,10 @@ Common entity groups:
 
 - Router device: router-wide health, firmware, reboot, client totals, ports,
   Wi-Fi radio temperature and legacy WAN summary sensors kept for compatibility.
-- WAN interface devices: per-uplink connectivity, enabled state, enable switch,
-  provider, role, public IP, uptime, traffic counters and throughput.
+- WAN interface devices: per-uplink connectivity, enable switch, public IP,
+  uptime, downtime, traffic counters and throughput. Provider, role and
+  interface name are attributes of the Connected sensor; their separate
+  sensors and the Enabled binary sensor are opt-in on new installations.
 - VPN interface devices: VPN state and enable/disable control for VPN profiles
   that are not WAN uplinks.
 - IPsec crypto-map devices: site-to-site tunnel state, IKE state, traffic,

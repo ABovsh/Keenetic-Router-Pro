@@ -38,11 +38,13 @@ async def async_setup_entry(
 
 
 class KeeneticClientRateLimitNumber(ClientEntity, NumberEntity, RestoreEntity):
-    """Cap one client's throughput via ``ip traffic-shape host``.
+    """Cap one client's download rate via ``ip traffic-shape host``.
 
-    The router does not report the configured shape back through any endpoint
-    this integration polls, so the entity restores its own last value across
-    restarts rather than showing a stale or empty reading.
+    The value shown is the router's own: ``show ip hotspot`` reports each
+    host's shape, with the download cap as ``tx`` (router to client), so a
+    limit set or removed in the router's web UI shows up here too. The value
+    this entity last wrote is the fallback for firmware that does not report
+    the shape.
     """
 
     _attr_has_entity_name = True
@@ -68,6 +70,10 @@ class KeeneticClientRateLimitNumber(ClientEntity, NumberEntity, RestoreEntity):
         ClientEntity.__init__(self, coordinator, entry.entry_id, entry.title, mac, label)
         self._api_client = client
         self._limit_kbps: float = 0
+        # Polls left before the router's value wins over a write. A tick
+        # already in flight during the write still carries the old shape, so
+        # wait for the router to echo the value, or for two polls at most.
+        self._pending_polls = 0
 
     @property
     def unique_id(self) -> str:
@@ -78,8 +84,30 @@ class KeeneticClientRateLimitNumber(ClientEntity, NumberEntity, RestoreEntity):
         return "Bandwidth Limit"
 
     @property
+    def _router_limit(self) -> int | None:
+        client = self._client or {}
+        shape = client.get("traffic-shape")
+        if not isinstance(shape, dict):
+            return None
+        try:
+            return int(shape.get("tx"))
+        except (TypeError, ValueError):
+            return None
+
+    @property
     def native_value(self) -> float:
-        return self._limit_kbps
+        router = self._router_limit
+        if router is None or self._pending_polls:
+            return self._limit_kbps
+        return router
+
+    def _handle_coordinator_update(self) -> None:
+        if self._pending_polls:
+            if self._router_limit == self._limit_kbps:
+                self._pending_polls = 0
+            else:
+                self._pending_polls -= 1
+        super()._handle_coordinator_update()
 
     async def async_added_to_hass(self) -> None:
         """Restore the limit we last wrote to the router."""
@@ -99,4 +127,5 @@ class KeeneticClientRateLimitNumber(ClientEntity, NumberEntity, RestoreEntity):
         kbps = int(value)
         await self._api_client.async_set_client_rate_limit(self._mac, kbps)
         self._limit_kbps = kbps
+        self._pending_polls = 2
         self.async_write_ha_state()

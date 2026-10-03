@@ -286,7 +286,8 @@ def test_downtime_accrues_only_while_every_wan_is_down() -> None:
     assert sensor.native_value == 0  # nothing accrued yet, outage just started
 
     sensor._handle_coordinator_update()  # t=220, still down for 60 s
-    assert sensor.native_value == 60
+    assert int(sensor._seconds) == 60
+    assert sensor.native_value == 0  # published in five-minute steps
 
     coordinator.data["active_wan"] = "LTE"
     sensor._handle_coordinator_update()  # t=280, recovered
@@ -470,7 +471,10 @@ def test_downtime_does_not_close_an_outage_on_an_unreachable_router() -> None:
     coordinator.last_update_success = True
     coordinator.data["active_wan"] = None
     sensor._handle_coordinator_update()  # t=220, still down
-    assert sensor.native_value == 120
+    # The unreadable stretch is not billed here (Router Downtime owns it);
+    # the clock restarts at the first fresh "down" observation.
+    assert sensor.native_value == 0
+    assert sensor._down_since == 220.0
 
 
 # --------------------------------------------------------------------------

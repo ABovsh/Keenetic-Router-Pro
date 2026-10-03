@@ -82,7 +82,8 @@ class KeeneticDisconnectedClientsSensor(ControllerEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "disconnected_clients"
     _attr_icon = "mdi:lan-disconnect"
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    # How many known devices are away is not worth a statistics history.
+    _attr_state_class = None
     _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:

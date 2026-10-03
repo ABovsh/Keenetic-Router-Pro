@@ -30,8 +30,13 @@ from homeassistant.const import (
 )
 
 from ..coordinator import KeeneticCoordinator
-from ..const import COUNTER_DEADBAND_BYTES
-from ..entity import CryptoMapEntity, CounterDeadbandMixin, ThroughputDeadbandMixin
+from ..const import COUNTER_DEADBAND_BYTES, FIELD_CONNECTED
+from ..entity import (
+    CounterDeadbandMixin,
+    CryptoMapEntity,
+    LinkActiveMixin,
+    ThroughputDeadbandMixin,
+)
 from ..utils import coerce_byte_count
 
 
@@ -123,7 +128,17 @@ class KeeneticCryptoMapIkeStateSensor(_CryptoMapSensorBase):
 # ---------- Traffic counters & throughput ----------
 
 
-class _CryptoMapBytesBase(CounterDeadbandMixin, _CryptoMapSensorBase):
+class _CryptoMapLinkActiveMixin(LinkActiveMixin):
+    """Gate a tunnel traffic sensor on the tunnel being established."""
+
+    def _link_active(self) -> bool:
+        cmap = self._cmap
+        return bool(cmap and cmap.get(FIELD_CONNECTED))
+
+
+class _CryptoMapBytesBase(
+    _CryptoMapLinkActiveMixin, CounterDeadbandMixin, _CryptoMapSensorBase
+):
     """Shared RX/TX byte counter base.
 
     The counters are a sum across all phase-2 SAs of the tunnel. A
@@ -180,7 +195,9 @@ class KeeneticCryptoMapTxBytesSensor(_CryptoMapBytesBase):
         return "TX Bytes"
 
 
-class _CryptoMapThroughputBase(ThroughputDeadbandMixin, _CryptoMapSensorBase):
+class _CryptoMapThroughputBase(
+    _CryptoMapLinkActiveMixin, ThroughputDeadbandMixin, _CryptoMapSensorBase
+):
     """Shared RX/TX throughput base.
 
     Throughput is computed in the coordinator as a delta against the

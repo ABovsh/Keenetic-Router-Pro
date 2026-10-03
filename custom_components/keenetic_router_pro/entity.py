@@ -1,7 +1,9 @@
 """Base entity classes for Keenetic Router Pro."""
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Any
+from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.core import callback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -103,6 +105,64 @@ class SourceFreshnessMixin:
         return bool(getattr(super(), "available", True)) and bool(
             (self.coordinator.data or {}).get(self._freshness_key, True)
         )
+
+
+class LinkActiveMixin:
+    """Report a traffic counter unavailable while its link is not up.
+
+    A down link's counter is not a measurement. Publishing its frozen value
+    still buys a full long-term-statistics quota (a short-term row every five
+    minutes, an hourly row forever) and hides the difference between "moved
+    no bytes" and "there is no link"; ``unavailable`` records nothing. Gate on
+    the link, never on the value: an idle standby uplink that is up reads a
+    true zero and stays available.
+    """
+
+    def _link_active(self) -> bool:
+        raise NotImplementedError
+
+    @property
+    def available(self) -> bool:
+        return bool(getattr(super(), "available", True)) and self._link_active()
+
+
+class UptimeMixin:
+    """Uptime published as the moment it started, set once per session.
+
+    The router reports elapsed seconds, which as a state is a clock: a row on
+    every poll, or 24 a day even when held for an hour. The start time is the
+    same fact in HA's native form (the frontend shows "3 days ago", like HA's
+    own Uptime sensor) and costs one row per reboot or reconnect. It is worked
+    out at the first reading and held: the router's counter and HA's clock
+    drift apart, and following them would move it on every poll. A counter
+    that went back is a new session and sets a new start.
+    """
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_state_class = None
+
+    @staticmethod
+    def _now() -> datetime:
+        return datetime.now().astimezone()
+
+    def _publish_uptime(self, seconds: int | None) -> datetime | None:
+        if seconds is not None and seconds <= 0:
+            # A down tunnel reports 0: no session yet, not one starting now.
+            seconds = None
+        previous = getattr(self, "_uptime_seconds", None)
+        self._uptime_seconds = seconds
+        if seconds is None:
+            self._up_since = None
+            return None
+        if (
+            getattr(self, "_up_since", None) is None
+            or previous is None
+            or seconds < previous
+        ):
+            self._up_since = (self._now() - timedelta(seconds=seconds)).replace(
+                microsecond=0
+            )
+        return self._up_since
 
 
 class ThroughputDeadbandMixin:
@@ -493,6 +553,14 @@ class CryptoMapEntity(_FingerprintedCoordinatorEntity):
     @property
     def _fingerprint_source(self) -> dict[str, Any] | None:
         return self._cmap
+
+    @property
+    def available(self) -> bool:
+        # Failed reads keep the last snapshot for a short grace window only;
+        # after that the tunnel's state is unknown, not "as last seen".
+        return super().available and bool(
+            (self.coordinator.data or {}).get("crypto_maps_fresh", True)
+        )
 
     @property
     def _cmap(self) -> dict[str, Any] | None:

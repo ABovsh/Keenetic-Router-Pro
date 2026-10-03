@@ -4,18 +4,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 
 from ..const import LINK_STATE_DOWN
 from ..coordinator import KeeneticCoordinator
-from ..entity import ControllerEntity
+from ..entity import ControllerEntity, SourceFreshnessMixin
 from ..utils import coerce_int
 
 
-class KeeneticDnsProxyStatusSensor(ControllerEntity, SensorEntity):
+class KeeneticDnsProxyStatusSensor(SourceFreshnessMixin, ControllerEntity, SensorEntity):
     """Overall DNS proxy health, including DoH upstream status."""
+
+    _freshness_key = "dns_proxy_fresh"
 
     _attr_has_entity_name = True
     _attr_name = "DNS Proxy Status"
@@ -60,7 +62,9 @@ class KeeneticDnsProxyStatusSensor(ControllerEntity, SensorEntity):
         }
 
 
-class KeeneticDnsProxyFailedRequestsSensor(ControllerEntity, SensorEntity):
+class KeeneticDnsProxyFailedRequestsSensor(
+    SourceFreshnessMixin, ControllerEntity, SensorEntity
+):
     """Number of failed DNS proxy upstream requests in router stats.
 
     Declared as ``TOTAL_INCREASING`` because the router's underlying
@@ -73,9 +77,12 @@ class KeeneticDnsProxyFailedRequestsSensor(ControllerEntity, SensorEntity):
 
     _attr_has_entity_name = True
     _attr_name = "DNS Proxy Failed Requests"
+    _freshness_key = "dns_proxy_fresh"
     _attr_icon = "mdi:alert-circle-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    # A diagnostic counter: its state answers "is DNS failing"; statistics
+    # added a row every five minutes forever.
+    _attr_state_class = None
     _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
