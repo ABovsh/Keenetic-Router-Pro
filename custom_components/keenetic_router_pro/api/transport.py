@@ -330,6 +330,24 @@ class _Transport:
                 raise KeeneticApiError(error_marker)
         return result
 
+    async def _async_save_configuration(self, change: str) -> None:
+        """Persist the running config so a change survives a router reboot.
+
+        Best effort: the change itself already took effect, so a failed save
+        is logged rather than reported as a failed command.
+        """
+        try:
+            await self._rci_parse("system configuration save")
+        except asyncio.CancelledError:
+            raise
+        except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError) as err:
+            _LOGGER.warning(
+                "%s applied, but saving the router configuration failed: %s — "
+                "the change will be lost on the next reboot",
+                change,
+                err,
+            )
+
     async def _rci_batch(self, tree: Dict[str, Any]) -> Dict[str, Any] | None:
         """Send a composite RCI tree request in a single HTTP round-trip.
 

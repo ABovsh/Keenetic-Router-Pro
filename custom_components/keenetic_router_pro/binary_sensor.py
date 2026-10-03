@@ -222,8 +222,18 @@ class KeeneticWanConnectedSensor(WanEntity, BinarySensorEntity):
             ignored = pc.get("all_profiles")
             if ignored and len(ignored) > 1:
                 # Surface all observed profiles for debugging when more
-                # than one is touching this interface.
-                attrs["all_ping_check_profiles"] = ignored
+                # than one is touching this interface — without their
+                # success/fail counters, which advance on every poll and
+                # wrote a recorder row each medium tick.
+                attrs["all_ping_check_profiles"] = [
+                    {
+                        "profile": profile.get("profile"),
+                        "status": profile.get("status"),
+                        "check_hosts": list(profile.get("check_hosts") or []),
+                    }
+                    for profile in ignored
+                    if isinstance(profile, dict)
+                ]
 
         layers = wan.get("summary_layers") or {}
         if layers:

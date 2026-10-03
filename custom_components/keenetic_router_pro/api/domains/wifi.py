@@ -216,3 +216,5 @@ class WifiMixin:
         cmd = f"interface {interface_name} {'up' if enabled else 'down'}"
         _LOGGER.debug("Set Wi-Fi %s enabled=%s via: %s", interface_name, enabled, cmd)
         await self._rci_parse(cmd)
+        # Without a save the router undoes the toggle on its next boot.
+        await self._async_save_configuration(f"Wi-Fi {interface_name} up/down")

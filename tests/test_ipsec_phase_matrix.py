@@ -138,7 +138,12 @@ def test_wan_connected_sensor_exposes_full_ping_check_attributes() -> None:
             "max_fails": 3,
             "update_interval": 10,
             "status": "fail",
-            "all_profiles": ["default", "backup"],
+            "all_profiles": [
+                {"profile": "default", "status": "fail", "success_count": 1,
+                 "fail_count": 3, "check_hosts": ["captive.keenetic.net"]},
+                {"profile": "backup", "status": "pass", "success_count": 9,
+                 "fail_count": 0, "check_hosts": ["1.1.1.1"]},
+            ],
         },
     }
     coordinator = SimpleNamespace(
@@ -173,7 +178,10 @@ def test_wan_connected_sensor_exposes_full_ping_check_attributes() -> None:
             "ping check failing (3/3 consecutive failures to "
             "captive.keenetic.net)"
         ),
-        "all_ping_check_profiles": ["default", "backup"],
+        "all_ping_check_profiles": [
+            {"profile": "default", "status": "fail", "check_hosts": ["captive.keenetic.net"]},
+            {"profile": "backup", "status": "pass", "check_hosts": ["1.1.1.1"]},
+        ],
         "summary_layers": {"conf": "running", "link": "up"},
     }
 

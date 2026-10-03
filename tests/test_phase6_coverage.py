@@ -763,7 +763,9 @@ async def test_wan_network_vpn_wifi_domain_branches_pin_router_shapes() -> None:
     await client.async_set_wireguard_enabled("Wireguard0", True)
     assert [call.args[0] for call in client._rci_parse.await_args_list] == [
         "interface WifiMaster0/AccessPoint0 down",
+        "system configuration save",
         "interface Wireguard0 up",
+        "system configuration save",
     ]
 
 

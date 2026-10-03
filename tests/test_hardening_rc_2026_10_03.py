@@ -707,3 +707,79 @@ def test_mesh_uptime_is_unknown_without_a_reading(
 
     data["mesh_nodes"][0]["uptime"] = "86400"
     assert sensor.native_value == 86400
+
+
+# ---------- Interface toggles survive a router reboot ----------
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda client: client.async_set_interface_enabled("Wireguard0", False),
+        lambda client: client.async_set_wifi_enabled("WifiMaster0/AccessPoint1", True),
+    ],
+    ids=["interface", "wifi"],
+)
+async def test_interface_toggles_are_saved_to_startup_config(call) -> None:
+    """Running-config changes are lost on reboot unless saved (CLI manual 2.5).
+
+    Crypto maps, client policies and rate limits already saved; the Wi-Fi,
+    WAN and VPN switches did not, so the router undid them on its next boot.
+    """
+    client = _client()
+    client._rci_parse = AsyncMock(return_value={})
+
+    await call(client)
+
+    commands = [c.args[0] for c in client._rci_parse.await_args_list]
+    assert commands[-1] == "system configuration save"
+    assert commands[0].startswith("interface ")
+
+
+async def test_a_failed_save_does_not_fail_the_toggle() -> None:
+    client = _client()
+
+    async def _parse(command: str):
+        if command == "system configuration save":
+            raise KeeneticApiError("busy")
+        return {}
+
+    client._rci_parse = AsyncMock(side_effect=_parse)
+
+    await client.async_set_interface_enabled("Wireguard0", True)
+
+
+# ---------- Ping-check profile list on the WAN Connected sensor ----------
+
+
+def test_ping_check_profile_list_does_not_carry_per_poll_counters(
+    keenetic_entry, keenetic_coordinator_factory
+) -> None:
+    """Two profiles on one WAN exposed success_count, which moves every poll."""
+    from custom_components.keenetic_router_pro.binary_sensor import (
+        KeeneticWanConnectedSensor,
+    )
+
+    profiles = [
+        {"profile": "_WEBADMIN_ISP", "status": "pass", "success_count": 7, "fail_count": 0,
+         "check_hosts": ["8.8.8.8"], "check_addresses": ["8.8.8.8"]},
+        {"profile": "custom", "status": "pass", "success_count": 3, "fail_count": 0,
+         "check_hosts": ["1.1.1.1"], "check_addresses": ["1.1.1.1"]},
+    ]
+    wan = {
+        "id": "ISP",
+        "internet_access": True,
+        "ping_check": {"passing": True, "status": "pass", "all_profiles": profiles},
+    }
+    data = {"wan_interfaces": [wan], "wan_by_id": {"ISP": wan}}
+    sensor = KeeneticWanConnectedSensor(keenetic_coordinator_factory(data), keenetic_entry, "ISP")
+
+    before = sensor.extra_state_attributes
+    profiles[0]["success_count"] = 8
+    profiles[1]["success_count"] = 4
+
+    assert sensor.extra_state_attributes == before
+    assert before["all_ping_check_profiles"] == [
+        {"profile": "_WEBADMIN_ISP", "status": "pass", "check_hosts": ["8.8.8.8"]},
+        {"profile": "custom", "status": "pass", "check_hosts": ["1.1.1.1"]},
+    ]
