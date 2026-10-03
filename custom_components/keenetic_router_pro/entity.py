@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from typing import Any
+from homeassistant.components.sensor import SensorDeviceClass
+from homeassistant.const import UnitOfTime
 from homeassistant.core import callback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -122,6 +124,40 @@ class LinkActiveMixin:
     @property
     def available(self) -> bool:
         return bool(getattr(super(), "available", True)) and self._link_active()
+
+
+class UptimeMixin:
+    """An uptime duration published once an hour, and at once on a restart.
+
+    Uptime advances on every poll, so publishing it as read writes a recorder
+    row a minute per sensor, and its long-term statistics say nothing a
+    history graph does not. Holding the value for an hour keeps it readable in
+    days with two decimals while costing 24 rows a day; a counter that went
+    back (reboot, reconnect) is published immediately.
+    """
+
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_suggested_unit_of_measurement = UnitOfTime.DAYS
+    _attr_suggested_display_precision = 2
+    _attr_state_class = None
+    _UPTIME_STEP = 3600
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return UnitOfTime.SECONDS
+
+    def _publish_uptime(self, seconds: int | None) -> int | None:
+        if seconds is None:
+            self._uptime_published = None
+            return None
+        previous = getattr(self, "_uptime_published", None)
+        if (
+            previous is None
+            or seconds < previous
+            or seconds - previous >= self._UPTIME_STEP
+        ):
+            self._uptime_published = seconds
+        return self._uptime_published
 
 
 class ThroughputDeadbandMixin:

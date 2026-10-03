@@ -510,16 +510,6 @@ def test_wireguard_traffic_is_unavailable_while_the_profile_is_down(
     assert sensor.available is True
 
 
-def test_wireguard_uptime_is_not_gated(
-    keenetic_entry, keenetic_coordinator_factory
-) -> None:
-    data = {"wireguard": {"profiles": {"Wireguard0": {"enabled": False, "state": "down"}}}}
-    sensor = KeeneticWgUptimeSensor(
-        keenetic_coordinator_factory(data), keenetic_entry, "Wireguard0"
-    )
-    assert sensor.available is True
-
-
 # ---------- Zero-on-a-healthy-router counters ship disabled ----------
 
 
@@ -903,3 +893,159 @@ def test_policy_select_reports_registration_from_the_hotspot_row(
     )
 
     assert select.extra_state_attributes["is_registered"] is True
+
+
+# ---------- Uptime: hourly duration, immediate on restart ----------
+
+
+def test_uptime_publishes_hourly_and_at_once_on_a_restart(
+    keenetic_entry, keenetic_coordinator_factory
+) -> None:
+    from custom_components.keenetic_router_pro.sensor.system import KeeneticUptimeSensor
+
+    data = {"system": {"uptime": 600_000}}
+    sensor = KeeneticUptimeSensor(keenetic_coordinator_factory(data), keenetic_entry)
+    assert sensor.native_value == 600_000
+
+    data["system"]["uptime"] = 600_000 + 3_540
+    assert sensor.native_value == 600_000
+
+    data["system"]["uptime"] = 600_000 + 3_600
+    assert sensor.native_value == 603_600
+
+    data["system"]["uptime"] = 45  # reboot
+    assert sensor.native_value == 45
+
+
+def test_wan_uptime_follows_the_same_hourly_rule(
+    keenetic_entry, keenetic_coordinator_factory
+) -> None:
+    wan = {"id": "ISP", "link_state": "up", "uptime": 10_000}
+    data = {"wan_interfaces": [wan], "wan_by_id": {"ISP": wan}}
+    from custom_components.keenetic_router_pro.sensor.network import KeeneticWanUptimeSensor
+
+    sensor = KeeneticWanUptimeSensor(keenetic_coordinator_factory(data), keenetic_entry, "ISP")
+    assert sensor.native_value == 10_000
+    wan["uptime"] = 10_060
+    assert sensor.native_value == 10_000
+
+
+def test_wireguard_uptime_is_unavailable_while_the_profile_is_down(
+    keenetic_entry, keenetic_coordinator_factory
+) -> None:
+    profile = {"enabled": False, "state": "down", "uptime": 0}
+    data = {"wireguard": {"profiles": {"Wireguard0": profile}}}
+    sensor = KeeneticWgUptimeSensor(
+        keenetic_coordinator_factory(data), keenetic_entry, "Wireguard0"
+    )
+    assert sensor.available is False
+
+    profile.update(enabled=True, state="up", uptime=120)
+    assert sensor.available is True
+    assert sensor.native_value == 120
+
+
+def test_pppoe_uptime_is_unknown_without_a_reading(
+    keenetic_entry, keenetic_coordinator_factory
+) -> None:
+    from custom_components.keenetic_router_pro.sensor.network import KeeneticPppoeUptimeSensor
+
+    sensor = KeeneticPppoeUptimeSensor(
+        keenetic_coordinator_factory({"wan_status": {"status": "down"}}), keenetic_entry
+    )
+    assert sensor.native_value is None
+
+
+# ---------- VPN switches shadowed by a WAN switch ----------
+
+
+def test_vpn_switch_of_an_interface_that_is_a_wan_is_pruned() -> None:
+    """A VPN uplink is controlled by its WAN device's Enabled switch.
+
+    Older releases also registered a VPN switch for it; setup never creates
+    that one any more, so it sat in the registry as unavailable forever
+    (two such switches on the live install, 2026-10-03).
+    """
+    import types
+    from types import SimpleNamespace
+
+    from custom_components.keenetic_router_pro import _async_prune_vpn_switches_shadowed_by_wan
+    from test_hardening_1_10_0 import _patched_registries
+
+    removed: list[str] = []
+    entries = [
+        SimpleNamespace(entity_id="switch.wg_pl_gdn", unique_id="e1_vpn_Wireguard0"),
+        SimpleNamespace(entity_id="switch.openvpn", unique_id="e1_vpn_OpenVPN0"),
+        SimpleNamespace(entity_id="switch.wan", unique_id="e1_wan_Wireguard0_enabled_switch"),
+    ]
+    er_mod = types.ModuleType("homeassistant.helpers.entity_registry")
+    er_mod.async_get = lambda _hass: SimpleNamespace(
+        async_remove=lambda entity_id: removed.append(entity_id)
+    )
+    er_mod.async_entries_for_config_entry = lambda _reg, _eid: entries
+    data = {"wan_interfaces": [{"id": "Wireguard0"}, {"id": "GigabitEthernet1"}]}
+
+    with _patched_registries(**{"homeassistant.helpers.entity_registry": er_mod}):
+        _async_prune_vpn_switches_shadowed_by_wan(None, SimpleNamespace(entry_id="e1"), data)
+
+    assert removed == ["switch.wg_pl_gdn"]
+
+
+# ---------- OOM counter: compare router log time with HA's time zone ----------
+
+
+def test_oom_clock_uses_the_home_assistant_time_zone(monkeypatch) -> None:
+    """Router logs are local time; a Docker HA process often runs in UTC.
+
+    Compared against the process clock, a router three hours ahead had every
+    fresh event dropped as "future" until it could fall out of the window.
+    """
+    import sys
+    import types
+    from datetime import datetime, timedelta, timezone
+
+    from custom_components.keenetic_router_pro.coordinator_parts.oom import local_now
+
+    kyiv = timezone(timedelta(hours=3))
+    fake_dt = types.ModuleType("homeassistant.util.dt")
+    fake_dt.now = lambda: datetime(2026, 10, 3, 12, 0, tzinfo=kyiv)
+    monkeypatch.setitem(sys.modules, "homeassistant.util.dt", fake_dt)
+    monkeypatch.setattr(sys.modules["homeassistant.util"], "dt", fake_dt, raising=False)
+
+    assert local_now() == datetime(2026, 10, 3, 12, 0)
+
+
+# ---------- Mesh firmware_available between polls ----------
+
+
+def test_mesh_firmware_available_survives_a_blank_poll() -> None:
+    """Live: Giga's available_version went '' for one slow tick (2026-10-03 08:53)."""
+    from custom_components.keenetic_router_pro.coordinator_parts.derived import (
+        carry_firmware_available,
+    )
+
+    previous = [{"cid": "a", "firmware": "4.3.8", "firmware_available": "4.3.9"}]
+    blank = [{"cid": "a", "firmware": "4.3.8", "firmware_available": ""}]
+    assert carry_firmware_available(blank, previous)[0]["firmware_available"] == "4.3.9"
+
+    newer = [{"cid": "a", "firmware": "4.3.8", "firmware_available": "4.4.0"}]
+    assert carry_firmware_available(newer, previous)[0]["firmware_available"] == "4.4.0"
+
+    installed = [{"cid": "a", "firmware": "4.3.9", "firmware_available": ""}]
+    assert carry_firmware_available(installed, previous)[0]["firmware_available"] == ""
+
+    other = [{"cid": "b", "firmware": "4.3.8", "firmware_available": ""}]
+    assert carry_firmware_available(other, previous)[0]["firmware_available"] == ""
+
+
+async def test_coordinator_carries_mesh_firmware_available() -> None:
+    client = StageFixtureClient()
+    coordinator = _coordinator(client)
+    client.mesh_nodes = [{"id": "n1", "cid": "n1", "firmware": "1", "firmware_available": "2"}]
+    coordinator.data = await _updated_data(coordinator)
+
+    client.mesh_nodes = [{"id": "n1", "cid": "n1", "firmware": "1", "firmware_available": ""}]
+    coordinator._refresh_count = 3
+    data = await _updated_data(coordinator)
+
+    assert data["mesh_nodes"][0]["firmware_available"] == "2"

@@ -6,10 +6,10 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfTime, EntityCategory
+from homeassistant.const import PERCENTAGE, EntityCategory
 
 from ..coordinator import KeeneticCoordinator
-from ..entity import ControllerEntity, DeadbandMixin
+from ..entity import ControllerEntity, DeadbandMixin, UptimeMixin
 from ..utils import coerce_float, coerce_seconds, parse_memory_fraction
 
 
@@ -109,20 +109,12 @@ class KeeneticMemoryUsageSensor(DeadbandMixin, ControllerEntity, SensorEntity):
         return None
 
 
-class KeeneticUptimeSensor(ControllerEntity, SensorEntity):
-    """Router uptime sensor.
-
-    ``TOTAL_INCREASING`` is the right state class for a monotonic
-    counter that resets to zero on reboot. Storing uptime as
-    ``MEASUREMENT`` produces a sawtooth in long-term statistics
-    because every poll inserts a fresh sample.
-    """
+class KeeneticUptimeSensor(UptimeMixin, ControllerEntity, SensorEntity):
+    """Router uptime, published hourly (see ``UptimeMixin``)."""
     _attr_has_entity_name = True
     _attr_translation_key = "uptime"
     _attr_icon = "mdi:timer-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -130,10 +122,6 @@ class KeeneticUptimeSensor(ControllerEntity, SensorEntity):
     @property
     def unique_id(self) -> str:
         return f"{self._entry_id}_uptime"
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        return UnitOfTime.SECONDS
 
     @property
     def native_value(self) -> int | None:
@@ -153,10 +141,10 @@ class KeeneticUptimeSensor(ControllerEntity, SensorEntity):
         for value in candidates:
             seconds = coerce_seconds(value, default=None)
             if seconds is not None:
-                return seconds
+                return self._publish_uptime(seconds)
 
-        # Unknown, not 0: a fake 0 reads as a reboot in long-term statistics.
-        return None
+        # Unknown, not 0: a fake 0 would read as a reboot.
+        return self._publish_uptime(None)
 
 
 class KeeneticFirmwareVersionSensor(ControllerEntity, SensorEntity):

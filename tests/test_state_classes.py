@@ -28,23 +28,33 @@ def _class_assignments(path: pathlib.Path, class_name: str) -> dict[str, str]:
 
 
 @pytest.mark.parametrize(
-    ("relative_path", "class_name"),
+    "class_path",
     [
-        ("sensor/system.py", "KeeneticUptimeSensor"),
-        ("sensor/network.py", "KeeneticPppoeUptimeSensor"),
-        ("sensor/wireguard.py", "KeeneticWgUptimeSensor"),
-        ("sensor/mesh.py", "KeeneticMeshUptimeSensor"),
+        "sensor.system.KeeneticUptimeSensor",
+        "sensor.network.KeeneticPppoeUptimeSensor",
+        "sensor.network.KeeneticWanUptimeSensor",
+        "sensor.wireguard.KeeneticWgUptimeSensor",
+        "sensor.mesh.KeeneticMeshUptimeSensor",
     ],
 )
-def test_uptime_sensors_use_total_increasing(
-    relative_path: str,
-    class_name: str,
-) -> None:
-    assignments = _class_assignments(ROOT / relative_path, class_name)
+def test_uptime_sensors_are_hourly_durations_without_statistics(class_path: str) -> None:
+    """Uptime long-term statistics answer nothing a history graph does not.
 
-    assert (
-        assignments.get("_attr_state_class") == "SensorStateClass.TOTAL_INCREASING"
-    ), f"{class_name} must use TOTAL_INCREASING for monotonic uptime"
+    The sensors are durations published once an hour (and at once on a
+    restart), with no state_class, so they cost one row an hour each.
+    """
+    import importlib
+
+    from homeassistant.components.sensor import SensorDeviceClass
+
+    module_name, class_name = class_path.rsplit(".", 1)
+    cls = getattr(
+        importlib.import_module(f"custom_components.keenetic_router_pro.{module_name}"),
+        class_name,
+    )
+    assert getattr(cls, "_attr_state_class", None) is None
+    assert cls._attr_device_class == SensorDeviceClass.DURATION
+    assert cls._UPTIME_STEP == 3600
 
 
 def test_client_session_uptime_is_a_timestamp() -> None:

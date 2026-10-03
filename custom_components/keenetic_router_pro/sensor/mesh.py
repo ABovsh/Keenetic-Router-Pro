@@ -6,11 +6,11 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTime, EntityCategory
+from homeassistant.const import EntityCategory
 
 from ..const import FIELD_CONNECTED, LINK_STATE_DOWN, LINK_STATE_UP
 from ..coordinator import KeeneticCoordinator
-from ..entity import ControllerEntity, DeadbandMixin, MeshEntity
+from ..entity import ControllerEntity, DeadbandMixin, MeshEntity, UptimeMixin
 from ..utils import coerce_float, coerce_int, coerce_seconds, parse_memory_fraction
 
 _ICON_ETHERNET = "mdi:ethernet"
@@ -103,15 +103,14 @@ class KeeneticMeshSystemStateSensor(ControllerEntity, SensorEntity):
         }
 
 
-class KeeneticMeshUptimeSensor(MeshEntity, SensorEntity):
-    """Mesh node uptime sensor."""
+class KeeneticMeshUptimeSensor(UptimeMixin, MeshEntity, SensorEntity):
+    """Mesh node uptime, published hourly (see ``UptimeMixin``)."""
     _attr_has_entity_name = True
     _attr_translation_key = "uptime"
     _attr_icon = "mdi:timer-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_suggested_display_precision = 0
-    # native_value reads node["uptime"] — ignored by MeshEntity base by default.
+    # native_value derives from node["uptime"], which MeshEntity ignores for
+    # write suppression; opt out so the hourly value actually reaches HA.
     _FINGERPRINT_IGNORE = frozenset()
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry, node_cid: str) -> None:
@@ -122,16 +121,12 @@ class KeeneticMeshUptimeSensor(MeshEntity, SensorEntity):
         return self._mesh_unique_id("uptime_v2")
 
     @property
-    def native_unit_of_measurement(self) -> str:
-        return UnitOfTime.SECONDS
-
-    @property
     def native_value(self) -> int | None:
         node = self._node
         if not node:
-            return None
+            return self._publish_uptime(None)
         # An offline node reports no system block: unknown, not a reboot.
-        return coerce_seconds(node.get("uptime"), default=None)
+        return self._publish_uptime(coerce_seconds(node.get("uptime"), default=None))
 
 
 class KeeneticMeshClientsSensor(MeshEntity, SensorEntity):

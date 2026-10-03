@@ -24,6 +24,7 @@ from ..entity import (
     LinkActiveMixin,
     SourceFreshnessMixin,
     ThroughputDeadbandMixin,
+    UptimeMixin,
     WanEntity,
 )
 from ..utils import (
@@ -111,19 +112,12 @@ class KeeneticWanIpSensor(ControllerEntity, SensorEntity):
         }
 
 
-class KeeneticPppoeUptimeSensor(ControllerEntity, SensorEntity):
-    """PPPoE connection uptime sensor.
-
-    Uses ``TOTAL_INCREASING`` so long-term statistics record the
-    monotonic counter cleanly and reset to zero on reconnect, instead
-    of a sawtooth gauge graph.
-    """
+class KeeneticPppoeUptimeSensor(UptimeMixin, ControllerEntity, SensorEntity):
+    """Uplink session uptime, published hourly (see ``UptimeMixin``)."""
     _attr_has_entity_name = True
     _attr_translation_key = "pppoe_uptime"
     _attr_icon = "mdi:timer-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -133,13 +127,9 @@ class KeeneticPppoeUptimeSensor(ControllerEntity, SensorEntity):
         return f"{self._entry_id}_pppoe_uptime"
 
     @property
-    def native_unit_of_measurement(self) -> str:
-        return UnitOfTime.SECONDS
-
-    @property
-    def native_value(self) -> int:
-        wan = self.coordinator.data.get("wan_status", {})
-        return coerce_seconds(wan.get("uptime"), default=0) or 0
+    def native_value(self) -> int | None:
+        wan = self.coordinator.data.get("wan_status", {}) or {}
+        return self._publish_uptime(coerce_seconds(wan.get("uptime"), default=None))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
@@ -449,14 +439,10 @@ class KeeneticWanPublicIpSensor(_WanSensorBase):
         }
 
 
-class KeeneticWanUptimeSensor(_WanSensorBase):
-    """Session uptime for the WAN, in seconds."""
+class KeeneticWanUptimeSensor(UptimeMixin, _WanSensorBase):
+    """Session uptime for the WAN, published hourly (see ``UptimeMixin``)."""
     _attr_icon = "mdi:timer-outline"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_device_class = SensorDeviceClass.DURATION
-    # Same statistics contract as the PPPoE/mesh uptime sensors.
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_suggested_display_precision = 0
     # native_value derives from wan["uptime"]; the WanEntity base ignores it
     # for write-suppression, so opt out of dedup here.
     _FINGERPRINT_IGNORE = frozenset()
@@ -470,15 +456,11 @@ class KeeneticWanUptimeSensor(_WanSensorBase):
         return "Uptime"
 
     @property
-    def native_unit_of_measurement(self) -> str:
-        return UnitOfTime.SECONDS
-
-    @property
     def native_value(self) -> int | None:
         wan = self._wan
         if not wan:
-            return None
-        return coerce_seconds(wan.get("uptime"), default=None)
+            return self._publish_uptime(None)
+        return self._publish_uptime(coerce_seconds(wan.get("uptime"), default=None))
 
 
 class _WanLinkActiveMixin(LinkActiveMixin):
