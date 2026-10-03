@@ -203,10 +203,14 @@ class KeeneticClientUptimeSensor(ClientEntity, SensorEntity):
 
         computed = datetime.now().astimezone() - timedelta(seconds=seconds)
         reconnected = self._last_uptime is not None and seconds < self._last_uptime
+        # Within one session the start can only be refined EARLIER. The
+        # router's per-client counter runs a few percent slow (measured live:
+        # +90 s every ~35 min), so a later recomputation is drift, not news —
+        # following it published a creeping start and a row each time.
         if (
             self._session_start is None
             or reconnected
-            or abs(computed - self._session_start) > _SESSION_START_TOLERANCE
+            or self._session_start - computed > _SESSION_START_TOLERANCE
         ):
             self._session_start = computed
         self._last_uptime = seconds

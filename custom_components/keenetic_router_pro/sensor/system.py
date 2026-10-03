@@ -136,7 +136,7 @@ class KeeneticUptimeSensor(ControllerEntity, SensorEntity):
         return UnitOfTime.SECONDS
 
     @property
-    def native_value(self) -> int:
+    def native_value(self) -> int | None:
         sys = self.coordinator.data.get("system", {}) or {}
         candidates = []
 
@@ -155,7 +155,8 @@ class KeeneticUptimeSensor(ControllerEntity, SensorEntity):
             if seconds is not None:
                 return seconds
 
-        return 0
+        # Unknown, not 0: a fake 0 reads as a reboot in long-term statistics.
+        return None
 
 
 class KeeneticFirmwareVersionSensor(ControllerEntity, SensorEntity):

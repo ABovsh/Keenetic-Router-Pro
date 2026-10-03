@@ -615,3 +615,95 @@ def test_oom_total_counts_live_shaped_events() -> None:
 
     assert state["total"] == 2
     assert state["last_seen_iso"] == "2026-10-03T10:06:28"
+
+
+# ---------- Client Wi-Fi session start ----------
+
+
+def _session_sensor(monkeypatch, keenetic_entry, keenetic_coordinator_factory):
+    from datetime import datetime as real_datetime, timezone
+
+    from custom_components.keenetic_router_pro.sensor import client as client_module
+
+    clock = {"now": real_datetime(2026, 10, 3, 8, 0, tzinfo=timezone.utc)}
+
+    class _Clock(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock["now"]
+
+    monkeypatch.setattr(client_module, "datetime", _Clock)
+    mac = "aa:bb:cc:dd:ee:ff"
+    data = {"clients_by_mac": {mac: {"mac": mac, "active": True, "uptime": 3600}}}
+    sensor = client_module.KeeneticClientUptimeSensor(
+        keenetic_coordinator_factory(data), keenetic_entry, mac, "Phone"
+    )
+    return sensor, data["clients_by_mac"][mac], clock
+
+
+def test_session_start_does_not_creep_when_the_router_counter_lags(
+    monkeypatch, keenetic_entry, keenetic_coordinator_factory
+) -> None:
+    """Live S24/A16 sessions crept +90 s every ~35 min with no reconnect.
+
+    The router's per-client uptime runs a few percent slower than the wall
+    clock, so the recomputed start drifts forward until it crosses the
+    tolerance and is re-published: a wrong value plus a recorder row.
+    """
+    from datetime import timedelta
+
+    sensor, client, clock = _session_sensor(
+        monkeypatch, keenetic_entry, keenetic_coordinator_factory
+    )
+    start = sensor.native_value
+
+    for _ in range(6):
+        clock["now"] += timedelta(minutes=35)
+        client["uptime"] += 35 * 60 - 90
+        assert sensor.native_value == start
+
+
+def test_session_start_still_follows_a_reconnect(
+    monkeypatch, keenetic_entry, keenetic_coordinator_factory
+) -> None:
+    from datetime import timedelta
+
+    sensor, client, clock = _session_sensor(
+        monkeypatch, keenetic_entry, keenetic_coordinator_factory
+    )
+    start = sensor.native_value
+
+    clock["now"] += timedelta(minutes=10)
+    client["uptime"] = 30
+    assert sensor.native_value == clock["now"] - timedelta(seconds=30)
+    assert sensor.native_value > start
+
+
+# ---------- Uptime counters without a reading ----------
+
+
+def test_router_uptime_is_unknown_without_a_reading(
+    keenetic_entry, keenetic_coordinator_factory
+) -> None:
+    """A fake 0 on a TOTAL_INCREASING counter reads as a reset in statistics."""
+    from custom_components.keenetic_router_pro.sensor.system import KeeneticUptimeSensor
+
+    sensor = KeeneticUptimeSensor(
+        keenetic_coordinator_factory({"system": {"uptime": "garbage"}}), keenetic_entry
+    )
+    assert sensor.native_value is None
+
+
+def test_mesh_uptime_is_unknown_without_a_reading(
+    keenetic_entry, keenetic_coordinator_factory
+) -> None:
+    from custom_components.keenetic_router_pro.sensor.mesh import KeeneticMeshUptimeSensor
+
+    data = {"mesh_nodes": [{"id": "node", "cid": "node", "connected": False}]}
+    sensor = KeeneticMeshUptimeSensor(
+        keenetic_coordinator_factory(data), keenetic_entry, "node"
+    )
+    assert sensor.native_value is None
+
+    data["mesh_nodes"][0]["uptime"] = "86400"
+    assert sensor.native_value == 86400

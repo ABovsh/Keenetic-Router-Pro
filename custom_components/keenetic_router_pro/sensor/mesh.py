@@ -126,11 +126,12 @@ class KeeneticMeshUptimeSensor(MeshEntity, SensorEntity):
         return UnitOfTime.SECONDS
 
     @property
-    def native_value(self) -> int:
+    def native_value(self) -> int | None:
         node = self._node
         if not node:
-            return 0
-        return coerce_seconds(node.get("uptime"), default=0) or 0
+            return None
+        # An offline node reports no system block: unknown, not a reboot.
+        return coerce_seconds(node.get("uptime"), default=None)
 
 
 class KeeneticMeshClientsSensor(MeshEntity, SensorEntity):
