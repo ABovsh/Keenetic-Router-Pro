@@ -75,7 +75,10 @@ An actively maintained, hardened fork of the original Keenetic Router Pro integr
 - **Useful diagnostics, not just raw counters.** The fork adds DNS proxy
   health and failed-request sensors, IPsec VICI out-of-memory diagnostics,
   ping-check aware WAN interpretation, WireGuard/IPsec state sensors, and
-  long-term-statistics-friendly uptime classes.
+  downtime totals: Router Downtime (switched off or rebooting, dated from the
+  router's own uptime), Internet Downtime (no WAN with internet) and an
+  optional Downtime per WAN. They keep long-term statistics, so a
+  statistics card shows the total for any week, month or year.
 - **Presence and client controls are less noisy.** Client lookups use a
   precomputed MAC index, per-client entities skip no-op state writes, selected
   client presence is based on Keenetic's own link/active state, and
@@ -113,8 +116,8 @@ implemented here as of 1.9.0 — see **Bandwidth Limit** under Entities.
 - IPsec VICI OOM Total: a monotonic counter of
   `IpSec::Vici::Stats: out of memory` events from the router log,
   persisted across HA restarts and HA-Statistics-friendly for
-  `events/hour` graphs. Disabled by default on new installations, like
-  WAN Downtime: both stay at 0 on a healthy router.
+  `events/hour` graphs. Disabled by default on new installations: it
+  stays at 0 on a healthy router.
 - WAN and IPsec throughput shown in Mbit/s with automatic unit conversion (kbit/s ↔ Mbit/s ↔ Gbit/s) in the HA entity UI.
 - WAN interface devices group status, public IP, role, traffic counters,
   throughput and enable/disable control for each uplink.
@@ -210,8 +213,9 @@ Home Assistant writes a history row whenever an entity's state **or any of its
 attributes** changes, so an attribute that moves every poll costs a row every
 poll even when the entity itself has not changed. Nothing here publishes one:
 counters that only ever go up live on their own sensors, gauges are rounded and
-published on a slower tier than they are polled, and the Wi-Fi session sensor
-reports when the session started rather than counting seconds. Traffic
+published on a slower tier than they are polled, uptime sensors update once
+an hour without long-term statistics, and the Wi-Fi session sensor reports
+when the session started rather than counting seconds. Traffic
 counters, throughput and the connection-count gauge each hold their last
 published value until it moves by a meaningful amount, so a busy link does not
 write a row per poll for a change no graph can render. The counters of a WAN

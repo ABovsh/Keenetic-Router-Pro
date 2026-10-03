@@ -10,6 +10,11 @@ git log.
 
 ## Unreleased
 
+### ⚠️ Breaking
+
+- Router, mesh-node, WAN, PPPoE and WireGuard uptime sensors update once an hour (immediately after a reboot or reconnect), are shown in days and no longer record long-term statistics. WireGuard uptime is unavailable while the profile is down instead of 0.
+- WAN Downtime is renamed Internet Downtime (the entity ID is unchanged). It now counts time when no WAN has internet access (the ping check, where configured), not only time when no WAN holds the default route. Time when the router could not be read is no longer counted; time the router was off is counted by the new Router Downtime.
+
 ### Security
 
 - Downloaded diagnostics no longer contain client MAC addresses (they were still present under `via`), client IPv6 addresses, the public endpoints of WireGuard, IPsec and KeenDNS tunnels, the KeenDNS name, or interface descriptions (free text that may hold a contract or phone number).
@@ -26,13 +31,19 @@ git log.
 - Router and mesh-node uptime, and Active Connections, show unknown instead of 0 when the router reports no value.
 - Connection Policy `is_registered` now shows the router's registration flag; it was always false.
 - Removing an entry also removes its "unsupported features" notice from Repairs.
+- VPN switches that older versions created for interfaces that are now WAN uplinks are removed. Nothing updated them, so they stayed unavailable.
+- IPsec VICI OOM Total compares router log times with Home Assistant's time zone. On installations whose system clock runs in UTC, new events were counted hours late or not at all.
+- A mesh node no longer shows an empty available firmware version for one poll when the controller briefly reports it blank.
 
 ### Improvements
 
+- New Router Downtime sensor: total time the router was switched off or rebooting. It is dated from the router's own uptime, so it stays correct when Home Assistant was down at the same time, and a router that was only unreachable is not counted.
+- New per-WAN Downtime sensor: total time an enabled uplink had no internet access. It is disabled by default because every one records long-term statistics.
+- Downtime sensors keep long-term statistics, so a statistics card shows the total for any day, week, month or year.
 - Each update now usually needs one request instead of about twenty. The neighbour table is read from the combined request instead of a separate command, and mesh members are included on the slow tier.
 - Traffic counters and throughput of a WAN without link, of a site-to-site tunnel that is not established, and of a WireGuard profile that is down are unavailable instead of 0. This removes their long-term statistics rows while the link is down.
 - WAN Connected `all_ping_check_profiles` lists each profile's name, status and hosts; the per-poll success and fail counters were removed from it.
-- IPsec VICI OOM Total and WAN Downtime are disabled by default on new installations. Existing entities are not changed.
+- IPsec VICI OOM Total is disabled by default on new installations. Existing entities are not changed.
 
 ## 1.18.0
 
