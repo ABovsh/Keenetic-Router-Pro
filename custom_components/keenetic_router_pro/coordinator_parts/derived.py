@@ -54,6 +54,30 @@ def mesh_associations(mesh_nodes: Any) -> dict[str, Any]:
     return {"total": total, "by_node": by_node}
 
 
+def carry_firmware_available(
+    nodes: list[Any], previous_nodes: list[Any] | None
+) -> list[Any]:
+    """Keep a mesh node's known available firmware through a blank poll.
+
+    The controller intermittently reports ``fw-available`` as empty for one
+    poll, which blanked the update entity's version and wrote two rows. A
+    blank only stands once the node runs the version it had been offered.
+    """
+    known = {
+        node.get("cid") or node.get("id"): node.get("firmware_available")
+        for node in previous_nodes or []
+        if isinstance(node, dict)
+    }
+    carried: list[Any] = []
+    for node in nodes:
+        if isinstance(node, dict) and not node.get("firmware_available"):
+            offered = known.get(node.get("cid") or node.get("id"))
+            if offered and offered != node.get("firmware"):
+                node = {**node, "firmware_available": offered}
+        carried.append(node)
+    return carried
+
+
 def real_client_macs(clients_by_mac: dict[str, dict[str, Any]]) -> set[str]:
     """Return MACs of genuine hotspot clients, excluding neighbour-only ghosts.
 

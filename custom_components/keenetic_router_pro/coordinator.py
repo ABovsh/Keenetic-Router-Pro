@@ -18,6 +18,7 @@ from .const import DOMAIN, FAST_SCAN_INTERVAL
 from .utils import is_client_online
 from .coordinator_parts.derived import (
     build_clients_by_mac,
+    carry_firmware_available,
     counter_rate_bytes_per_second,
     mesh_associations,
     real_client_macs,
@@ -33,7 +34,7 @@ from .coordinator_parts.fetching import (
     next_backoff_interval,
     ok_or_default,
 )
-from .coordinator_parts.oom import advance_oom_state
+from .coordinator_parts.oom import advance_oom_state, local_now
 from .coordinator_parts.payloads import (
     dict_or_empty,
     list_or_empty,
@@ -457,6 +458,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # the API layer now raises instead of returning MAC-keyed
             # fallback nodes (which used to flip mesh unique_ids).
             mesh_nodes = _ok("mesh_nodes", mesh_nodes, _prev.get("mesh_nodes", []))
+            if slow_refresh and not mesh_nodes_failed and isinstance(mesh_nodes, list):
+                mesh_nodes = carry_firmware_available(
+                    mesh_nodes, _prev.get("mesh_nodes")
+                )
             mesh_nodes_fresh = self._source_is_fresh(
                 "mesh_nodes",
                 attempted=slow_refresh,
@@ -575,7 +580,9 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # persist that over the real total. Skip the tick; the events are
             # still in the router log when the load succeeds.
             if events and self._oom_state_loaded:
-                next_oom_state = advance_oom_state(self._oom_state, events)
+                next_oom_state = advance_oom_state(
+                    self._oom_state, events, now=local_now()
+                )
                 if next_oom_state != self._oom_state:
                     self._oom_state = next_oom_state
                     self._oom_state_dirty = True

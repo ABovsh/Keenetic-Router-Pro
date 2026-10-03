@@ -14,6 +14,23 @@ _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.coordinator")
 _KEENETIC_LOG_TS_FORMATS = ("%b %d %H:%M:%S", "%b  %d %H:%M:%S")
 
 
+def local_now() -> datetime:
+    """Return naive wall-clock time in Home Assistant's configured time zone.
+
+    Router log timestamps are local time without a zone. The HA process clock
+    is often UTC (Docker without TZ), which made a router ahead of UTC look
+    like it logged in the future; the configured zone is the household's.
+    """
+    try:
+        from homeassistant.util import dt as dt_util
+    except ImportError:
+        return datetime.now()
+    now = getattr(dt_util, "now", None)
+    if now is None:
+        return datetime.now()
+    return now().replace(tzinfo=None)
+
+
 def parse_keenetic_log_ts(
     value: str | None,
     now: datetime | None = None,

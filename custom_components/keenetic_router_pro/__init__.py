@@ -158,6 +158,39 @@ def _async_prune_interface_switches(hass: HomeAssistant, entry: ConfigEntry) -> 
 
 
 @callback
+def _async_prune_vpn_switches_shadowed_by_wan(
+    hass: HomeAssistant, entry: ConfigEntry, data: dict[str, Any] | None
+) -> None:
+    """Remove VPN switches for interfaces that are WAN uplinks.
+
+    A VPN uplink is switched from its WAN device's Enabled switch, and setup
+    no longer creates a separate VPN switch for it. Ones registered by older
+    releases are never provided again and would stay unavailable forever.
+    """
+    wan_ids = {
+        str(wan.get("id"))
+        for wan in (data or {}).get("wan_interfaces", []) or []
+        if isinstance(wan, dict) and wan.get("id")
+    }
+    if not wan_ids:
+        return
+    try:
+        er = importlib.import_module(_ENTITY_REGISTRY)
+    except ImportError:
+        return
+    entries_for = getattr(er, "async_entries_for_config_entry", None)
+    if entries_for is None:
+        return
+
+    registry = er.async_get(hass)
+    prefix = f"{entry.entry_id}_vpn_"
+    for registry_entry in list(entries_for(registry, entry.entry_id)):
+        unique_id = getattr(registry_entry, "unique_id", "") or ""
+        if unique_id.startswith(prefix) and unique_id[len(prefix):] in wan_ids:
+            registry.async_remove(registry_entry.entity_id)
+
+
+@callback
 def _async_remove_stale_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Delete device rows this entry no longer has a single entity for.
 
@@ -558,6 +591,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _async_prune_client_entities(hass, entry)
     _async_prune_interface_switches(hass, entry)
+    _async_prune_vpn_switches_shadowed_by_wan(hass, entry, coordinator.data)
 
     _async_update_insecure_http_issue(hass, entry, host, use_ssl)
 
