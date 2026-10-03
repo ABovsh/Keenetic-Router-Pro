@@ -355,7 +355,10 @@ class _Transport:
             return None
         if self._rci_batch_supported is False:
             return None
-        path = RCI_ROOT
+        # The tree endpoint is ``/rci/``: KeeneticOS answers ``POST /rci``
+        # with 405, and behind a KeenDNS proxy with ``auth`` each 405 also
+        # logs a Lockout "invalid address '127.0.0.1'" record.
+        path = f"{RCI_ROOT}/"
         try:
             result = await self._request("POST", path, json=tree)
         except asyncio.CancelledError:
@@ -364,7 +367,7 @@ class _Transport:
             _LOGGER.debug(
                 "RCI batch POST failed: %s", err
             )
-            if _is_endpoint_missing(err):
+            if _is_endpoint_missing(err) or getattr(err, "status", None) == 405:
                 self._rci_batch_supported = False
             return None
         except (aiohttp.ClientError, asyncio.TimeoutError) as err:

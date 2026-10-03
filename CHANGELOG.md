@@ -8,6 +8,12 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## Unreleased
+
+### Bug fixes
+
+- The combined data request now goes to `/rci/`. It was sent to `/rci`, which the router rejects with HTTP 405, so every update fell back to separate requests. On routers reached through a KeenDNS address with authentication, each rejected request also added a `Lockout … invalid address '127.0.0.1'` line to the router's system log.
+
 ## 1.18.0
 
 ### ⚠️ Breaking

@@ -169,3 +169,30 @@ async def test_prefetch_tick_returns_false_when_batch_unsupported() -> None:
     assert ok is False
     assert client._tick_cache is None
     client._request.assert_not_awaited()
+
+
+async def test_rci_batch_posts_to_rci_root_with_trailing_slash() -> None:
+    # KeeneticOS answers ``POST /rci`` with 405; the RCI tree endpoint is
+    # ``POST /rci/``. Behind a KeenDNS proxy with ``auth`` every 405 also
+    # logs a Lockout "invalid address '127.0.0.1'" record on the router.
+    client = _client()
+    tree = {"show": {"system": {}}}
+    client._request = AsyncMock(return_value={"show": {"system": {}}})
+
+    await client._rci_batch(tree)
+
+    client._request.assert_awaited_once_with("POST", "/rci/", json=tree)
+
+
+async def test_rci_batch_latches_off_on_method_not_allowed() -> None:
+    client = _client()
+    client._request = AsyncMock(
+        side_effect=KeeneticApiError("HTTP error 405 for /rci/: <empty>", status=405)
+    )
+
+    assert await client._rci_batch({"show": {"system": {}}}) is None
+    assert client._rci_batch_supported is False
+
+    client._request = AsyncMock(return_value={"show": {"system": {}}})
+    assert await client._rci_batch({"show": {"system": {}}}) is None
+    client._request.assert_not_awaited()
