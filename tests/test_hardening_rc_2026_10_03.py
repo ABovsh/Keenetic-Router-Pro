@@ -783,3 +783,64 @@ def test_ping_check_profile_list_does_not_carry_per_poll_counters(
         {"profile": "_WEBADMIN_ISP", "status": "pass", "check_hosts": ["8.8.8.8"]},
         {"profile": "custom", "status": "pass", "check_hosts": ["1.1.1.1"]},
     ]
+
+
+# ---------- Diagnostics redaction against live payload keys ----------
+
+
+async def test_diagnostics_redacts_identifiers_found_in_live_payloads() -> None:
+    """Keys seen in a live NH dump (2026-10-03) that escaped redaction."""
+    import re
+    from types import SimpleNamespace
+
+    from custom_components.keenetic_router_pro import diagnostics
+
+    data = {
+        "clients": [
+            {
+                "via": "80:07:94:46:ab:ab",
+                "ip6": ["2001:db8::1234"],
+                "neighbour": {"via": "80:07:94:46:ab:ab"},
+            }
+        ],
+        "interfaces": {
+            "GigabitEthernet1": {"description": "0677779709 - BKM ISP"},
+            "Wireguard1": {
+                "wireguard": {"peer": [{"local-endpoint-address": "100.64.20.190"}]}
+            },
+        },
+        "crypto_maps": {
+            "site": {"phase1": {"local_addr": "100.64.20.190", "remote_addr": "203.0.113.76"}}
+        },
+        "ndns": {
+            "booked": "yahny",
+            "address6": "2001:db8::1",
+            "ttp": {
+                "tunnel": [
+                    {
+                        "client": "198.51.100.4",
+                        "target-local": "100.64.20.190:52604",
+                        "target-remote": "198.51.100.10:443",
+                        "destination": "100.64.20.190:80",
+                    }
+                ]
+            },
+        },
+        "mesh_nodes": [{"backhaul": {"root": "8000.50:ff:20:f8:4e:39", "bridge": "8000.50:ff:20:f8:4e:39"}}],
+    }
+    entry = SimpleNamespace(
+        title="Router", version=1, domain="keenetic_router_pro", source="user",
+        data={}, options={},
+        runtime_data=SimpleNamespace(
+            coordinator=SimpleNamespace(data=data, update_interval=None, last_update_success=True),
+            client=None,
+        ),
+    )
+
+    dumped = repr(await diagnostics.async_get_config_entry_diagnostics(None, entry))
+
+    assert not re.search(r"(?i)(?:[0-9a-f]{2}:){5}[0-9a-f]{2}", dumped)
+    assert not re.search(r"\b(?:\d{1,3}\.){3}\d{1,3}\b", dumped)
+    assert "2001:db8" not in dumped
+    assert "0677779709" not in dumped
+    assert "yahny" not in dumped
