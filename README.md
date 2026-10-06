@@ -57,7 +57,9 @@ An actively maintained, hardened fork of the original Keenetic Router Pro integr
   install this cut the integration's recorder writes by roughly a third.
   Inventory-only extender counts and the duplicate router-level WAN counters
   do not create scheduled statistics rows, and router and mesh memory ignore
-  one-point fluctuations.
+  one-point fluctuations. Client RSSI, negotiated link speed and per-router or
+  mesh client counts keep normal history without scheduled statistics; the
+  aggregate connected-client count and active connections keep long-term trends.
 - **No third-party dependencies.** The integration installs nothing into your
   Home Assistant environment (upstream pulls in `icmplib`, `pyqrcode` and
   `pypng`).

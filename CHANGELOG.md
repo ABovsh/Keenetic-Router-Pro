@@ -10,6 +10,10 @@ git log.
 
 ## Unreleased
 
+### ⚠️ Breaking
+
+- **Client RSSI, Link Speed, Router Clients and mesh-node Clients stop collecting long-term statistics.** Current readings, normal recorder history and existing statistics remain; Total Connected Clients and Active Connections keep their long-term trends. Statistics cards for the affected sensors no longer receive new aggregates, and Home Assistant may show a Repairs notice about their changed statistics metadata.
+
 ### 🐛 Fixed
 
 - **Provider downtime pauses while WAN observations cannot be read.** Cached link and ping-check failures no longer add downtime during the router's temporary read-failure grace period.

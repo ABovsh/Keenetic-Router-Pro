@@ -376,7 +376,8 @@ class KeeneticClientRssiSensor(ClientEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_icon = _ICON_WIFI
     _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    # Keep recent diagnostic history without scheduled long-term statistics.
+    _attr_state_class = None
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
@@ -416,7 +417,8 @@ class KeeneticClientTxRateSensor(ClientEntity, SensorEntity):
     """Current Wi-Fi link speed reported by the router."""
     _attr_has_entity_name = True
     _attr_icon = "mdi:speedometer"
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    # Negotiated link capacity is diagnostic; throughput has its own statistics.
+    _attr_state_class = None
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     # Per-client counters move constantly; new installs opt in.
     _attr_entity_registry_enabled_default = False

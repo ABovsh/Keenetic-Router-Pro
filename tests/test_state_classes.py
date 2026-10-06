@@ -1,13 +1,84 @@
-"""Regression guards for monotonic uptime state classes."""
+"""Sensor statistics contracts and preservation of ordinary readings."""
 
 from __future__ import annotations
 
 import ast
 import pathlib
+from types import SimpleNamespace
 
 import pytest
 
+from homeassistant.components.sensor import SensorStateClass
+
+from custom_components.keenetic_router_pro.sensor.client import (
+    KeeneticClientRssiSensor,
+    KeeneticClientTxRateSensor,
+)
+from custom_components.keenetic_router_pro.sensor.clients import (
+    KeeneticConnectedClientsSensor,
+    KeeneticRouterClientsSensor,
+)
+from custom_components.keenetic_router_pro.sensor.mesh import KeeneticMeshClientsSensor
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "keenetic_router_pro"
+
+
+@pytest.mark.parametrize(
+    "sensor_cls,field,initial,changed,suffix",
+    [
+        (KeeneticClientRssiSensor, "rssi", -60, -66, "rssi"),
+        (KeeneticClientTxRateSensor, "txrate", 84, 96, "txrate"),
+    ],
+)
+def test_client_link_diagnostics_keep_readings_without_statistics(
+    sensor_cls, field: str, initial: int, changed: int, suffix: str,
+) -> None:
+    mac = "aa:bb:cc:dd:ee:ff"
+    client = {"mac": mac, "link": "up", field: initial}
+    coordinator = SimpleNamespace(data={"clients_by_mac": {mac: client}})
+    entry = SimpleNamespace(entry_id="entry", title="Router")
+    sensor = sensor_cls(coordinator, entry, mac, "Phone")
+
+    assert sensor._attr_state_class is None
+    assert sensor.unique_id == f"entry_client_{mac}_{suffix}"
+    assert sensor.available and sensor.native_value == initial
+    client[field] = changed
+    assert sensor.native_value == changed
+    client["link"] = "down"
+    assert not sensor.available
+
+
+def test_router_count_keeps_readings_while_aggregate_keeps_statistics() -> None:
+    coordinator = SimpleNamespace(data={
+        "client_stats": {"connected": 8},
+        "mesh_associations": {"total": 3},
+    })
+    entry = SimpleNamespace(entry_id="entry", title="Router")
+    router = KeeneticRouterClientsSensor(coordinator, entry)
+    aggregate = KeeneticConnectedClientsSensor(coordinator, entry)
+
+    assert router._attr_state_class is None
+    assert aggregate._attr_state_class == SensorStateClass.MEASUREMENT
+    assert router.unique_id == "entry_router_clients_v2"
+    assert aggregate.unique_id == "entry_connected_clients_v2"
+    assert (router.native_value, aggregate.native_value) == (5, 8)
+    coordinator.data["client_stats"]["connected"] = 10
+    assert (router.native_value, aggregate.native_value) == (7, 10)
+
+
+def test_mesh_count_keeps_readings_and_source_availability_without_statistics() -> None:
+    node = {"cid": "node_1", "associations": 3}
+    coordinator = SimpleNamespace(data={"mesh_nodes": [node]})
+    entry = SimpleNamespace(entry_id="entry", title="Router")
+    sensor = KeeneticMeshClientsSensor(coordinator, entry, "node_1")
+
+    assert sensor._attr_state_class is None
+    assert sensor.unique_id == "entry_mesh_node_1_clients_v2"
+    assert sensor.available and sensor.native_value == 3
+    node["associations"] = 0
+    assert sensor.available and sensor.native_value == 0
+    coordinator.data["mesh_nodes_fresh"] = False
+    assert not sensor.available
 
 
 def _class_assignments(path: pathlib.Path, class_name: str) -> dict[str, str]:

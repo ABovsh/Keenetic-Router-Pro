@@ -46,7 +46,8 @@ class KeeneticRouterClientsSensor(ControllerEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "router_clients"
     _attr_icon = "mdi:devices"
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    # Per-AP distribution stays in recent history; the aggregate keeps statistics.
+    _attr_state_class = None
     _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
