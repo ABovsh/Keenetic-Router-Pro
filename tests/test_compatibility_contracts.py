@@ -36,6 +36,7 @@ EXPECTED_COORDINATOR_KEYS = {
     "clients_by_mac",
     "wan_status",
     "wan_interfaces",
+    "wan_observation_fresh",
     "wan_by_id",
     "mesh_nodes",
     "mesh_nodes_fresh",

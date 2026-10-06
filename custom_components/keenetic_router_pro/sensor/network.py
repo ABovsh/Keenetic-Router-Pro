@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from time import monotonic
 from typing import Any
 
@@ -11,7 +12,7 @@ from homeassistant.components.sensor import (
     SensorDeviceClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
 from homeassistant.const import UnitOfTime, UnitOfInformation, UnitOfDataRate, EntityCategory
 
 from ..const import LINK_STATE_DOWN, LINK_STATE_UP, WAN_STATUS_CONNECTED, WAN_STATUS_LINK_UP
@@ -30,6 +31,7 @@ from ..entity import (
 from ..utils import (
     apply_relative_deadband,
     coerce_byte_count,
+    coerce_float,
     coerce_int,
     coerce_seconds,
 )
@@ -37,6 +39,22 @@ from ..utils import (
 _ICON_ETHERNET = "mdi:ethernet"
 _ICON_IP_NETWORK = "mdi:ip-network"
 _ICON_WEB_OFF = "mdi:web-off"
+
+
+@dataclass
+class _NetworkCounterData(ExtraStoredData):
+    """Preserve native accumulated values even when HA stores unavailable."""
+
+    native_value: float
+
+    def as_dict(self) -> dict[str, float]:
+        return {"native_value": self.native_value}
+
+
+def _nonnegative_counter(value: Any) -> float | None:
+    """Reject corrupt restored totals before they reach statistics."""
+    result = coerce_float(value)
+    return result if result is not None and result >= 0 else None
 
 
 class KeeneticWanStatusSensor(ControllerEntity, SensorEntity):
@@ -622,12 +640,18 @@ class KeeneticWanFailoverCountSensor(ControllerEntity, SensorEntity, RestoreEnti
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+        extra = await self.async_get_last_extra_data()
+        restored = _nonnegative_counter(extra.as_dict().get("native_value")) if extra else None
+        if restored is not None:
+            self._count = int(restored)
+            return
         last = await self.async_get_last_state()
         if last is not None and last.state not in (None, "unknown", "unavailable"):
-            try:
-                self._count = int(float(last.state))
-            except (TypeError, ValueError):
-                self._count = 0
+            self._count = int(_nonnegative_counter(last.state) or 0)
+
+    @property
+    def extra_restore_state_data(self) -> _NetworkCounterData:
+        return _NetworkCounterData(self._count)
 
     @property
     def native_value(self) -> int:
@@ -698,22 +722,35 @@ class _DowntimeClockMixin:
         """Return True when the router answered and is past its boot."""
         if not self.coordinator.last_update_success:
             return False
+        if not (self.coordinator.data or {}).get("wan_observation_fresh", True):
+            return False
         system = (self.coordinator.data or {}).get("system") or {}
         uptime = coerce_seconds(system.get("uptime"), default=None)
         return uptime is None or uptime >= self._BOOT_GRACE
 
     async def _async_restore_seconds(self) -> None:
+        extra = await self.async_get_last_extra_data()
+        restored = _nonnegative_counter(extra.as_dict().get("native_value")) if extra else None
+        if restored is not None:
+            self._seconds = restored
+            self._published = int(restored)
+            return
         last = await self.async_get_last_state()
         if last is not None and last.state not in (None, "unknown", "unavailable"):
             # The state is stored in the display unit (hours by default, or
             # whatever the user picked), not in native seconds.
             attributes = getattr(last, "attributes", None) or {}
             unit = attributes.get("unit_of_measurement") or UnitOfTime.SECONDS
-            try:
-                self._seconds = float(last.state) * _SECONDS_PER_UNIT.get(str(unit), 1)
-            except (TypeError, ValueError):
-                self._seconds = 0.0
+            value = _nonnegative_counter(last.state)
+            self._seconds = _nonnegative_counter(
+                (value or 0) * _SECONDS_PER_UNIT.get(str(unit), 1)
+            ) or 0.0
         self._published = int(self._seconds)
+
+    @property
+    def extra_restore_state_data(self) -> _NetworkCounterData:
+        # Keep sub-publication-step seconds too; display rounding is not storage.
+        return _NetworkCounterData(self._seconds)
 
 
 class KeeneticWanDowntimeSensor(

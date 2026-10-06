@@ -104,7 +104,7 @@ class SourceFreshnessMixin:
     def available(self) -> bool:
         return bool(getattr(super(), "available", True)) and bool(
             (self.coordinator.data or {}).get(self._freshness_key, True)
-        )
+        ) and self.native_value is not None
 
 
 class LinkActiveMixin:
@@ -159,9 +159,13 @@ class UptimeMixin:
             or previous is None
             or seconds < previous
         ):
-            self._up_since = (self._now() - timedelta(seconds=seconds)).replace(
-                microsecond=0
-            )
+            try:
+                self._up_since = (self._now() - timedelta(seconds=seconds)).replace(
+                    microsecond=0
+                )
+            except OverflowError:
+                self._uptime_seconds = None
+                self._up_since = None
         return self._up_since
 
 

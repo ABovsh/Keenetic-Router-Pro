@@ -22,6 +22,7 @@ from homeassistant.const import (
     CONF_TYPE,
 )
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.trigger import TriggerActionType, TriggerInfo
 from homeassistant.helpers.typing import ConfigType
 
@@ -44,9 +45,14 @@ TRIGGER_SCHEMA = DEVICE_TRIGGER_BASE_SCHEMA.extend(
 
 
 async def async_get_triggers(
-    _hass: HomeAssistant | None, device_id: str
+    hass: HomeAssistant, device_id: str
 ) -> list[dict[str, Any]]:
     """List the triggers this integration offers for a device."""
+    device = dr.async_get(hass).async_get(device_id)
+    if device is None or not any(
+        (DOMAIN, entry_id) in device.identifiers for entry_id in device.config_entries
+    ):
+        return []
     return [
         {
             CONF_PLATFORM: "device",

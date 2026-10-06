@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..utils import first_present
+from ..utils import coerce_byte_count, first_present
 from .derived import counter_rate_bytes_per_second, order_wan_interfaces
 
 
@@ -115,18 +115,18 @@ def enrich_wan_interfaces(
     for wan in wan_interfaces:
         wan_id = wan.get("id")
         stats = (interface_stats or {}).get(wan_id) or {}
-        rx_bytes = _first_stat_int(
+        rx_bytes = coerce_byte_count(_first_stat_int(
             stats,
             "rxbytes",
             "rx-bytes",
             "rx_bytes",
-        )
-        tx_bytes = _first_stat_int(
+        ))
+        tx_bytes = coerce_byte_count(_first_stat_int(
             stats,
             "txbytes",
             "tx-bytes",
             "tx_bytes",
-        )
+        ))
         wan["rx_bytes"] = rx_bytes
         wan["tx_bytes"] = tx_bytes
         wan["rx_packets"] = _first_stat_int(
@@ -181,6 +181,13 @@ def enrich_wan_interfaces(
         else:
             wan["rx_throughput"] = 0.0
             wan["tx_throughput"] = 0.0
+
+        # A partial aggregate may omit one interface while its siblings are
+        # readable. Missing counters cannot establish an idle (zero) rate.
+        if rx_bytes is None:
+            wan["rx_throughput"] = None
+        if tx_bytes is None:
+            wan["tx_throughput"] = None
 
     ordered = order_wan_interfaces(wan_interfaces)
     wan_by_id = {

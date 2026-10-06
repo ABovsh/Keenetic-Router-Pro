@@ -234,6 +234,7 @@ async def test_coordinator_pipeline_fixtures_publishes_expected_data_keys() -> N
         "clients_by_mac",
         "wan_status",
         "wan_interfaces",
+        "wan_observation_fresh",
         "wan_by_id",
         "mesh_nodes",
         "mesh_nodes_fresh",

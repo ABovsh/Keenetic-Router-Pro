@@ -228,11 +228,18 @@ def test_batch_tree_requests_clients_by_default() -> None:
 
 
 @pytest.mark.asyncio
-async def test_device_triggers_expose_the_integration_events() -> None:
+async def test_device_triggers_expose_the_integration_events(monkeypatch) -> None:
     """The 1.9.0 events were only reachable by hand-written YAML until now."""
     from custom_components.keenetic_router_pro import device_trigger
+    from homeassistant.helpers import device_registry
+    from types import SimpleNamespace
 
-    triggers = await device_trigger.async_get_triggers(None, "device_id_1")
+    device = SimpleNamespace(
+        identifiers={("keenetic_router_pro", "entry")}, config_entries={"entry"}
+    )
+    registry = SimpleNamespace(async_get=lambda _id: device)
+    monkeypatch.setattr(device_registry, "async_get", lambda _hass: registry, raising=False)
+    triggers = await device_trigger.async_get_triggers(object(), "device_id_1")
     types = {t["type"] for t in triggers}
     assert types == {"client_connected", "client_disconnected", "wan_failover"}
     for trigger in triggers:
