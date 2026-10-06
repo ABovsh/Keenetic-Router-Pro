@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 
 from ..const import FIELD_CONNECTED
@@ -17,7 +17,7 @@ class KeeneticConnectedClientsSensor(ControllerEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "connected_clients"
     _attr_icon = "mdi:devices"
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None
     _attr_suggested_display_precision = 0
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:

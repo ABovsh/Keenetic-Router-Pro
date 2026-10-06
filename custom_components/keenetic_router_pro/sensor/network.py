@@ -170,7 +170,7 @@ class KeeneticActiveConnectionsSensor(DeadbandMixin, ControllerEntity, SensorEnt
     _attr_icon = "mdi:connection"
     # Active connections is an instantaneous count, not a lifetime total.
     # MEASUREMENT keeps HA statistics from treating it as a monotonic sum.
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None
     _attr_suggested_display_precision = 0
     # A dithering gauge: measured live it walks +31/+70/-97/+54 between
     # adjacent polls of an otherwise quiet router. 25 was too narrow to catch
@@ -509,7 +509,7 @@ class _WanBytesBase(
 ):
     """Shared RX/TX byte counter base."""
     _attr_device_class = SensorDeviceClass.DATA_SIZE
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = None
     _attr_native_unit_of_measurement = UnitOfInformation.BYTES
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     # A counter reset (router reboot) is a move far larger than the band, so
@@ -563,7 +563,7 @@ class _WanThroughputBase(
     _WanLinkActiveMixin, SourceFreshnessMixin, ThroughputDeadbandMixin, _WanSensorBase
 ):
     _attr_device_class = SensorDeviceClass.DATA_RATE
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None
     # See _WanBytesBase: throughput fields are also in the base ignore set.
     _FINGERPRINT_IGNORE = frozenset()
     _attr_native_unit_of_measurement = UnitOfDataRate.BITS_PER_SECOND
@@ -628,7 +628,7 @@ class KeeneticWanFailoverCountSensor(ControllerEntity, SensorEntity, RestoreEnti
     _attr_translation_key = "wan_failover_count"
     _attr_icon = "mdi:swap-horizontal"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = None
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -837,6 +837,7 @@ class KeeneticWanLinkDowntimeSensor(
         wan_type = str((self._wan or {}).get("type") or "").lower()
         if wan_type in self._TUNNEL_TYPES:
             self._attr_entity_registry_enabled_default = False
+            self._attr_state_class = None
 
     @property
     def unique_id(self) -> str:

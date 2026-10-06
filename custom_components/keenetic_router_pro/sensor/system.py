@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, EntityCategory
 
@@ -19,7 +19,7 @@ class KeeneticCpuLoadSensor(DeadbandMixin, ControllerEntity, SensorEntity):
     _attr_translation_key = "cpu_load"
     _attr_icon = "mdi:cpu-64-bit"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None
     # An idle router flips between 0 % and 1 % on every poll; only a move worth
     # noticing should cost a row.
     _DEADBAND = 3.0
@@ -52,7 +52,7 @@ class KeeneticMemoryUsageSensor(DeadbandMixin, ControllerEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "memory_usage"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None
     _attr_icon = "mdi:memory"
     # Same band as the mesh-node memory sensor: measured live, the main router
     # flipped between two adjacent whole percents 187 times a day.

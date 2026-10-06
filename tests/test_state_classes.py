@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ast
+import importlib
+import inspect
 import pathlib
 from types import SimpleNamespace
 
@@ -19,8 +21,46 @@ from custom_components.keenetic_router_pro.sensor.clients import (
     KeeneticRouterClientsSensor,
 )
 from custom_components.keenetic_router_pro.sensor.mesh import KeeneticMeshClientsSensor
+from custom_components.keenetic_router_pro.sensor.network import KeeneticWanLinkDowntimeSensor
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "keenetic_router_pro"
+
+
+def test_only_downtime_families_opt_into_statistics() -> None:
+    """Optional sensor creation must not bypass the reliability-only budget."""
+    from homeassistant.components.sensor import SensorEntity
+
+    keep = {"KeeneticWanDowntimeSensor", "KeeneticWanLinkDowntimeSensor"}
+    offenders = []
+    for path in (ROOT / "sensor").glob("*.py"):
+        if path.stem == "__init__":
+            continue
+        module = importlib.import_module(
+            f"custom_components.keenetic_router_pro.sensor.{path.stem}"
+        )
+        for name, cls in vars(module).items():
+            if (name.startswith("_") or not inspect.isclass(cls)
+                    or cls.__module__ != module.__name__
+                    or not issubclass(cls, SensorEntity) or name in keep):
+                continue
+            sensor = object.__new__(cls)
+            sensor.coordinator = SimpleNamespace(data={"wan_interfaces": []})
+            sensor._wg_name = "Wireguard0"
+            state_class = getattr(sensor, "state_class", getattr(sensor, "_attr_state_class", None))
+            if state_class is not None:
+                offenders.append(name)
+    assert not offenders, f"Unexpected statistics streams: {sorted(offenders)}"
+
+
+@pytest.mark.parametrize("wan_type", ["Ethernet", "PPPoE", "WireGuard", "OpenVPN"])
+def test_only_provider_downtime_keeps_statistics(wan_type: str) -> None:
+    coordinator = SimpleNamespace(data={"wan_interfaces": [{"id": "ISP", "type": wan_type}]})
+    entry = SimpleNamespace(entry_id="entry", title="Router")
+    sensor = KeeneticWanLinkDowntimeSensor(coordinator, entry, "ISP")
+    expected = None if wan_type in ("WireGuard", "OpenVPN") else SensorStateClass.TOTAL_INCREASING
+    assert sensor._attr_state_class == expected
+    assert sensor.unique_id == "entry_wan_ISP_downtime"
+    assert sensor.native_value == 0 and sensor.available
 
 
 @pytest.mark.parametrize(
@@ -48,7 +88,7 @@ def test_client_link_diagnostics_keep_readings_without_statistics(
     assert not sensor.available
 
 
-def test_router_count_keeps_readings_while_aggregate_keeps_statistics() -> None:
+def test_router_and_aggregate_counts_keep_normal_history() -> None:
     coordinator = SimpleNamespace(data={
         "client_stats": {"connected": 8},
         "mesh_associations": {"total": 3},
@@ -58,7 +98,7 @@ def test_router_count_keeps_readings_while_aggregate_keeps_statistics() -> None:
     aggregate = KeeneticConnectedClientsSensor(coordinator, entry)
 
     assert router._attr_state_class is None
-    assert aggregate._attr_state_class == SensorStateClass.MEASUREMENT
+    assert aggregate._attr_state_class is None
     assert router.unique_id == "entry_router_clients_v2"
     assert aggregate.unique_id == "entry_connected_clients_v2"
     assert (router.native_value, aggregate.native_value) == (5, 8)
@@ -142,7 +182,7 @@ def test_client_session_uptime_is_a_timestamp() -> None:
     assert "_attr_state_class" not in assignments
 
 
-def test_active_connections_sensor_uses_measurement() -> None:
+def test_active_connections_sensor_keeps_normal_history() -> None:
     """Active connections is an instantaneous gauge, not a lifetime total.
 
     Using TOTAL caused HA statistics to treat it as a monotonic sum,
@@ -151,7 +191,7 @@ def test_active_connections_sensor_uses_measurement() -> None:
     assignments = _class_assignments(
         ROOT / "sensor/network.py", "KeeneticActiveConnectionsSensor"
     )
-    assert assignments.get("_attr_state_class") == "SensorStateClass.MEASUREMENT"
+    assert assignments.get("_attr_state_class") == "None"
 
 
 @pytest.mark.parametrize(

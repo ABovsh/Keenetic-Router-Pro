@@ -12,7 +12,7 @@ git log.
 
 ### ⚠️ Breaking
 
-- **Client RSSI, Link Speed, Router Clients and mesh-node Clients stop collecting long-term statistics.** Current readings, normal recorder history and existing statistics remain; Total Connected Clients and Active Connections keep their long-term trends. Statistics cards for the affected sensors no longer receive new aggregates, and Home Assistant may show a Repairs notice about their changed statistics metadata.
+- **Only Internet Downtime and provider Downtime keep long-term statistics.** CPU, memory, Wi-Fi temperatures, client RSSI and Link Speed, client and connection counts, traffic totals and rates, and failover counts keep current readings and normal recorder history without new statistics. VPN tunnel downtime also stops creating statistics. Existing statistics remain; normal history follows your recorder retention setting. Statistics cards for affected sensors stop receiving aggregates, and Home Assistant may show a Repairs notice about changed statistics metadata.
 
 ### 🐛 Fixed
 

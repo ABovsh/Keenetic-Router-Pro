@@ -172,17 +172,15 @@ def _wg(cls, wan_ids: list[str]):
     return cls(coordinator, _entry(), "Wireguard0")
 
 
-def test_wireguard_counters_leave_statistics_to_the_wan_sensor_of_an_uplink() -> None:
-    from homeassistant.components.sensor import SensorStateClass
-
+def test_wireguard_counters_keep_normal_history_for_all_profiles() -> None:
     from custom_components.keenetic_router_pro.sensor.wireguard import (
         KeeneticWgRxSensor,
         KeeneticWgTxSensor,
     )
 
     for cls in (KeeneticWgRxSensor, KeeneticWgTxSensor):
-        assert _wg(cls, ["Wireguard0"]).state_class is None
-        assert _wg(cls, ["ISP"]).state_class == SensorStateClass.TOTAL_INCREASING
+        assert _wg(cls, ["Wireguard0"])._attr_state_class is None
+        assert _wg(cls, ["ISP"])._attr_state_class is None
 
 
 # ---------- Duplicate or static entities start disabled ----------

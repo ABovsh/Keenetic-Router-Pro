@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 
@@ -208,7 +208,7 @@ class KeeneticMeshCpuLoadSensor(DeadbandMixin, MeshEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "cpu_load"
     _attr_native_unit_of_measurement = "%"
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:cpu-64-bit"
     # native_value reads node["cpuload"] — ignored by MeshEntity base.
@@ -242,7 +242,7 @@ class KeeneticMeshMemorySensor(DeadbandMixin, MeshEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_translation_key = "memory_usage"
     _attr_native_unit_of_measurement = "%"
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:memory"
     _DEADBAND = 2.0

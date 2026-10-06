@@ -9,7 +9,6 @@ from typing import Any
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
-    SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfInformation, EntityCategory
@@ -284,7 +283,7 @@ class KeeneticClientRxSensor(CounterDeadbandMixin, ClientEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_icon = "mdi:download-network"
     _attr_device_class = SensorDeviceClass.DATA_SIZE
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = None
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     # Shared byte step expressed in this sensor's own unit (GiB).
     _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
@@ -330,7 +329,7 @@ class KeeneticClientTxSensor(CounterDeadbandMixin, ClientEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_icon = "mdi:upload-network"
     _attr_device_class = SensorDeviceClass.DATA_SIZE
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = None
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     # Shared byte step expressed in this sensor's own unit (GiB).
     _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
