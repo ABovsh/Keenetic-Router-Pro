@@ -164,17 +164,19 @@ def test_is_ranked_wan_string_false_global() -> None:
 # F15/F21/F22 — sensor state-class contracts
 # --------------------------------------------------------------------------
 @pytest.mark.parametrize(
-    ("relative_path", "class_name"),
+    ("relative_path", "class_name", "state_class"),
     [
-        ("sensor/clients.py", "KeeneticConnectedClientsSensor"),
-        ("sensor/clients.py", "KeeneticRouterClientsSensor"),
-        ("sensor/mesh.py", "KeeneticMeshClientsSensor"),
+        ("sensor/clients.py", "KeeneticConnectedClientsSensor", "None"),
+        ("sensor/clients.py", "KeeneticRouterClientsSensor", "None"),
+        ("sensor/mesh.py", "KeeneticMeshClientsSensor", "None"),
     ],
 )
-def test_count_sensors_use_measurement(relative_path: str, class_name: str) -> None:
+def test_count_sensors_use_selected_statistics(
+    relative_path: str, class_name: str, state_class: str,
+) -> None:
     assignments = _class_assignments(ROOT / relative_path, class_name)
-    assert assignments.get("_attr_state_class") == "SensorStateClass.MEASUREMENT", (
-        f"{class_name} is an instantaneous count and must use MEASUREMENT"
+    assert assignments.get("_attr_state_class") == state_class, (
+        f"{class_name} keeps readings without scheduled statistics"
     )
 
 
@@ -186,9 +188,9 @@ def test_extender_count_does_not_create_long_term_statistics() -> None:
 
 
 @pytest.mark.parametrize("class_name", ["KeeneticWgRxSensor", "KeeneticWgTxSensor"])
-def test_wireguard_byte_sensors_total_increasing(class_name: str) -> None:
+def test_wireguard_byte_sensors_keep_normal_history(class_name: str) -> None:
     assignments = _class_assignments(ROOT / "sensor/wireguard.py", class_name)
-    assert assignments.get("_attr_state_class") == "SensorStateClass.TOTAL_INCREASING"
+    assert assignments.get("_attr_state_class") == "None"
     assert assignments.get("_attr_device_class") == "SensorDeviceClass.DATA_SIZE"
 
 

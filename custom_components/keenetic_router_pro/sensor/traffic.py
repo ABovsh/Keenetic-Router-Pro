@@ -7,7 +7,6 @@ from typing import Any
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
-    SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, UnitOfInformation
@@ -31,7 +30,7 @@ class _TrafficSensorBase(
     # Keep the published legacy unit stable until existing statistics can be
     # migrated without reinterpreting same-ID TOTAL_INCREASING history.
     _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = None
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
     _freshness_key = "interface_stats_fresh"

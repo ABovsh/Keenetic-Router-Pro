@@ -8,8 +8,8 @@ from typing import Any, Dict, List
 
 import aiohttp
 
-from ...const import DOMAIN, FIELD_CONNECTED, LINK_STATE_UP, RCI_HOTSPOT_HOST_PATHS
-from ...utils import coerce_bool, normalize_mac
+from ...const import DOMAIN, FIELD_CONNECTED, RCI_HOTSPOT_HOST_PATHS
+from ...utils import is_client_online, normalize_mac
 from ..errors import KeeneticApiError
 from ..helpers import (
     _dict_items,
@@ -131,12 +131,7 @@ class ClientsMixin:
                 })
                 continue
 
-            is_active = False
-            if "active" in client:
-                value = client.get("active")
-                is_active = coerce_bool(value)
-            elif "link" in client:
-                is_active = str(client.get("link") or "").lower() == LINK_STATE_UP
+            is_active = is_client_online(client)
 
             if is_active:
                 connected += 1

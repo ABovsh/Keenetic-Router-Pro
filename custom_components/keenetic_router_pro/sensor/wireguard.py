@@ -7,7 +7,6 @@ from typing import Any
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
-    SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfInformation, EntityCategory
@@ -21,7 +20,7 @@ from ..utils import bytes_to_mib, coerce_byte_count, coerce_seconds
 class _BaseWgSensor(ControllerEntity, SensorEntity):
     """Base class for WireGuard sensors."""
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None
 
     def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry, wg_name: str) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
@@ -84,32 +83,14 @@ class _WgLinkActiveMixin(LinkActiveMixin):
         return bool(self._wg.get("enabled"))
 
 
-class _WgUplinkStatisticsMixin:
-    """Leave a WAN uplink's traffic statistics to its WAN RX/TX Bytes sensor.
-
-    A profile used as an uplink is also a WAN, whose own byte sensors record
-    the same counter; two statistics streams for one counter double the rows.
-    """
-
-    @property
-    def state_class(self) -> SensorStateClass | None:
-        wans = (self.coordinator.data or {}).get("wan_interfaces") or []
-        if any(isinstance(w, dict) and w.get("id") == self._wg_name for w in wans):
-            return None
-        return self._attr_state_class
-
-
 class KeeneticWgRxSensor(
-    _WgUplinkStatisticsMixin, _WgLinkActiveMixin, CounterDeadbandMixin, _BaseWgSensor
+    _WgLinkActiveMixin, CounterDeadbandMixin, _BaseWgSensor
 ):
     """WireGuard RX (received traffic) sensor."""
     _attr_has_entity_name = True
-    # RX bytes is a cumulative counter that resets when the tunnel restarts —
-    # TOTAL_INCREASING (not the base MEASUREMENT) is the correct contract so
-    # HA long-term statistics chart reset-aware deltas rather than the raw
-    # absolute counter.
+    # Cumulative counters and their resets remain visible in ordinary history.
     _attr_device_class = SensorDeviceClass.DATA_SIZE
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = None
     # Shared byte step expressed in this sensor's own unit (MiB).
     _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**2
 
@@ -136,13 +117,13 @@ class KeeneticWgRxSensor(
 
 
 class KeeneticWgTxSensor(
-    _WgUplinkStatisticsMixin, _WgLinkActiveMixin, CounterDeadbandMixin, _BaseWgSensor
+    _WgLinkActiveMixin, CounterDeadbandMixin, _BaseWgSensor
 ):
     """WireGuard TX (sent traffic) sensor."""
     _attr_has_entity_name = True
-    # See KeeneticWgRxSensor: cumulative counter → TOTAL_INCREASING.
+    # See KeeneticWgRxSensor: ordinary history preserves the counter.
     _attr_device_class = SensorDeviceClass.DATA_SIZE
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = None
     # Shared byte step expressed in this sensor's own unit (MiB).
     _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**2
 

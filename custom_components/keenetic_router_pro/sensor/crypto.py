@@ -19,7 +19,6 @@ from typing import Any
 
 from homeassistant.components.sensor import (
     SensorEntity,
-    SensorStateClass,
     SensorDeviceClass,
 )
 from homeassistant.config_entries import ConfigEntry
@@ -141,14 +140,12 @@ class _CryptoMapBytesBase(
 ):
     """Shared RX/TX byte counter base.
 
-    The counters are a sum across all phase-2 SAs of the tunnel. A
-    phase-2 rekey resets each SA's counter to zero, which is handled
-    by ``SensorStateClass.TOTAL_INCREASING`` — HA Statistics treats a
-    drop as a reset rather than a negative delta.
+    The counters are a sum across all phase-2 SAs of the tunnel; a phase-2
+    rekey resets each SA's counter to zero.
     """
 
     _attr_device_class = SensorDeviceClass.DATA_SIZE
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = None
     _attr_native_unit_of_measurement = UnitOfInformation.BYTES
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES
@@ -206,7 +203,7 @@ class _CryptoMapThroughputBase(
     """
 
     _attr_device_class = SensorDeviceClass.DATA_RATE
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None
     _attr_native_unit_of_measurement = UnitOfDataRate.BITS_PER_SECOND
     _attr_suggested_display_precision = 0
     _field = "rx_throughput"

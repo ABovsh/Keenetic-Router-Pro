@@ -12,7 +12,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from .api import KeeneticClient
 from .coordinator import KeeneticCoordinator
 from .entity import ClientEntity
-from .utils import iter_tracked_clients
+from .utils import coerce_float, iter_tracked_clients
 
 # Writes go straight to the router's config; never send two at once.
 PARALLEL_UPDATES = 1
@@ -115,12 +115,10 @@ class KeeneticClientRateLimitNumber(ClientEntity, NumberEntity, RestoreEntity):
         last_state = await self.async_get_last_state()
         if last_state is None:
             return
-        try:
-            self._limit_kbps = float(last_state.state)
-        except (TypeError, ValueError):
-            # "unknown"/"unavailable" from a restart mid-outage: 0 (no limit)
-            # is the safe reading, since we cannot confirm what the router has.
-            self._limit_kbps = 0
+        restored = coerce_float(last_state.state)
+        self._limit_kbps = (
+            restored if restored is not None and 0 <= restored <= _MAX_KBPS else 0
+        )
 
     async def async_set_native_value(self, value: float) -> None:
         """Apply the limit, or remove the shape entry when set to 0."""

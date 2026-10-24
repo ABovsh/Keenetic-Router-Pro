@@ -480,6 +480,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ndns_info = dict_or_empty(_ok("ndns_info", ndns_info, {}))
             # Read every tick now: one failed read must not drop every WAN
             # back to the link heuristic, so keep the last answer.
+            ping_check_failed = isinstance(ping_check_status, BaseException)
             ping_check_status = dict_or_empty(
                 _ok(
                     "ping_check_status",
@@ -793,6 +794,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             wan_status = dict_or_empty(
                 _ok("wan_status", wan_status, _prev.get("wan_status", {}))
             )
+            wan_interfaces_failed = isinstance(wan_interfaces, BaseException)
             wan_interfaces = _ok(
                 "wan_interfaces", wan_interfaces, _prev.get("wan_interfaces", [])
             )
@@ -988,6 +990,13 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "clients_by_mac": clients_by_mac,
                 "wan_status": wan_status,
                 "wan_interfaces": wan_interfaces,
+                # Preserved data keeps dashboards stable, but is not evidence
+                # that a provider is still down during an unreadable poll.
+                "wan_observation_fresh": (
+                    critical_decision.action == "ok"
+                    and not wan_interfaces_failed
+                    and not ping_check_failed
+                ),
                 "wan_by_id": wan_by_id,
                 "mesh_nodes": mesh_nodes,
                 "mesh_nodes_fresh": mesh_nodes_fresh,

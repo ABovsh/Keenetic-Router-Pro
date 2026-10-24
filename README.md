@@ -1,7 +1,7 @@
 # Keenetic Router Pro
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge)](https://github.com/custom-components/hacs)
-![Version](https://img.shields.io/badge/version-1.19.0-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-1.20.0-blue?style=for-the-badge)
 ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.5%2B-41BDF5?style=for-the-badge&logo=home-assistant)
 
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ABovsh_Keenetic-Router-Pro)
@@ -55,9 +55,11 @@ An actively maintained, hardened fork of the original Keenetic Router Pro integr
   a slower cadence than they are polled, and percentages are whole numbers, so
   they stop writing a row for every tenth of a percent. On a three-router
   install this cut the integration's recorder writes by roughly a third.
-  Inventory-only extender counts and the duplicate router-level WAN counters
-  do not create scheduled statistics rows, and router and mesh memory ignore
-  one-point fluctuations.
+  Router and mesh memory ignore one-point fluctuations. Only Internet
+  Downtime and provider Downtime create statistics. All other sensors, including
+  CPU, memory, client counts and traffic, keep ordinary history for the period
+  configured in Home Assistant recorder. VPN tunnel downtime uses ordinary
+  history too.
 - **No third-party dependencies.** The integration installs nothing into your
   Home Assistant environment (upstream pulls in `icmplib`, `pyqrcode` and
   `pypng`).

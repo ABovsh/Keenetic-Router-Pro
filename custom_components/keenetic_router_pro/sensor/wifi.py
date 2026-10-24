@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfInformation, UnitOfTemperature, EntityCategory
 
@@ -28,7 +28,7 @@ class KeeneticWifi24TemperatureSensor(DeadbandMixin, ControllerEntity, SensorEnt
     _attr_translation_key = "wifi_24_temperature"
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:thermometer"
     _DEADBAND = _TEMPERATURE_DEADBAND_C
@@ -65,7 +65,7 @@ class KeeneticWifi5TemperatureSensor(DeadbandMixin, ControllerEntity, SensorEnti
     _attr_translation_key = "wifi_5_temperature"
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:thermometer"
     _DEADBAND = _TEMPERATURE_DEADBAND_C
@@ -104,7 +104,7 @@ class KeeneticWifi24RxSensor(
     _attr_icon = "mdi:download-network"
     _attr_device_class = SensorDeviceClass.DATA_SIZE
     _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = None
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     # Shared byte step expressed in this sensor's own unit (GiB).
     _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
@@ -139,7 +139,7 @@ class KeeneticWifi24TxSensor(
     _attr_icon = "mdi:upload-network"
     _attr_device_class = SensorDeviceClass.DATA_SIZE
     _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = None
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     # Shared byte step expressed in this sensor's own unit (GiB).
     _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
@@ -174,7 +174,7 @@ class KeeneticWifi5RxSensor(
     _attr_icon = "mdi:download-network"
     _attr_device_class = SensorDeviceClass.DATA_SIZE
     _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = None
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     # Shared byte step expressed in this sensor's own unit (GiB).
     _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
@@ -209,7 +209,7 @@ class KeeneticWifi5TxSensor(
     _attr_icon = "mdi:upload-network"
     _attr_device_class = SensorDeviceClass.DATA_SIZE
     _attr_native_unit_of_measurement = UnitOfInformation.GIGABYTES
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = None
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     # Shared byte step expressed in this sensor's own unit (GiB).
     _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3

@@ -8,6 +8,22 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 1.20.0
+
+### ⚠️ Breaking
+
+- **Only Internet Downtime and provider Downtime keep long-term statistics.** CPU, memory, Wi-Fi temperatures, client RSSI and Link Speed, client and connection counts, traffic totals and rates, and failover counts keep current readings and normal recorder history without new statistics. VPN tunnel downtime also stops creating statistics. Existing statistics remain; normal history follows your recorder retention setting. Statistics cards for affected sensors stop receiving aggregates, and Home Assistant may show a Repairs notice about changed statistics metadata.
+
+### 🐛 Fixed
+
+- **Provider downtime pauses while WAN observations cannot be read.** Cached link and ping-check failures no longer add downtime during the router's temporary read-failure grace period.
+- **Downtime and failover totals survive a restart during a router outage.** Native totals, including downtime below the five-minute publication step, are restored even when the last displayed state was unavailable.
+- **Missing interface traffic samples are unavailable instead of showing an idle link.** A failed read for one interface no longer publishes unknown byte counters or false zero throughput while other interfaces remain readable.
+- **Connected-client counts agree with presence tracking.** A live link counts as connected even when the router's activity flag is false; expired neighbours no longer inflate the count.
+- **Router automation triggers are offered on the router device.** WAN, mesh and client devices no longer offer router events that could never match their device ID.
+- **Invalid saved downtime and bandwidth limits are rejected.** Non-finite or negative values no longer prevent entity setup or publish invalid numbers; restored limits also respect the control's maximum.
+- **A corrupt uptime cannot crash its timestamp sensor.** Values outside the representable calendar recover on the next valid reading.
+
 ## 1.19.0
 
 ### ✨ New
