@@ -114,12 +114,16 @@ async def async_setup_entry(
     coordinator: KeeneticCoordinator = runtime.coordinator
     entities: list[SensorEntity] = []
 
-    entities.append(KeeneticCpuLoadSensor(coordinator, entry))
-    entities.append(KeeneticWanFailoverCountSensor(coordinator, entry))
-    entities.append(KeeneticWanDowntimeSensor(coordinator, entry))
-    entities.append(KeeneticMemoryUsageSensor(coordinator, entry))
-    entities.append(KeeneticUptimeSensor(coordinator, entry))
-    entities.append(KeeneticFirmwareVersionSensor(coordinator, entry))
+    entities.extend(
+        [
+            KeeneticCpuLoadSensor(coordinator, entry),
+            KeeneticWanFailoverCountSensor(coordinator, entry),
+            KeeneticWanDowntimeSensor(coordinator, entry),
+            KeeneticMemoryUsageSensor(coordinator, entry),
+            KeeneticUptimeSensor(coordinator, entry),
+            KeeneticFirmwareVersionSensor(coordinator, entry),
+        ]
+    )
 
     # Legacy controller-level WAN summary sensors are kept for
     # backwards compatibility. The per-WAN device entities below are
@@ -135,18 +139,26 @@ async def async_setup_entry(
     # to fetch it, creating them anyway would be worse than omitting them:
     # they would confidently report zero clients rather than going away.
     if getattr(coordinator, "needs_client_data", True):
-        entities.append(KeeneticConnectedClientsSensor(coordinator, entry))
-        entities.append(KeeneticRouterClientsSensor(coordinator, entry))
-        entities.append(KeeneticDisconnectedClientsSensor(coordinator, entry))
-        entities.append(KeeneticExtenderCountSensor(coordinator, entry))
+        entities.extend(
+            [
+                KeeneticConnectedClientsSensor(coordinator, entry),
+                KeeneticRouterClientsSensor(coordinator, entry),
+                KeeneticDisconnectedClientsSensor(coordinator, entry),
+                KeeneticExtenderCountSensor(coordinator, entry),
+            ]
+        )
 
     # WiFi radio sensors
-    entities.append(KeeneticWifi24TemperatureSensor(coordinator, entry))
-    entities.append(KeeneticWifi5TemperatureSensor(coordinator, entry))
-    entities.append(KeeneticWifi24RxSensor(coordinator, entry))
-    entities.append(KeeneticWifi24TxSensor(coordinator, entry))
-    entities.append(KeeneticWifi5RxSensor(coordinator, entry))
-    entities.append(KeeneticWifi5TxSensor(coordinator, entry))
+    entities.extend(
+        [
+            KeeneticWifi24TemperatureSensor(coordinator, entry),
+            KeeneticWifi5TemperatureSensor(coordinator, entry),
+            KeeneticWifi24RxSensor(coordinator, entry),
+            KeeneticWifi24TxSensor(coordinator, entry),
+            KeeneticWifi5RxSensor(coordinator, entry),
+            KeeneticWifi5TxSensor(coordinator, entry),
+        ]
+    )
 
     # Traffic counters
     entities.append(KeeneticLanRxSensor(coordinator, entry))
@@ -213,22 +225,26 @@ async def async_setup_entry(
     if client_sensors != CLIENT_SENSORS_OFF:
         full = client_sensors == CLIENT_SENSORS_FULL
         for mac, label, initial_ip in iter_tracked_clients(entry):
-            entities.append(
-                KeeneticClientIpSensor(coordinator, entry, mac, label, initial_ip)
-            )
-            entities.append(KeeneticClientUptimeSensor(coordinator, entry, mac, label))
-            entities.append(KeeneticClientLastSeenSensor(coordinator, entry, mac, label))
-            entities.append(
-                KeeneticClientConnectionTypeSensor(coordinator, entry, mac, label)
+            entities.extend(
+                [
+                    KeeneticClientIpSensor(coordinator, entry, mac, label, initial_ip),
+                    KeeneticClientUptimeSensor(coordinator, entry, mac, label),
+                    KeeneticClientLastSeenSensor(coordinator, entry, mac, label),
+                    KeeneticClientConnectionTypeSensor(coordinator, entry, mac, label),
+                ]
             )
             if not full:
                 continue
-            entities.append(KeeneticClientRxSensor(coordinator, entry, mac, label))
-            entities.append(KeeneticClientTxSensor(coordinator, entry, mac, label))
-            entities.append(KeeneticClientRssiSensor(coordinator, entry, mac, label))
-            entities.append(KeeneticClientTxRateSensor(coordinator, entry, mac, label))
-            entities.append(KeeneticClientWifiBandSensor(coordinator, entry, mac, label))
-            entities.append(KeeneticClientWifiModeSensor(coordinator, entry, mac, label))
+            entities.extend(
+                [
+                    KeeneticClientRxSensor(coordinator, entry, mac, label),
+                    KeeneticClientTxSensor(coordinator, entry, mac, label),
+                    KeeneticClientRssiSensor(coordinator, entry, mac, label),
+                    KeeneticClientTxRateSensor(coordinator, entry, mac, label),
+                    KeeneticClientWifiBandSensor(coordinator, entry, mac, label),
+                    KeeneticClientWifiModeSensor(coordinator, entry, mac, label),
+                ]
+            )
 
     # Per-WAN sensor set: one sub-device per uplink (Default + backups).
     # Covers provider name, priority role, underlying interface, public
@@ -293,11 +309,15 @@ def _add_mesh_sensors(
         node_id = str(node_cid)
         if node_id not in known_mesh_ids:
             known_mesh_ids.add(node_id)
-            entities.append(KeeneticMeshCpuLoadSensor(coordinator, entry, node_id))
-            entities.append(KeeneticMeshMemorySensor(coordinator, entry, node_id))
-            entities.append(KeeneticMeshUptimeSensor(coordinator, entry, node_id))
-            entities.append(KeeneticMeshClientsSensor(coordinator, entry, node_id))
-            entities.append(KeeneticMeshFirmwareVersionSensor(coordinator, entry, node_id))
+            entities.extend(
+                [
+                    KeeneticMeshCpuLoadSensor(coordinator, entry, node_id),
+                    KeeneticMeshMemorySensor(coordinator, entry, node_id),
+                    KeeneticMeshUptimeSensor(coordinator, entry, node_id),
+                    KeeneticMeshClientsSensor(coordinator, entry, node_id),
+                    KeeneticMeshFirmwareVersionSensor(coordinator, entry, node_id),
+                ]
+            )
 
         node_ip = node.get("ip")
         if node_ip and node_id not in known_mesh_local_ip_ids:

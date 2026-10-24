@@ -60,7 +60,8 @@ def test_only_provider_downtime_keeps_statistics(wan_type: str) -> None:
     expected = None if wan_type in ("WireGuard", "OpenVPN") else SensorStateClass.TOTAL_INCREASING
     assert sensor._attr_state_class == expected
     assert sensor.unique_id == "entry_wan_ISP_downtime"
-    assert sensor.native_value == 0 and sensor.available
+    assert sensor.native_value == 0
+    assert sensor.available
 
 
 @pytest.mark.parametrize(
@@ -81,7 +82,8 @@ def test_client_link_diagnostics_keep_readings_without_statistics(
 
     assert sensor._attr_state_class is None
     assert sensor.unique_id == f"entry_client_{mac}_{suffix}"
-    assert sensor.available and sensor.native_value == initial
+    assert sensor.available
+    assert sensor.native_value == initial
     client[field] = changed
     assert sensor.native_value == changed
     client["link"] = "down"
@@ -114,9 +116,11 @@ def test_mesh_count_keeps_readings_and_source_availability_without_statistics() 
 
     assert sensor._attr_state_class is None
     assert sensor.unique_id == "entry_mesh_node_1_clients_v2"
-    assert sensor.available and sensor.native_value == 3
+    assert sensor.available
+    assert sensor.native_value == 3
     node["associations"] = 0
-    assert sensor.available and sensor.native_value == 0
+    assert sensor.available
+    assert sensor.native_value == 0
     coordinator.data["mesh_nodes_fresh"] = False
     assert not sensor.available
 
