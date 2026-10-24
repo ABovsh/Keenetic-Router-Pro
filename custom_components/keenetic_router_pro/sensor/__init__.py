@@ -128,13 +128,17 @@ async def async_setup_entry(
     # Legacy controller-level WAN summary sensors are kept for
     # backwards compatibility. The per-WAN device entities below are
     # the preferred model for new dashboards.
-    entities.append(KeeneticWanStatusSensor(coordinator, entry))
-    entities.append(KeeneticWanIpSensor(coordinator, entry))
-    entities.append(KeeneticPppoeUptimeSensor(coordinator, entry))
-    entities.append(KeeneticActiveConnectionsSensor(coordinator, entry))
-    entities.append(KeeneticDnsProxyStatusSensor(coordinator, entry))
-    entities.append(KeeneticDnsProxyFailedRequestsSensor(coordinator, entry))
-    entities.append(KeeneticIpsecViciOomTotalSensor(coordinator, entry))
+    entities.extend(
+        [
+            KeeneticWanStatusSensor(coordinator, entry),
+            KeeneticWanIpSensor(coordinator, entry),
+            KeeneticPppoeUptimeSensor(coordinator, entry),
+            KeeneticActiveConnectionsSensor(coordinator, entry),
+            KeeneticDnsProxyStatusSensor(coordinator, entry),
+            KeeneticDnsProxyFailedRequestsSensor(coordinator, entry),
+            KeeneticIpsecViciOomTotalSensor(coordinator, entry),
+        ]
+    )
     # These four count the client tree. When the coordinator has been told not
     # to fetch it, creating them anyway would be worse than omitting them:
     # they would confidently report zero clients rather than going away.
@@ -161,10 +165,14 @@ async def async_setup_entry(
     )
 
     # Traffic counters
-    entities.append(KeeneticLanRxSensor(coordinator, entry))
-    entities.append(KeeneticLanTxSensor(coordinator, entry))
-    entities.append(KeeneticWanRxSensor(coordinator, entry))
-    entities.append(KeeneticWanTxSensor(coordinator, entry))
+    entities.extend(
+        [
+            KeeneticLanRxSensor(coordinator, entry),
+            KeeneticLanTxSensor(coordinator, entry),
+            KeeneticWanRxSensor(coordinator, entry),
+            KeeneticWanTxSensor(coordinator, entry),
+        ]
+    )
 
     host = entry.data.get("host") or entry.data.get("ip", "unknown")
     entities.append(KeeneticLocalIpSensor(coordinator, entry, host))
