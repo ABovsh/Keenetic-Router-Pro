@@ -1,11 +1,22 @@
 # Keenetic Router Pro
 
-Bring your Keenetic network into Home Assistant. See which internet connection is active, how long each provider was offline, which mesh extenders are reachable, and when a device joins or leaves. Home Assistant polls the router directly on your LAN with no cloud dependency.
+Monitor and control your Keenetic router, mesh extenders, and connected devices from Home Assistant. Direct LAN connections have no cloud dependency.
 
 ![Version](https://img.shields.io/badge/version-1.20.0-blue?style=for-the-badge)
 ![Home Assistant 2024.5 or newer](https://img.shields.io/badge/Home%20Assistant-2024.5%2B-41BDF5?style=for-the-badge&logo=home-assistant)
 
-[Install](#install-with-hacs) · [Connect your router](#connect-your-router) · [Explore your devices](#explore-your-devices) · [Troubleshooting](#troubleshooting)
+[Features](#features) · [Install](#install-with-hacs) · [Connect your router](#connect-your-router) · [Dashboard and automation examples](#dashboard-and-automation-examples) · [Troubleshooting](#troubleshooting)
+
+## Features
+
+- **Internet and failover.** See the active uplink, public IP, throughput, and traffic totals. Compare downtime by provider and see how long the whole site lost internet. Trigger an automation when the router switches uplinks.
+- **Presence and client controls.** Track selected devices, see when they were last online, and trigger automations when clients connect or disconnect. Block internet access, assign a connection policy, or set a bandwidth limit.
+- **Mesh monitoring.** See which extenders are online, how many clients each serves, and how much traffic crosses its ports. New extenders appear as the controller discovers them.
+- **VPN monitoring and control.** Check WireGuard and IPsec tunnel state and traffic. Enable or disable supported profiles from Home Assistant.
+- **Router and Wi-Fi diagnostics.** Monitor CPU load, memory use, active connections, radio temperature, and DNS proxy failures. Switch supported Wi-Fi networks on or off.
+- **Firmware and maintenance.** Check for and install firmware updates on the router and supported mesh extenders, or reboot a device from Home Assistant.
+
+Available entities and controls depend on the router model, installed KeeneticOS components, and selected clients.
 
 ## Install with HACS
 
@@ -36,17 +47,7 @@ In Home Assistant, enter the **app hostname** and its credentials. This mode use
 
 </details>
 
-## Explore your devices
-
-The devices and controls you see depend on your model, installed KeeneticOS components, and tracked clients.
-
-| Device | What to look for |
-| --- | --- |
-| Router | CPU and memory usage, active connections, Wi-Fi radio temperature, DNS proxy health, firmware updates, and reboot. **Internet Downtime** counts periods when no uplink has internet. |
-| WAN uplink | Connection state, public IP, throughput, traffic totals, and an enable switch. Each provider’s **Downtime** counts loss of link or internet on that uplink. |
-| Mesh extender | Reachability, connected clients, ports, traffic, firmware updates, and reboot. New nodes appear as the controller discovers them. |
-| VPN | WireGuard and IPsec state, traffic, and controls for supported profiles. A VPN that serves as an uplink shares its WAN device. |
-| Tracked client | Presence, last seen, connection policy, access blocking, and bandwidth limit where supported. |
+## Dashboard and automation examples
 
 **Compare providers.** Add each uplink’s **Downtime** sensor to a Home Assistant statistics card and compare the change over the same week or month. Use **Internet Downtime** for the whole site. Time when Home Assistant cannot read the router is excluded.
 
