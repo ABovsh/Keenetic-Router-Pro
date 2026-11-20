@@ -4,10 +4,15 @@
 
 <p align="center">Know when your internet switches providers, when a device comes home,<br>and when a mesh extender goes offline. All from Home Assistant.</p>
 
-<p align="center">
-  <a href="https://github.com/ABovsh/Keenetic-Router-Pro/releases"><img src="https://img.shields.io/badge/version-1.20.0-blue" alt="Version 1.20.0"></a>
-  <img src="https://img.shields.io/badge/Home%20Assistant-2024.5%2B-18BCF2?logo=homeassistant&logoColor=white" alt="Home Assistant 2024.5 or newer">
-</p>
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ABovsh&repository=Keenetic-Router-Pro&category=integration)
+![Version](https://img.shields.io/badge/version-1.20.0-blue?style=for-the-badge)
+![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.5%2B-41BDF5?style=for-the-badge&logo=home-assistant)
+
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ABovsh_Keenetic-Router-Pro)
+[![Reliability](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=reliability_rating)](https://sonarcloud.io/component_measures?id=ABovsh_Keenetic-Router-Pro&metric=reliability_rating)
+[![Security](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=security_rating)](https://sonarcloud.io/component_measures?id=ABovsh_Keenetic-Router-Pro&metric=security_rating)
+[![Maintainability](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=sqale_rating)](https://sonarcloud.io/component_measures?id=ABovsh_Keenetic-Router-Pro&metric=sqale_rating)
+[![Coverage](https://img.shields.io/sonar/coverage/ABovsh_Keenetic-Router-Pro?server=https%3A%2F%2Fsonarcloud.io&style=for-the-badge&logo=sonarcloud&label=coverage)](https://sonarcloud.io/component_measures?id=ABovsh_Keenetic-Router-Pro&metric=coverage)
 
 ## What you can do
 
@@ -114,14 +119,3 @@ For a support request, download diagnostics from the integration entry and revie
 
 
 [Release notes](CHANGELOG.md) · [Apache License 2.0](LICENSE) · [Report an issue](https://github.com/ABovsh/Keenetic-Router-Pro/issues)
-
-<details>
-<summary>Code quality and test coverage</summary>
-
-[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ABovsh_Keenetic-Router-Pro)
-[![Reliability](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=reliability_rating)](https://sonarcloud.io/component_measures?id=ABovsh_Keenetic-Router-Pro&metric=reliability_rating)
-[![Security](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=security_rating)](https://sonarcloud.io/component_measures?id=ABovsh_Keenetic-Router-Pro&metric=security_rating)
-[![Maintainability](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=sqale_rating)](https://sonarcloud.io/component_measures?id=ABovsh_Keenetic-Router-Pro&metric=sqale_rating)
-[![Coverage](https://img.shields.io/sonar/coverage/ABovsh_Keenetic-Router-Pro?server=https%3A%2F%2Fsonarcloud.io&style=for-the-badge&logo=sonarcloud&label=coverage)](https://sonarcloud.io/component_measures?id=ABovsh_Keenetic-Router-Pro&metric=coverage)
-
-</details>
