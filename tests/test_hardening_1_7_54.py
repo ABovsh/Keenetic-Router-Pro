@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 from typing import Any
 
 import pytest
@@ -17,10 +16,6 @@ from custom_components.keenetic_router_pro.api import (
 from custom_components.keenetic_router_pro.coordinator_parts.derived import (
     mesh_associations,
     real_client_macs,
-)
-from custom_components.keenetic_router_pro.coordinator_parts.oom import (
-    advance_oom_state,
-    parse_keenetic_log_ts,
 )
 from custom_components.keenetic_router_pro.coordinator_parts.payloads import (
     merge_clients_with_neighbours,
@@ -110,25 +105,6 @@ def test_node_auth_missing_challenge_sends_no_credentials() -> None:
     assert ("192.168.1.3", 80) not in client._node_auth_headers
 
 
-# ---------------------------------------------------------------- CA04
-def test_dns_proxy_status_accepts_dict_payload() -> None:
-    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
-
-    async def fake_rci_get(path, **kwargs):
-        return {
-            "proxy-status": {
-                "proxy-name": "Dns::Proxy",
-                "proxy-config": "",
-                "proxy-stat": "",
-            }
-        }
-
-    client._rci_get = fake_rci_get
-    result = asyncio.run(client.async_get_dns_proxy_status())
-
-    assert result.get("proxies")
-    assert client._dns_proxy_supported is True
-
 
 # ---------------------------------------------------------------- CA05
 def test_set_client_policy_none_mac_raises_api_error() -> None:
@@ -180,28 +156,6 @@ def test_merge_clients_tolerates_dict_shaped_neighbours() -> None:
     assert merged == clients
 
 
-# ---------------------------------------------------------------- CB04
-def test_oom_high_water_mark_not_lowered_by_sliding_window() -> None:
-    ts = "May 27 17:33:48"
-    parsed = parse_keenetic_log_ts(ts)
-    state = {
-        "last_seen_iso": parsed.isoformat(),
-        "last_seen_count": 3,
-        "total": 3,
-    }
-    # Window slid: only one event at the same second remains visible.
-    new_state = advance_oom_state(state, [(ts, "oom")], now=parsed)
-    assert new_state["total"] == 3
-    assert new_state["last_seen_count"] == 3  # high-water mark preserved
-
-
-# ---------------------------------------------------------------- CB05
-def test_feb_29_log_timestamp_survives_non_leap_year() -> None:
-    parsed = parse_keenetic_log_ts(
-        "Feb 29 10:00:00", now=datetime(2026, 3, 1, 0, 0, 0)
-    )
-    assert parsed is not None
-    assert parsed.month == 2
 
 
 # ---------------------------------------------------------------- CB07

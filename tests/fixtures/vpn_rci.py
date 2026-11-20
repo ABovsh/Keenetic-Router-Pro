@@ -14,7 +14,6 @@ CRYPTO_MAPS = {
     }
 }
 
-IPSEC_DIAGNOSTICS = {"status": "ok"}
 
 IPSEC_PHASE_STATES = (
     "UNDEFINED",

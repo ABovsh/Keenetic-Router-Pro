@@ -9,7 +9,6 @@ from types import SimpleNamespace
 from typing import Any
 
 from conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
-from test_coordinator_update_flow import FakeKeeneticClient
 from test_hardening_1_10_0 import _patched_registries
 
 from custom_components.keenetic_router_pro import async_remove_config_entry_device
@@ -18,7 +17,6 @@ from custom_components.keenetic_router_pro.const import (
     CONF_CLIENT_SENSORS,
     CONF_TRACKED_CLIENTS,
 )
-from custom_components.keenetic_router_pro.coordinator import KeeneticCoordinator
 from custom_components.keenetic_router_pro.diagnostics import (
     _MAC_SET_FIELDS,
     async_get_config_entry_diagnostics,
@@ -125,42 +123,6 @@ class _FlakyStore:
     async def async_save(self, data: dict[str, Any]) -> None:
         self.saved.append(dict(data))
 
-
-def _oom_client() -> FakeKeeneticClient:
-    client = FakeKeeneticClient()
-
-    async def ipsec_diagnostics() -> dict[str, Any]:
-        return {"events": [("May 1 12:00:00", "IpSec::Vici::Stats: out of memory")]}
-
-    client.async_get_ipsec_diagnostics = ipsec_diagnostics  # type: ignore[assignment]
-    return client
-
-
-def test_failed_oom_store_load_is_retried_on_the_next_tick() -> None:
-    """A transient load error latched the counter at 0 for the whole session."""
-    store = _FlakyStore()
-    coordinator = KeeneticCoordinator(object(), _oom_client())  # type: ignore[arg-type]
-    coordinator._oom_store = store  # type: ignore[assignment]
-
-    asyncio.run(coordinator._async_update_data())
-
-    assert store.loads == 1
-    assert coordinator._oom_state_loaded is False
-
-
-def test_retried_oom_store_load_does_not_overwrite_the_persisted_total() -> None:
-    """The reset-to-zero state was saved over the real total on disk."""
-    store = _FlakyStore()
-    coordinator = KeeneticCoordinator(object(), _oom_client())  # type: ignore[arg-type]
-    coordinator._oom_store = store  # type: ignore[assignment]
-
-    asyncio.run(coordinator._async_update_data())
-    coordinator.data = None
-    data = asyncio.run(coordinator._async_update_data())
-
-    assert store.loads == 2
-    assert coordinator._oom_state_loaded is True
-    assert data["ipsec_diagnostics"]["oom_total"] == 8
 
 
 # --- 4. The options flow must update the entry once, not twice ---

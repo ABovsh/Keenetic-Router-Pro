@@ -96,11 +96,6 @@ from .crypto import (
     KeeneticCryptoMapRxThroughputSensor,
     KeeneticCryptoMapTxThroughputSensor,
 )
-from .dns import (
-    KeeneticDnsProxyStatusSensor,
-    KeeneticDnsProxyFailedRequestsSensor,
-)
-from .ipsec import KeeneticIpsecViciOomTotalSensor
 from .wireguard import KeeneticWgRxSensor, KeeneticWgTxSensor, KeeneticWgUptimeSensor
 
 
@@ -134,9 +129,6 @@ async def async_setup_entry(
             KeeneticWanIpSensor(coordinator, entry),
             KeeneticPppoeUptimeSensor(coordinator, entry),
             KeeneticActiveConnectionsSensor(coordinator, entry),
-            KeeneticDnsProxyStatusSensor(coordinator, entry),
-            KeeneticDnsProxyFailedRequestsSensor(coordinator, entry),
-            KeeneticIpsecViciOomTotalSensor(coordinator, entry),
         ]
     )
     # These four count the client tree. When the coordinator has been told not

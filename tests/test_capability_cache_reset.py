@@ -22,10 +22,8 @@ def _client() -> KeeneticClient:
 def _latch_all(client: KeeneticClient) -> None:
     client._mws_member_supported = False
     client._crypto_map_supported = True
-    client._dns_proxy_supported = False
     client._ping_check_supported = True
     client._ndns_supported = False
-    client._ipsec_diagnostics_supported = True
     client._hotspot_subpath_skip = {"foo", "bar"}
     client._hotspot_subpath_winner = "foo"
     client._iface_stat_get_only = True
@@ -40,10 +38,8 @@ def test_reset_capability_caches_restores_defaults() -> None:
 
     assert client._mws_member_supported is None
     assert client._crypto_map_supported is None
-    assert client._dns_proxy_supported is None
     assert client._ping_check_supported is None
     assert client._ndns_supported is None
-    assert client._ipsec_diagnostics_supported is None
     assert client._hotspot_subpath_skip == set()
     assert client._hotspot_subpath_winner is None
     assert client._iface_stat_get_only is None
@@ -91,10 +87,8 @@ async def test_version_change_triggers_reset() -> None:
     assert client._last_seen_fw_version == "3.9.2"
     assert client._mws_member_supported is None
     assert client._crypto_map_supported is None
-    assert client._dns_proxy_supported is None
     assert client._ping_check_supported is None
     assert client._ndns_supported is None
-    assert client._ipsec_diagnostics_supported is None
     assert client._hotspot_subpath_skip == set()
     assert client._hotspot_subpath_winner is None
     assert client._iface_stat_get_only is None

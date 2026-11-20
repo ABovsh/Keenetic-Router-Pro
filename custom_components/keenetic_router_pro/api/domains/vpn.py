@@ -10,29 +10,20 @@ import aiohttp
 
 from ...const import (
     DOMAIN,
-    FIELD_CONNECTED,
     INTERFACE_CONF_DISABLED,
-    IPSEC_STATE_ESTABLISHED,
     LINK_STATE_DOWN,
     LINK_STATE_UP,
 )
-from ...utils import coerce_bool, coerce_byte_count, first_present
+from ...utils import coerce_byte_count, first_present
 from ..errors import KeeneticApiError
 from ..helpers import (
-    _as_list,
-    _clean_addr,
-    _clean_str,
-    _extract_log_entries,
-    _extract_parse_messages,
     _is_endpoint_missing,
     _normalize_interfaces,
-    _to_int,
     _validate_cli_arg,
 )
 from ..parsers.ipsec import (
     merge_crypto_map_config,
     parse_ipsec_statusall,
-    parse_ipsec_vici_diagnostics,
 )
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.api.vpn")
@@ -219,77 +210,14 @@ class VpnMixin:
 
         return {"profiles": profiles}
 
-    @classmethod
-    def _parse_ipsec_vici_diagnostics(
-        cls,
-        lines: List[str],
-        entries: List[Dict[str, Any]] | None = None,
-    ) -> Dict[str, Any]:
-        """Summarize recent IPsec VICI memory errors from router log lines.
-
-        ``lines`` is the legacy text-only input — each entry is a raw log
-        line. ``entries`` is the modern shape: each entry is a dict with
-        ``time`` and ``message`` fields, preserving the per-record
-        timestamp emitted by the router. When ``entries`` is supplied,
-        ``events`` is populated with ``(timestamp, line)`` tuples so the
-        coordinator can dedup against a persisted ``last_seen_ts`` and
-        maintain a monotonically increasing OOM counter.
-        """
-        return parse_ipsec_vici_diagnostics(lines, entries=entries)
-
-    async def async_get_ipsec_diagnostics(self) -> Dict[str, Any]:
-        """Return low-cadence diagnostics for IPsec/VICI router log errors.
-
-        Uses RCI ``show/log`` (structured JSON with ``time`` + ``message``
-        per record). Falls back to ``show log 200 once`` text mode if the
-        JSON endpoint is unavailable. The JSON shape preserves per-event
-        timestamps so the coordinator can build a monotonic OOM counter
-        with timestamp dedup.
-        """
-        if self._ipsec_diagnostics_supported is False:
-            # Router has no log access — latched off after both read paths
-            # returned "endpoint missing" (mirrors the other capability caches).
-            return {}
-        # Larger window than 200: at the post-1.7.45 cadence the router
-        # generates ~1 OOM per 10 min, and we poll every 5 min — so a
-        # 1000-line window comfortably covers two polling intervals
-        # plus router log churn from DHCP/Wi-Fi.
-        try:
-            data = await self._rci_post("", {"show": {"log": {"max-lines": 1000, "once": True}}})
-            entries = _extract_log_entries(data)
-            if entries:
-                diag = self._parse_ipsec_vici_diagnostics([], entries=entries)
-                diag["command"] = "show log 1000 once"
-                return diag
-        except asyncio.CancelledError:
-            raise
-        except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError) as err:
-            _LOGGER.debug("show/log JSON path failed: %s — falling back to text", err)
-        # Fallback to text-only path (no per-event timestamps).
-        try:
-            data = await self._rci_parse("show log 200 once")
-            lines = _extract_parse_messages(data)
-            diag = self._parse_ipsec_vici_diagnostics(lines)
-            diag["command"] = "show log 200 once"
-            return diag
-        except asyncio.CancelledError:
-            raise
-        except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError) as err:
-            _LOGGER.debug("Error getting IPsec diagnostics: %s", err)
-            if _is_endpoint_missing(err):
-                self._ipsec_diagnostics_supported = False
-            return {}
 
     @classmethod
     def _parse_ipsec_statusall(cls, text: str) -> Dict[str, Dict[str, Any]]:
         """Parse strongSwan ``ipsec statusall`` text into normalized dicts.
 
-        The output mirrors the dict shape produced by
-        ``async_get_crypto_maps`` so existing sensors/binary_sensors
-        and entity wiring keep working without changes. The key
-        difference is the data source: stroke (this) instead of vici
-        (crypto_maps), avoiding the per-call OOM leak in ``ndm``'s
-        ``IpSec::Vici::Stats`` handler on KeeneticOS 5.x.
+        The data source is stroke (``show/ipsec``) rather than the VICI
+        ``show/crypto/map`` path, avoiding the per-call OOM leak in
+        ``ndm``'s ``IpSec::Vici::Stats`` handler on KeeneticOS 5.x.
         """
         return parse_ipsec_statusall(text)
 
@@ -336,9 +264,6 @@ class VpnMixin:
         vanish) for a whole slow tick, while the coordinator can keep its
         previous snapshot. "Not found" from both reads means the router has
         no IPsec component; that is latched like the other capabilities.
-
-        Output shape matches ``async_get_crypto_maps`` so downstream
-        sensors/binary_sensors keep working unchanged.
         """
         if self._crypto_map_supported is False:
             return {}
@@ -375,165 +300,6 @@ class VpnMixin:
             {} if isinstance(config, BaseException) else _crypto_map_config_entries(config),
         )
 
-    async def async_get_crypto_maps(self) -> Dict[str, Dict[str, Any]]:
-        """Return site-to-site IPsec tunnels (`crypto map` entries).
-
-        Endpoint: rci/show/crypto/map
-
-        Site-to-site IPsec tunnels do NOT appear as virtual interfaces
-        in /rci/show/interface, so they need their own data path and
-        their own entity model — they can't piggyback on the existing
-        per-WAN / per-VPN-client plumbing that other VPN types use.
-
-        The router response looks like (tunnel that never came up):
-            {
-              "crypto_map": {
-                "TEST": {
-                  "config": {
-                    "remote_peer": "192.0.2.1",
-                    "enabled": "yes",              # NOTE: string, not bool
-                    "crypto_ipsec_profile_name": "TEST",
-                    "mode": "tunnel"
-                  },
-                  "status": {
-                    "primary_peer": true,
-                    "initiator": true,
-                    "ike_state": "UNDEFINED",
-                    "state": "UNDEFINED",
-                    "via": "PPPoE0",
-                    "local-endpoint-address": "78.188.13.104",
-                    "remote-endpoint-address": "192.0.2.1"
-                  }
-                }
-              }
-            }
-
-        A fully established tunnel additionally has `status.phase1`
-        (dict) and `status.phase2_sa_list.phase2_sa` (list of SA dicts
-        with in_bytes / out_bytes counters). We treat those as optional
-        because the router only populates them once SA negotiation has
-        actually happened.
-
-        We normalise to:
-            {
-              "<name>": {
-                "name": "TEST",
-                "enabled": True,                   # config.enabled == "yes"
-                "remote_peer": "192.0.2.1",
-                "mode": "tunnel",
-                "ipsec_profile_name": "TEST",
-                "state": "UNDEFINED",              # status.state
-                "ike_state": "UNDEFINED",          # status.phase1.ike_state
-                                                   #   or status.ike_state
-                FIELD_CONNECTED: False,                # state == PHASE2_ESTABLISHED
-                "via": "PPPoE0" or None,
-                "local_endpoint": "78.188.13.104" or None,
-                "remote_endpoint": "192.0.2.1" or None,
-                "rx_bytes": 1506697,               # sum across phase2 SAs
-                "tx_bytes": 129642,                # sum across phase2 SAs
-                "rx_packets": 2950,
-                "tx_packets": 2360,
-                "phase1": {...} or None,           # raw, for v2 sensors
-                "phase2_sa_list": [...] or [],     # raw, normalised to list
-                "raw_status": {...},               # raw status for diag
-                "raw_config": {...},
-              }
-            }
-        """
-        if self._crypto_map_supported is False:
-            return {}
-        try:
-            data = await self._rci_get("show/crypto/map")
-        except asyncio.CancelledError:
-            raise
-        except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError) as err:
-            if _is_endpoint_missing(err):
-                self._crypto_map_supported = False
-            _LOGGER.debug("show/crypto/map unavailable: %s", err)
-            return {}
-        self._crypto_map_supported = True
-
-        if not isinstance(data, dict):
-            return {}
-        raw_maps = data.get("crypto_map") or {}
-
-        if not isinstance(raw_maps, dict):
-            return {}
-
-        result: Dict[str, Dict[str, Any]] = {}
-        for name, entry in raw_maps.items():
-            if not isinstance(entry, dict):
-                continue
-
-            config = entry.get("config") or {}
-            status = entry.get("status") or {}
-            if not isinstance(config, dict):
-                config = {}
-            if not isinstance(status, dict):
-                status = {}
-
-            # phase1 may live either under status.phase1 (when router
-            # has negotiated) or — on some firmwares — the ike_state
-            # field alone is promoted to status.ike_state with no
-            # phase1 block. Handle both.
-            phase1 = status.get("phase1")
-            if not isinstance(phase1, dict):
-                phase1 = None
-
-            ike_state = None
-            if phase1:
-                ike_state = _clean_str(phase1.get("ike_state"))
-            if not ike_state:
-                ike_state = _clean_str(status.get("ike_state"))
-
-            # phase2 SA list — present only when SAs have been set up.
-            p2_wrapper = status.get("phase2_sa_list") or {}
-            if not isinstance(p2_wrapper, dict):
-                p2_wrapper = {}
-            phase2_sa_list = _as_list(p2_wrapper.get("phase2_sa"))
-
-            rx_bytes = 0
-            tx_bytes = 0
-            rx_packets = 0
-            tx_packets = 0
-            for sa in phase2_sa_list:
-                if not isinstance(sa, dict):
-                    continue
-                rx_bytes += _to_int(sa.get("in_bytes"))
-                tx_bytes += _to_int(sa.get("out_bytes"))
-                rx_packets += _to_int(sa.get("in_packets"))
-                tx_packets += _to_int(sa.get("out_packets"))
-
-            state = _clean_str(status.get("state"))
-            connected = state == IPSEC_STATE_ESTABLISHED
-            local_endpoint = _clean_addr(status.get("local-endpoint-address"))
-            remote_endpoint = _clean_addr(status.get("remote-endpoint-address"))
-
-            result[name] = {
-                "name": name,
-                "enabled": coerce_bool(config.get("enabled")),
-                "remote_peer": _clean_str(config.get("remote_peer")),
-                "mode": _clean_str(config.get("mode")),
-                "ipsec_profile_name": _clean_str(
-                    config.get("crypto_ipsec_profile_name")
-                ),
-                "state": state,
-                "ike_state": ike_state,
-                FIELD_CONNECTED: connected,
-                "via": _clean_str(status.get("via")),
-                "local_endpoint": local_endpoint,
-                "remote_endpoint": remote_endpoint,
-                "rx_bytes": rx_bytes,
-                "tx_bytes": tx_bytes,
-                "rx_packets": rx_packets,
-                "tx_packets": tx_packets,
-                "phase1": phase1,
-                "phase2_sa_list": phase2_sa_list,
-                "raw_config": config,
-                "raw_status": status,
-            }
-
-        return result
 
     async def async_set_crypto_map_enabled(
         self, name: str, enabled: bool

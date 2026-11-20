@@ -19,12 +19,8 @@ from __future__ import annotations
 
 import asyncio
 from typing import Any
-from unittest.mock import AsyncMock
 
-from conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
 
-from custom_components.keenetic_router_pro.api.client import KeeneticClient
-from custom_components.keenetic_router_pro.api.errors import KeeneticApiError
 from custom_components.keenetic_router_pro.binary_sensor import (
     KeeneticCryptoMapConnectedSensor,
     KeeneticMeshNodeSensor,
@@ -34,9 +30,6 @@ from custom_components.keenetic_router_pro.coordinator import KeeneticCoordinato
 from custom_components.keenetic_router_pro.coordinator_parts.refresh import (
     build_batch_tree,
     refresh_plan,
-)
-from custom_components.keenetic_router_pro.sensor.dns import (
-    KeeneticDnsProxyStatusSensor,
 )
 from custom_components.keenetic_router_pro.sensor.mesh import (
     KeeneticMeshMemorySensor,
@@ -203,34 +196,6 @@ def test_crypto_map_connected_attrs_ignore_volatile_counters() -> None:
     assert "tx_bytes" not in after
 
 
-def test_dns_proxy_status_attrs_ignore_volatile_counters() -> None:
-    coordinator = _DummyCoordinator(
-        {
-            "dns_proxy": {
-                "status": "ok",
-                "proxy_count": 2,
-                "requests_sent": 1000,
-                "proxies": [{"name": "doh1", "state": "ok"}],
-                "active_dns_server_count": 2,
-            }
-        }
-    )
-    entity = KeeneticDnsProxyStatusSensor(coordinator, _Entry())
-    before = entity.extra_state_attributes
-
-    coordinator.data["dns_proxy"].update(
-        {
-            "requests_sent": 1500,
-            "proxies": [{"name": "doh1", "state": "degraded"}],
-            "active_dns_server_count": 1,
-        }
-    )
-    after = entity.extra_state_attributes
-
-    assert after == before
-    for key in ("requests_sent", "proxies", "active_dns_server_count"):
-        assert key not in after
-
 
 def test_mesh_system_state_attrs_ignore_volatile_node_contents() -> None:
     coordinator = _DummyCoordinator(
@@ -316,7 +281,6 @@ def test_build_batch_tree_gates_check_update_on_update_check_tier() -> None:
     assert "check-update" not in tree.get("components", {})
     assert "version" in tree.get("show", {})
     assert "ndns" in tree.get("show", {})
-    assert "dns-proxy" in tree.get("show", {})
 
     update_check_tick = refresh_plan(first_refresh=False, refresh_count=1440)
     tree2 = build_batch_tree(update_check_tick)
@@ -386,11 +350,6 @@ class _UpdateTierFakeClient:
     async def async_get_ipsec_status(self) -> dict[str, Any]:
         return {}
 
-    async def async_get_dns_proxy_status(self) -> dict[str, Any]:
-        return {}
-
-    async def async_get_ipsec_diagnostics(self) -> dict[str, Any]:
-        return {}
 
     async def async_get_mesh_nodes(
         self, clients: list[dict[str, Any]] | None = None
@@ -567,24 +526,3 @@ def test_system_gauges_only_refresh_on_medium_ticks() -> None:
 # --------------------------------------------------------------------------
 # E. IPsec diagnostics capability latch
 # --------------------------------------------------------------------------
-
-
-def test_ipsec_diagnostics_latches_off_after_404() -> None:
-    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
-    client._rci_post = AsyncMock(
-        side_effect=KeeneticApiError("not found: 'show/log'", status=404)
-    )
-    client._rci_parse = AsyncMock(
-        side_effect=KeeneticApiError("not found: 'show/log'", status=404)
-    )
-
-    async def run() -> tuple[dict, dict]:
-        first = await client.async_get_ipsec_diagnostics()
-        second = await client.async_get_ipsec_diagnostics()
-        return first, second
-
-    first, second = asyncio.run(run())
-
-    assert first == {}
-    assert second == {}
-    client._rci_post.assert_awaited_once()

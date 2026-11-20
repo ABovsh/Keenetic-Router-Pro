@@ -23,7 +23,6 @@ from custom_components.keenetic_router_pro.sensor.traffic import KeeneticLanRxSe
 from custom_components.keenetic_router_pro.sensor.wifi import KeeneticWifi24RxSensor
 from custom_components.keenetic_router_pro.sensor.wireguard import KeeneticWgRxSensor
 from custom_components.keenetic_router_pro.utils import normalize_mesh_node_address
-from test_coordinator_stages import StageFixtureClient
 
 
 class _Counter(CounterDeadbandMixin):
@@ -84,40 +83,6 @@ class _AlwaysFailOomStore:
         self.attempts += 1
         raise OSError("storage busy")
 
-
-def test_oom_save_failure_retries_latest_snapshot_without_another_event() -> None:
-    client = StageFixtureClient()
-    client.ipsec_diagnostics = {
-        "events": [("May 1 12:00:00", "IpSec::Vici::Stats: out of memory")]
-    }
-    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
-    store = _FailOnceOomStore()
-    coordinator._oom_store = store  # type: ignore[assignment]
-
-    coordinator.data = asyncio.run(coordinator._async_update_data())
-    assert coordinator._oom_state_dirty is True
-    client.ipsec_diagnostics = {"events": []}
-    asyncio.run(coordinator._async_update_data())
-
-    assert coordinator._oom_state_dirty is False
-    assert store.saves[-1] == coordinator._oom_state
-
-
-def test_oom_save_retry_uses_bounded_exponential_backoff() -> None:
-    client = StageFixtureClient()
-    client.ipsec_diagnostics = {
-        "events": [("May 1 12:00:00", "IpSec::Vici::Stats: out of memory")]
-    }
-    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
-    store = _AlwaysFailOomStore()
-    coordinator._oom_store = store  # type: ignore[assignment]
-
-    for _ in range(5):
-        coordinator.data = asyncio.run(coordinator._async_update_data())
-
-    assert store.attempts == 3
-    assert coordinator._oom_save_backoff_ticks == 4
-    assert coordinator._oom_save_retry_after == 2
 
 
 def test_optional_source_freshness_expires_after_three_failed_attempts() -> None:

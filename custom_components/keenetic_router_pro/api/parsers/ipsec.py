@@ -7,7 +7,6 @@ from typing import Any
 
 from ...const import FIELD_CONNECTED, IPSEC_STATE_ESTABLISHED
 from ...utils import coerce_bool
-from ..constants import _IPSEC_VICI_OOM_RE
 from ..helpers import _clean_addr, _clean_str, _to_int
 
 
@@ -119,62 +118,6 @@ def _connection_child_fields(line: str) -> tuple[str, str] | None:
         return None
     return name, child_tail.removeprefix("child:").strip()
 
-
-def parse_ipsec_vici_diagnostics(
-    lines: list[str],
-    entries: list[dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """Summarize recent IPsec VICI memory errors from router log lines."""
-    matches: list[dict[str, Any]] = []
-    if entries is not None:
-        for ent in entries:
-            if not isinstance(ent, dict):
-                continue
-            msg = ent.get("message")
-            if not isinstance(msg, str):
-                continue
-            match = _IPSEC_VICI_OOM_RE.search(msg)
-            if not match:
-                continue
-            matches.append(
-                {
-                    "line": msg.strip(),
-                    "code": match.group("code"),
-                    "time": ent.get("time"),
-                }
-            )
-    else:
-        for line in lines:
-            if not isinstance(line, str):
-                continue
-            match = _IPSEC_VICI_OOM_RE.search(line)
-            if not match:
-                continue
-            matches.append(
-                {
-                    "line": line.strip(),
-                    "code": match.group("code"),
-                    "time": None,
-                }
-            )
-
-    last_match = None
-    if matches:
-        last_match = matches[0] if entries is not None else matches[-1]
-    scanned = len(entries) if entries is not None else len(lines)
-    return {
-        "status": "warning" if matches else "ok",
-        "vici_out_of_memory_count": len(matches),
-        "last_vici_out_of_memory": last_match.get("line") if last_match else None,
-        "last_error_code": last_match.get("code") if last_match else None,
-        # ``entries`` is newest-first, plain lines are oldest-first — pick
-        # the newest five from the correct end in each case.
-        "recent_matches": [
-            m["line"] for m in (matches[:5] if entries is not None else matches[-5:])
-        ],
-        "events": [(m["time"], m["line"]) for m in matches],
-        "scanned_log_lines": scanned,
-    }
 
 
 def _default_tunnel(name: str) -> dict[str, Any]:

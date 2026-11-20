@@ -20,7 +20,7 @@
 - **Track devices at home.** See who’s connected and when they were last seen. Set a bandwidth limit, block access, or assign a connection policy.
 - **Check your mesh.** Find offline extenders, see how many clients each serves, and check port traffic.
 - **Manage VPNs.** Monitor WireGuard and IPsec traffic and switch supported tunnels on or off.
-- **Check router health.** Watch CPU, memory, Wi-Fi temperature, and DNS failures. Toggle Wi-Fi, install firmware updates, or reboot a router or extender.
+- **Check router health.** Watch CPU, memory, and Wi-Fi temperature. Toggle Wi-Fi, install firmware updates, or reboot a router or extender.
 
 Home Assistant polls the router on your LAN with no cloud dependency. Available controls depend on your model and KeeneticOS components.
 

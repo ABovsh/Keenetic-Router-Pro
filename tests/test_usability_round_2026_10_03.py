@@ -140,12 +140,6 @@ def test_low_value_counters_keep_no_statistics() -> None:
     from custom_components.keenetic_router_pro.sensor.clients import (
         KeeneticDisconnectedClientsSensor,
     )
-    from custom_components.keenetic_router_pro.sensor.dns import (
-        KeeneticDnsProxyFailedRequestsSensor,
-    )
-    from custom_components.keenetic_router_pro.sensor.ipsec import (
-        KeeneticIpsecViciOomTotalSensor,
-    )
     from custom_components.keenetic_router_pro.sensor.traffic import (
         KeeneticLanRxSensor,
         KeeneticLanTxSensor,
@@ -153,8 +147,6 @@ def test_low_value_counters_keep_no_statistics() -> None:
 
     for cls in (
         KeeneticDisconnectedClientsSensor,
-        KeeneticDnsProxyFailedRequestsSensor,
-        KeeneticIpsecViciOomTotalSensor,
         KeeneticLanRxSensor,
         KeeneticLanTxSensor,
     ):

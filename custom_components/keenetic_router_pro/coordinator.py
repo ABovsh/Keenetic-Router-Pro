@@ -10,7 +10,6 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import KeeneticClient
@@ -36,7 +35,6 @@ from .coordinator_parts.fetching import (
     next_backoff_interval,
     ok_or_default,
 )
-from .coordinator_parts.oom import advance_oom_state, local_now
 from .coordinator_parts.payloads import (
     dict_or_empty,
     list_or_empty,
@@ -47,11 +45,9 @@ from .coordinator_parts.refresh import (
     refresh_plan,
     unsupported_batch_paths,
 )
-from .utils import coerce_int, normalize_mac
+from .utils import normalize_mac
 
 
-_OOM_STORE_VERSION = 1
-_advance_oom_state = advance_oom_state
 _dict_or_empty = dict_or_empty
 _list_or_empty = list_or_empty
 _counter_rate_bytes_per_second = counter_rate_bytes_per_second
@@ -143,25 +139,6 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Optional fetch families can fail while the coordinator itself stays
         # healthy. Keep a short grace window, then mark only that source stale.
         self._source_failure_streaks: dict[str, int] = {}
-        # Per-config-entry persistent OOM tracker. The Store key is
-        # derived from the API host so two routers on the same HA
-        # instance keep their counters independent. Schema:
-        #   {"last_seen_iso": "2026-05-27T17:33:48", "last_seen_count": 1, "total": 42}
-        host = getattr(client, "host", None) or "unknown"
-        self._oom_store: Store = Store(
-            hass,
-            _OOM_STORE_VERSION,
-            f"{DOMAIN}_vici_oom_{host}.json",
-        )
-        self._oom_state: dict[str, Any] = {
-            "last_seen_iso": None,
-            "last_seen_count": 0,
-            "total": 0,
-        }
-        self._oom_state_loaded = False
-        self._oom_state_dirty = False
-        self._oom_save_backoff_ticks = 0
-        self._oom_save_retry_after = 0
 
     def _source_is_fresh(self, name: str, *, attempted: bool, failed: bool) -> bool:
         """Track freshness for a tiered optional source by attempted refreshes."""
@@ -390,8 +367,6 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ndns_info,
                 ping_check_status,
                 crypto_maps,
-                dns_proxy,
-                ipsec_diagnostics,
             ) = await asyncio.gather(
                 _bounded(self.client.async_get_system_info()),
                 _bounded(self.client.async_get_current_version_info()) if very_slow_refresh else _resolve(_cached_version),
@@ -404,8 +379,6 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _bounded(self.client.async_get_ndns_info()) if very_slow_refresh else _resolve(_prev.get("ndns", {})),
                 _bounded(self.client.async_get_ping_check_status()),
                 _bounded(self.client.async_get_ipsec_status()) if ipsec_status_refresh else _resolve(_prev.get("crypto_maps", {})),
-                _bounded(self.client.async_get_dns_proxy_status()) if very_slow_refresh else _resolve(_prev.get("dns_proxy", {})),
-                _bounded(self.client.async_get_ipsec_diagnostics()) if very_slow_refresh else _resolve(_prev.get("ipsec_diagnostics", {})),
                 return_exceptions=True,
             )
 
@@ -520,112 +493,6 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 }
             else:
                 crypto_maps = _prev.get("crypto_maps", {})
-            # DNS proxy is diagnostic-only and intentionally slow-cadence;
-            # routers without the endpoint should not warn every refresh.
-            # A transient failure keeps the previous snapshot (an empty one
-            # read as "unknown" for a whole 15-minute tier); repeated failures
-            # mark the source stale through ``dns_proxy_fresh``.
-            dns_proxy_fresh = self._source_is_fresh(
-                "dns_proxy",
-                attempted=very_slow_refresh,
-                failed=very_slow_refresh and isinstance(dns_proxy, BaseException),
-            )
-            dns_proxy = dict_or_empty(
-                _ok("dns_proxy", dns_proxy, _prev.get("dns_proxy", {}), silent=True)
-            )
-            # IPsec diagnostics read recent router log lines on the same
-            # very-slow cadence as DNS diagnostics. Missing log access is
-            # non-critical and should not affect normal polling.
-            ipsec_diagnostics = dict_or_empty(
-                _ok(
-                    "ipsec_diagnostics",
-                    ipsec_diagnostics,
-                    _prev.get("ipsec_diagnostics", {}),
-                    silent=True,
-                )
-            )
-            # Monotonic OOM counter — persists across HA restarts via Store,
-            # dedups against the per-event router timestamp so each OOM is
-            # counted exactly once even when polling windows overlap. The
-            # `total` value powers the TOTAL_INCREASING sensor, which lets
-            # HA Statistics derive per-hour / per-day rates and produce
-            # bar-chart "when did problems happen" graphs.
-            if not getattr(self, "_oom_state_loaded", False):
-                if not hasattr(self, "_oom_state"):
-                    self._oom_state = {
-                        "last_seen_iso": None,
-                        "last_seen_count": 0,
-                        "total": 0,
-                    }
-                store = getattr(self, "_oom_store", None)
-                stored = None
-                # A failed load must NOT mark the state loaded: the counter
-                # would stay at 0 for the whole session and the next OOM event
-                # would save that 0 over the real persisted total. Retry on the
-                # next tick instead — a busy .storage/ at boot is transient.
-                loaded = store is None
-                if store is not None:
-                    try:
-                        stored = await store.async_load()
-                        loaded = True
-                    except (OSError, ValueError, TypeError) as err:
-                        _LOGGER.debug("OOM Store load failed: %s — retrying next tick", err)
-                if isinstance(stored, dict):
-                    self._oom_state = {
-                        "last_seen_iso": stored.get("last_seen_iso"),
-                        "last_seen_count": coerce_int(
-                            stored.get("last_seen_count"), 0
-                        ),
-                        "total": coerce_int(stored.get("total"), 0),
-                    }
-                self._oom_state_loaded = loaded
-
-            events = (
-                ipsec_diagnostics.get("events")
-                if very_slow_refresh and ipsec_diagnostics
-                else None
-            )
-            # Advancing on an unloaded state would count up from 0 and then
-            # persist that over the real total. Skip the tick; the events are
-            # still in the router log when the load succeeds.
-            if events and self._oom_state_loaded:
-                next_oom_state = advance_oom_state(
-                    self._oom_state, events, now=local_now()
-                )
-                if next_oom_state != self._oom_state:
-                    self._oom_state = next_oom_state
-                    self._oom_state_dirty = True
-                    self._oom_save_retry_after = 0
-            if getattr(self, "_oom_state_dirty", False) and self._oom_state_loaded:
-                store = getattr(self, "_oom_store", None)
-                retry_after = getattr(self, "_oom_save_retry_after", 0)
-                if retry_after > 0:
-                    self._oom_save_retry_after = retry_after - 1
-                elif store is not None:
-                    try:
-                        await store.async_save(self._oom_state)
-                    except (OSError, TypeError) as err:
-                        delay = min(
-                            max(1, getattr(self, "_oom_save_backoff_ticks", 0) * 2),
-                            15,
-                        )
-                        self._oom_save_backoff_ticks = delay
-                        self._oom_save_retry_after = delay - 1
-                        _LOGGER.debug(
-                            "OOM Store save failed: %s — retrying in %s tick(s)",
-                            err,
-                            delay,
-                        )
-                    else:
-                        self._oom_state_dirty = False
-                        self._oom_save_backoff_ticks = 0
-                        self._oom_save_retry_after = 0
-
-            # Copy before mutating: on non-very-slow ticks this is the SAME
-            # dict object as the currently-published self.data snapshot.
-            ipsec_diagnostics = dict(ipsec_diagnostics)
-            ipsec_diagnostics["oom_total"] = self._oom_state["total"]
-            ipsec_diagnostics["oom_last_seen"] = self._oom_state.get("last_seen_iso")
 
             # Handle critical fetch failures. If the router is unreachable,
             # auth has expired, or the RCI surface is down, ``system_info``
@@ -1014,9 +881,6 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "_iface_fingerprint": iface_fp,
                 "crypto_maps": crypto_maps,
                 "crypto_maps_fresh": crypto_maps_fresh,
-                "dns_proxy": dns_proxy,
-                "dns_proxy_fresh": dns_proxy_fresh,
-                "ipsec_diagnostics": ipsec_diagnostics,
                 "new_clients": new_macs,
                 "online_clients": online_macs,
                 "connected_clients": connected_macs,

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from .auth import _AuthMixin
 from .domains.clients import ClientsMixin
-from .domains.dns import DnsMixin
 from .domains.mesh import MeshMixin
 from .domains.network import NetworkMixin
 from .domains.system import SystemMixin
@@ -22,7 +21,6 @@ class KeeneticClient(
     ClientsMixin,
     WifiMixin,
     VpnMixin,
-    DnsMixin,
     MeshMixin,
     _Transport,
 ):

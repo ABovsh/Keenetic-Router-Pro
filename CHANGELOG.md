@@ -10,6 +10,10 @@ git log.
 
 ## Unreleased
 
+### ⚠️ Breaking
+
+- **The IPsec VICI OOM Total, DNS Proxy Status and DNS Proxy Failed Requests sensors are removed.** The integration no longer reads the router log for IPsec memory errors or polls DNS proxy statistics. Existing history stays in the recorder; delete the leftover entities from Settings → Entities, and update dashboards, automations or templates that use them.
+
 ### 🔧 Changed
 
 - **Setup guidance for KeeneticOS 5.1.9.** The SSL hint and the plaintext-HTTP Repair tell you to use the router's KeenDNS name for HTTPS, because the router presents its certificate only for that name; the KeenDNS web-app mode is labelled for KeeneticOS 5.1.8 and older.

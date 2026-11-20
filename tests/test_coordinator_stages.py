@@ -16,14 +16,19 @@ from custom_components.keenetic_router_pro.const import FAST_SCAN_INTERVAL
 from custom_components.keenetic_router_pro.coordinator import KeeneticCoordinator
 from tests.test_compatibility_contracts import EXPECTED_COORDINATOR_KEYS
 from tests.fixtures.clients_rci import CLIENTS, HOST_POLICIES, IP_NEIGHBOURS
-from tests.fixtures.dns_rci import DNS_PROXY, NDNS_INFO
+from tests.fixtures.dns_rci import (
+    NDNS_INFO,
+)
 from tests.fixtures.mesh_rci import MESH_NODES
 from tests.fixtures.system_rci import (
     AVAILABLE_VERSION,
     CURRENT_VERSION,
     SYSTEM_INFO,
 )
-from tests.fixtures.vpn_rci import CRYPTO_MAPS, IPSEC_DIAGNOSTICS, VPN_TUNNELS
+from tests.fixtures.vpn_rci import (
+    CRYPTO_MAPS,
+    VPN_TUNNELS,
+)
 from tests.fixtures.vpn_rci import WIREGUARD_STATUS
 from tests.fixtures.wan_rci import (
     INTERFACE_STATS,
@@ -52,8 +57,6 @@ class StageFixtureClient:
         self.ndns_info = deepcopy(NDNS_INFO)
         self.ping_check = deepcopy(PING_CHECK)
         self.crypto_maps = deepcopy(CRYPTO_MAPS)
-        self.dns_proxy = deepcopy(DNS_PROXY)
-        self.ipsec_diagnostics = deepcopy(IPSEC_DIAGNOSTICS)
         self.mesh_nodes = deepcopy(MESH_NODES)
         self.wifi_networks = deepcopy(WIFI_NETWORKS)
         self.wireguard_status = deepcopy(WIREGUARD_STATUS)
@@ -123,13 +126,6 @@ class StageFixtureClient:
         self._record_call("ipsec_status")
         return deepcopy(self.crypto_maps)
 
-    async def async_get_dns_proxy_status(self) -> dict[str, Any]:
-        self._record_call("dns_proxy")
-        return deepcopy(self.dns_proxy)
-
-    async def async_get_ipsec_diagnostics(self) -> dict[str, Any]:
-        self._record_call("ipsec_diagnostics")
-        return deepcopy(self.ipsec_diagnostics)
 
     async def async_get_mesh_nodes(
         self, clients: list[dict[str, Any]] | None = None
@@ -402,8 +398,6 @@ async def test_coordinator_very_slow_tick_refreshes_diagnostics_and_update_data(
     assert client.calls.get("available_version", 0) == 0
     assert client.calls.get("policies", 0) == 1
     assert client.calls.get("ndns", 0) == 1
-    assert client.calls.get("dns_proxy", 0) == 1
-    assert client.calls.get("ipsec_diagnostics", 0) == 1
 
 
 @pytest.mark.parametrize(
@@ -699,7 +693,6 @@ async def test_coordinator_calls_prefetch_tick_on_each_refresh() -> None:
     # show/crypto/map: that VICI path is the IPsec OOM source this release
     # avoids by using show/ipsec instead.
     assert "ndns" in show
-    assert "dns-proxy" in show
     assert "crypto" not in show
 
 

@@ -220,25 +220,6 @@ def test_nested_dict_items_handles_single_host_payload() -> None:
     assert _nested_dict_items(payload, "host") == [payload["host"]]
 
 
-def test_parse_ipsec_vici_diagnostics_counts_recent_memory_errors() -> None:
-    """IPsec VICI memory errors are summarized from router log lines."""
-    lines = [
-        "May 6 23:03:32 ndhcpc GigabitEthernet0/Vlan5: received ACK",
-        "May 6 23:04:13 ndm IpSec::Vici::Stats: out of memory [0xcffe02a7].",
-        "May 6 23:05:12 ndm IpSec::Vici::Stats: out of memory [0xcffe02a7].",
-    ]
-
-    summary = KeeneticClient._parse_ipsec_vici_diagnostics(lines)
-
-    assert summary["status"] == "warning"
-    assert summary["vici_out_of_memory_count"] == 2
-    assert summary["last_error_code"] == "0xcffe02a7"
-    assert summary["recent_matches"] == [
-        "May 6 23:04:13 ndm IpSec::Vici::Stats: out of memory [0xcffe02a7].",
-        "May 6 23:05:12 ndm IpSec::Vici::Stats: out of memory [0xcffe02a7].",
-    ]
-    assert summary["scanned_log_lines"] == 3
-
 
 def test_extract_parse_messages_handles_structured_log_payloads() -> None:
     """Structured show-log payloads are flattened into searchable lines."""
@@ -264,18 +245,7 @@ def test_extract_parse_messages_handles_structured_log_payloads() -> None:
         "IpSec::Vici::Stats: out of memory [0xcffe02a7].",
         "May 7 00:13:32 ndhcpc GigabitEthernet0/Vlan5: received ACK",
     ]
-    summary = KeeneticClient._parse_ipsec_vici_diagnostics(lines)
-    assert summary["status"] == "warning"
-    assert summary["vici_out_of_memory_count"] == 1
 
-
-def test_parse_ipsec_vici_diagnostics_reports_ok_without_errors() -> None:
-    """Normal logs produce an OK diagnostic state."""
-    summary = KeeneticClient._parse_ipsec_vici_diagnostics(["normal log line"])
-
-    assert summary["status"] == "ok"
-    assert summary["vici_out_of_memory_count"] == 0
-    assert summary["last_vici_out_of_memory"] is None
 
 
 def test_iface_list_kwarg_skips_redundant_normalization() -> None:

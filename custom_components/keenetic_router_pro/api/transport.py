@@ -64,10 +64,8 @@ class _Transport:
         # it): the controller has listed its mesh members by CID before.
         self._mws_members_seen: bool = False
         self._crypto_map_supported: bool | None = None
-        self._dns_proxy_supported: bool | None = None
         self._ping_check_supported: bool | None = None
         self._ndns_supported: bool | None = None
-        self._ipsec_diagnostics_supported: bool | None = None
         # Hotspot host RCI subpaths that have responded "not found" — skip
         # them on subsequent polls so we stop spamming the router log.
         self._hotspot_subpath_skip: set[str] = set()
@@ -107,10 +105,8 @@ class _Transport:
         """
         self._mws_member_supported = None
         self._crypto_map_supported = None
-        self._dns_proxy_supported = None
         self._ping_check_supported = None
         self._ndns_supported = None
-        self._ipsec_diagnostics_supported = None
         self._hotspot_subpath_skip = set()
         self._hotspot_subpath_winner = None
         self._iface_stat_get_only = None

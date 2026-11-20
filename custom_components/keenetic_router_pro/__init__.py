@@ -82,9 +82,7 @@ ISSUE_RCI_BLOCKED = "rci_blocked"
 _CAPABILITY_LABELS: dict[str, str] = {
     "_mws_member_supported": "Mesh (MWS) nodes",
     "_crypto_map_supported": "IPsec site-to-site tunnels",
-    "_ipsec_diagnostics_supported": "IPsec diagnostics",
     "_ping_check_supported": "WAN ping-check status",
-    "_dns_proxy_supported": "DNS proxy statistics",
     "_ndns_supported": "KeenDNS name and certificate",
 }
 

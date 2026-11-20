@@ -61,7 +61,6 @@ _LATCHED_BATCH_PATHS: dict[str, str] = {
     "_ping_check_supported": "show/ping-check",
     "_crypto_map_supported": "show/ipsec",
     "_ndns_supported": "show/ndns",
-    "_dns_proxy_supported": "show/dns-proxy",
 }
 
 
@@ -120,7 +119,6 @@ def build_batch_tree(
     if plan.very_slow_refresh:
         add("show/version")
         add("show/ndns")
-        add("show/dns-proxy")
     if plan.update_check_refresh:
         add("components/check-update")
     return batch_tree

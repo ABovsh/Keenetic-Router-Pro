@@ -28,17 +28,3 @@ _RCI_PARSE_ERROR_RE = re.compile(
     r"|\b(?:not found|permission denied|access denied|operation not allowed|no such command|bad parameter|already exists)\b",
     re.IGNORECASE,
 )
-_DNS_PROXY_STAT_RE = re.compile(
-    r"^\s*(?P<ip>\S+)\s+"
-    r"(?P<port>\d+)\s+"
-    r"(?P<sent>\d+)\s+"
-    r"(?P<answered>\d+)\s+"
-    r"(?P<nxdomain>\d+)\s+"
-    r"(?P<median>\d+)ms\s+"
-    r"(?P<average>\d+)ms\s+"
-    r"(?P<rank>\d+)\s*$"
-)
-_IPSEC_VICI_OOM_RE = re.compile(
-    r"IpSec::Vici::Stats:\s+out of memory(?:\s+\[(?P<code>[^\]]+)\])?",
-    re.IGNORECASE,
-)

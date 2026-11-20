@@ -26,13 +26,6 @@ from custom_components.keenetic_router_pro.sensor.crypto import (
     KeeneticCryptoMapRxThroughputSensor,
     KeeneticCryptoMapStateSensor,
 )
-from custom_components.keenetic_router_pro.sensor.dns import (
-    KeeneticDnsProxyFailedRequestsSensor,
-    KeeneticDnsProxyStatusSensor,
-)
-from custom_components.keenetic_router_pro.sensor.ipsec import (
-    KeeneticIpsecViciOomTotalSensor,
-)
 from custom_components.keenetic_router_pro.sensor.network import (
     KeeneticActiveConnectionsSensor,
     KeeneticWanDowntimeSensor,
@@ -121,7 +114,6 @@ def test_unsupported_batch_paths_follow_the_client_latches() -> None:
     client._ping_check_supported = False
     client._crypto_map_supported = False
     client._ndns_supported = False
-    client._dns_proxy_supported = False
     client._hotspot_subpath_skip = {"show/ip/hotspot/host"}
 
     assert unsupported_batch_paths(client) == frozenset(
@@ -129,7 +121,6 @@ def test_unsupported_batch_paths_follow_the_client_latches() -> None:
             "show/ping-check",
             "show/ipsec",
             "show/ndns",
-            "show/dns-proxy",
             "show/ip/hotspot",
         }
     )
@@ -139,7 +130,6 @@ async def test_coordinator_prefetch_skips_latched_off_endpoints() -> None:
     client = StageFixtureClient()
     client._rci_batch_supported = None
     client._ping_check_supported = False
-    client._dns_proxy_supported = False
 
     await _updated_data(_coordinator(client))
 
@@ -327,16 +317,6 @@ def test_crypto_map_entities_go_unavailable_once_the_source_is_stale(
 # ---------- DNS proxy ----------
 
 
-async def test_dns_proxy_status_raises_on_a_transient_failure() -> None:
-    client = _client()
-    client._rci_get = AsyncMock(
-        side_effect=KeeneticApiError("Timeout for /rci/show/dns-proxy")
-    )
-
-    with pytest.raises(KeeneticApiError):
-        await client.async_get_dns_proxy_status()
-    assert client._dns_proxy_supported is None
-
 
 def _dns_payload(sent: int, answered: int) -> dict[str, Any]:
     stat = (
@@ -346,45 +326,6 @@ def _dns_payload(sent: int, answered: int) -> dict[str, Any]:
     )
     return {"proxy-status": [{"proxy-name": "System", "proxy-stat": stat}]}
 
-
-async def test_dns_proxy_down_needs_a_real_sample() -> None:
-    """The stats window is ten seconds; three unanswered queries are not an outage."""
-    client = _client()
-    client._rci_get = AsyncMock(return_value=_dns_payload(sent=3, answered=0))
-    assert (await client.async_get_dns_proxy_status())["status"] == "ok"
-
-    client._rci_get = AsyncMock(return_value=_dns_payload(sent=25, answered=0))
-    assert (await client.async_get_dns_proxy_status())["status"] == "down"
-
-
-async def test_coordinator_keeps_the_dns_snapshot_when_the_fetch_fails() -> None:
-    client = StageFixtureClient()
-    coordinator = _coordinator(client)
-    first = await _updated_data(coordinator)
-    coordinator.data = first
-
-    client.async_get_dns_proxy_status = AsyncMock(
-        side_effect=KeeneticApiError("Timeout for /rci/show/dns-proxy")
-    )
-    coordinator._refresh_count = 15  # very-slow tick
-    second = await _updated_data(coordinator)
-
-    assert second["dns_proxy"] == first["dns_proxy"]
-    assert second["dns_proxy_fresh"] is True
-
-
-@pytest.mark.parametrize(
-    "sensor_cls", [KeeneticDnsProxyStatusSensor, KeeneticDnsProxyFailedRequestsSensor]
-)
-def test_dns_sensors_go_unavailable_once_the_source_is_stale(
-    sensor_cls, keenetic_entry, keenetic_coordinator_factory
-) -> None:
-    data = {"dns_proxy": {"status": "ok", "failed_requests": 3}, "dns_proxy_fresh": False}
-    sensor = sensor_cls(keenetic_coordinator_factory(data), keenetic_entry)
-    assert sensor.available is False
-
-    data["dns_proxy_fresh"] = True
-    assert sensor.available is True
 
 
 # ---------- Active connections without conntrack fields ----------
@@ -510,101 +451,6 @@ def test_wireguard_traffic_is_unavailable_while_the_profile_is_down(
 
     profile.update(enabled=True, state="up")
     assert sensor.available is True
-
-
-# ---------- Zero-on-a-healthy-router counters ship disabled ----------
-
-
-@pytest.mark.parametrize("sensor_cls", [KeeneticIpsecViciOomTotalSensor])
-def test_zero_on_healthy_counters_are_disabled_by_default(sensor_cls) -> None:
-    assert sensor_cls._attr_entity_registry_enabled_default is False
-
-
-# ---------- show/log on KeeneticOS 5.x ----------
-
-# Shape of ``POST /rci/ {"show": {"log": ...}}`` on KeeneticOS 5.1.6 (OP Titan,
-# 2026-10-03): records keyed by ascending id, oldest first; the text is nested
-# one level down and the time lives in ``timestamp`` on the outer record.
-_LIVE_LOG = {
-    "show": {
-        "log": {
-            "4216": {
-                "message": {"level": "Info", "label": "I", "message": "DHCPREQUEST received. "},
-                "timestamp": "Oct  3 09:50:01",
-                "ident": "ndhcps",
-                "id": 4216,
-            },
-            "4217": {
-                "message": {
-                    "level": "Critical",
-                    "label": "C",
-                    "message": "IpSec::Vici::Stats: out of memory [0xcffe02b0]. ",
-                },
-                "timestamp": "Oct  3 09:56:28",
-                "ident": "ndm",
-                "id": 4217,
-            },
-            "4218": {
-                "message": {
-                    "level": "Critical",
-                    "label": "C",
-                    "message": "IpSec::Vici::Stats: out of memory [0xcffe0300]. ",
-                },
-                "timestamp": "Oct  3 10:06:28",
-                "ident": "ndm",
-                "id": 4218,
-            },
-        }
-    }
-}
-
-
-def test_log_entries_carry_the_time_of_keeneticos_5_records() -> None:
-    from custom_components.keenetic_router_pro.api.helpers import _extract_log_entries
-
-    entries = _extract_log_entries(_LIVE_LOG)
-
-    assert [e["time"] for e in entries] == [
-        "Oct  3 10:06:28",
-        "Oct  3 09:56:28",
-        "Oct  3 09:50:01",
-    ]
-    assert entries[0]["module"] == "ndm"
-    assert entries[0]["level"] == "Critical"
-
-
-async def test_ipsec_diagnostics_events_are_timestamped_newest_first() -> None:
-    """Without a time every event was dropped and the OOM total stayed 0."""
-    client = _client()
-    client._rci_post = AsyncMock(return_value=_LIVE_LOG)
-
-    diag = await client.async_get_ipsec_diagnostics()
-
-    assert diag["vici_out_of_memory_count"] == 2
-    assert diag["last_error_code"] == "0xcffe0300"
-    assert [t for t, _ in diag["events"]] == ["Oct  3 10:06:28", "Oct  3 09:56:28"]
-
-
-def test_oom_total_counts_live_shaped_events() -> None:
-    from datetime import datetime
-
-    from custom_components.keenetic_router_pro.api.helpers import _extract_log_entries
-    from custom_components.keenetic_router_pro.api.parsers.ipsec import (
-        parse_ipsec_vici_diagnostics,
-    )
-    from custom_components.keenetic_router_pro.coordinator_parts.oom import (
-        advance_oom_state,
-    )
-
-    events = parse_ipsec_vici_diagnostics([], entries=_extract_log_entries(_LIVE_LOG))["events"]
-    state = advance_oom_state(
-        {"last_seen_iso": None, "last_seen_count": 0, "total": 0},
-        events,
-        now=datetime(2026, 10, 3, 11, 0, 0),
-    )
-
-    assert state["total"] == 2
-    assert state["last_seen_iso"] == "2026-10-03T10:06:28"
 
 
 # ---------- Client Wi-Fi session start ----------
@@ -961,26 +807,6 @@ def test_vpn_switch_of_an_interface_that_is_a_wan_is_pruned() -> None:
 
 # ---------- OOM counter: compare router log time with HA's time zone ----------
 
-
-def test_oom_clock_uses_the_home_assistant_time_zone(monkeypatch) -> None:
-    """Router logs are local time; a Docker HA process often runs in UTC.
-
-    Compared against the process clock, a router three hours ahead had every
-    fresh event dropped as "future" until it could fall out of the window.
-    """
-    import sys
-    import types
-    from datetime import datetime, timedelta, timezone
-
-    from custom_components.keenetic_router_pro.coordinator_parts.oom import local_now
-
-    kyiv = timezone(timedelta(hours=3))
-    fake_dt = types.ModuleType("homeassistant.util.dt")
-    fake_dt.now = lambda: datetime(2026, 10, 3, 12, 0, tzinfo=kyiv)
-    monkeypatch.setitem(sys.modules, "homeassistant.util.dt", fake_dt)
-    monkeypatch.setattr(sys.modules["homeassistant.util"], "dt", fake_dt, raising=False)
-
-    assert local_now() == datetime(2026, 10, 3, 12, 0)
 
 
 # ---------- Mesh firmware_available between polls ----------

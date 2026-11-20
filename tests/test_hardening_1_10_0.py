@@ -434,20 +434,6 @@ def test_untracking_a_client_removes_its_entities() -> None:
     assert "sensor.other" not in removed
 
 
-def test_dns_failed_requests_survives_a_non_finite_firmware_value() -> None:
-    """int(inf) raises OverflowError, which the local except tuple missed.
-
-    Every other counter in the codebase routes through coerce_int, which
-    already covers this; these two sensors hand-rolled it and diverged.
-    """
-    from custom_components.keenetic_router_pro.sensor.dns import (
-        KeeneticDnsProxyFailedRequestsSensor,
-    )
-
-    coordinator = _coordinator({"dns_proxy": {"failed_requests": float("inf")}})
-    sensor = KeeneticDnsProxyFailedRequestsSensor(coordinator, _entry())
-    assert sensor.native_value is None
-
 
 def test_downtime_does_not_close_an_outage_on_an_unreachable_router() -> None:
     """A failed tick leaves the PREVIOUS payload in place.
