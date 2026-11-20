@@ -312,7 +312,7 @@ class _Transport:
 
     async def _rci_parse(self, command: str) -> Any:
         """Execute a CLI-like command via /rci/parse."""
-        # JSON body sadece string: "interface Wireguard0 up"
+        # The parse endpoint expects a JSON string containing the command.
         result = await self._rci_post("parse", command, allow_text=True)
         normalized_command = str(command).strip().lower()
         if not normalized_command.startswith(("show ", "ip ping ")):

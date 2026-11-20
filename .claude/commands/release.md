@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Release (rc → main → tag, two gates)
 
-Since 2026-09-02 this fork ships like eveus: work stacks on the ephemeral `rc`
+Changes accumulate on the temporary `rc`
 branch, and **"merge to main" and "release" are two separate asks**. This command
 runs gate 1 in full and then **stops** — it does not tag unless you say so.
 
@@ -56,7 +56,7 @@ names, no coverage numbers, test counts, phases or audit process. Never write a
 ### 4. Update `README.md` — only if user-facing
 
 New entity, behaviour change, install step. Pure internal fixes do **not** touch
-README. Re-read "Why this fork" when scope shifted.
+README. Check that the setup steps and feature descriptions match the release.
 
 ### 5. Verify (the gate)
 
@@ -91,7 +91,7 @@ straight to `main`, no `rc` detour.
 ### 8. STOP
 
 Gate 1 is complete. **Do not tag and do not publish a release unless Anton
-separately asked for one** ("release" / "зарелізь").
+separately asked for one** ("release").
 
 ### 9. Gate 2 — only on that second ask
 

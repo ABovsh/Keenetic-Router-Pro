@@ -1,8 +1,77 @@
 # Keenetic Router Pro
 
-[![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge)](https://github.com/custom-components/hacs)
+Bring your Keenetic network into Home Assistant. See which internet connection is active, how long each provider was offline, which mesh extenders are reachable, and when a device joins or leaves. Home Assistant polls the router directly on your LAN with no cloud dependency.
+
 ![Version](https://img.shields.io/badge/version-1.20.0-blue?style=for-the-badge)
-![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.5%2B-41BDF5?style=for-the-badge&logo=home-assistant)
+![Home Assistant 2024.5 or newer](https://img.shields.io/badge/Home%20Assistant-2024.5%2B-41BDF5?style=for-the-badge&logo=home-assistant)
+
+[Install](#install-with-hacs) · [Connect your router](#connect-your-router) · [Explore your devices](#explore-your-devices) · [Troubleshooting](#troubleshooting)
+
+## Install with HACS
+
+1. In **HACS**, open **Custom repositories** from the menu. Enter `https://github.com/ABovsh/Keenetic-Router-Pro` and choose **Integration** as the repository type.
+2. Find **Keenetic Router Pro** in HACS, download it, then restart Home Assistant.
+3. Open **Settings → Devices & services → Add integration** and select **Keenetic Router Pro**.
+
+## Connect your router
+
+For a router on your LAN or reachable over a VPN, choose **Direct / local**. Enter the address and port of the router’s **web interface**. Use an account with **Web interface** permission and enable **Use challenge authentication**. KeeneticOS 5.1.9 and newer require challenge authentication on the web port.
+
+| How you reach the router | Host | Port¹ | Use SSL |
+| --- | --- | --- | --- |
+| HTTPS on your LAN or over VPN | Router’s KeenDNS name, resolving to its LAN address | 443 | On |
+| HTTP on your LAN or over VPN | Router’s LAN address, for example `192.168.1.1` | 80 | Off |
+| HTTPS over the internet | Router’s own KeenDNS name | 443 | On |
+
+¹ Enter your configured web port if you changed it. For HTTPS, the hostname must match the router certificate. For internet access, use a dedicated account with a strong password, allow **HTTPS only**, and restrict access to Home Assistant’s source address where possible.
+
+Select the clients you want to track and finish setup. Open the integration’s **Devices** list and select the router to see its firmware, health, and connected-client count.
+
+<details>
+<summary>Connecting through a KeenDNS protected web app on KeeneticOS 5.1.8 or older</summary>
+
+Choose **KeenDNS protected web app** if you already publish the API through a password-protected KeenDNS application. On the router, set its target to **This Keenetic device**, select **HTTP** for the internal application and use the internal port serving the API. Give a dedicated account **HTTP Proxy** permission. That account can issue management commands through the app.
+
+In Home Assistant, enter the **app hostname** and its credentials. This mode uses HTTPS on external port 443 and Basic Auth. On KeeneticOS 5.1.9 and newer, use the direct connection settings above.
+
+</details>
+
+## Explore your devices
+
+The devices and controls you see depend on your model, installed KeeneticOS components, and tracked clients.
+
+| Device | What to look for |
+| --- | --- |
+| Router | CPU and memory usage, active connections, Wi-Fi radio temperature, DNS proxy health, firmware updates, and reboot. **Internet Downtime** counts periods when no uplink has internet. |
+| WAN uplink | Connection state, public IP, throughput, traffic totals, and an enable switch. Each provider’s **Downtime** counts loss of link or internet on that uplink. |
+| Mesh extender | Reachability, connected clients, ports, traffic, firmware updates, and reboot. New nodes appear as the controller discovers them. |
+| VPN | WireGuard and IPsec state, traffic, and controls for supported profiles. A VPN that serves as an uplink shares its WAN device. |
+| Tracked client | Presence, last seen, connection policy, access blocking, and bandwidth limit where supported. |
+
+**Compare providers.** Add each uplink’s **Downtime** sensor to a Home Assistant statistics card and compare the change over the same week or month. Use **Internet Downtime** for the whole site. Time when Home Assistant cannot read the router is excluded.
+
+**Get a failover notification.** In the automation editor, add a **Device** trigger, select the router, and choose **switches to a different WAN**. Add a notification action. The same router offers triggers for clients connecting and disconnecting.
+
+**Choose how much client history to keep.** In the integration options, set **Per-client sensors** to `basic` for IP address, session, last seen, and connection type, or `full` for all client sensors. Choose `off` to skip this sensor family while keeping presence tracking and client controls.
+
+## Troubleshooting
+
+| Symptom | What to check |
+| --- | --- |
+| Repair says **Keenetic router refuses the configured API address** | After a KeeneticOS 5.1.9 upgrade, a forward to port 79 or a protected app targeting it stops working. Open **Reconfigure**, choose **Direct / local**, enter the router web address, and enable challenge authentication. |
+| HTTPS works in a browser but setup fails | Check that Home Assistant resolves the KeenDNS hostname to the intended address and can reach its HTTPS port. Enter the hostname covered by the certificate. |
+| Credentials are rejected | Sign in to the router web interface with the same account. Direct mode requires **Web interface** permission. **HTTP Proxy** permission applies to the older protected-app setup. |
+| HACS cannot download the integration | Check the custom repository URL and select a published version. HACS downloads the release asset named `keenetic_router_pro.zip`. |
+| A sensor appears slow to update | Link state and router-reported presence are polled every minute. Traffic and system gauges refresh less often, and firmware update checks run daily. |
+
+For a support request, download diagnostics from the integration entry and review the file before sharing it. For credentials, redaction, and private vulnerability reports, see the [security policy](SECURITY.md).
+
+## Project
+
+[Release notes](CHANGELOG.md) · [Apache License 2.0](LICENSE) · [Report an issue](https://github.com/ABovsh/Keenetic-Router-Pro/issues)
+
+<details>
+<summary>Code quality and test coverage</summary>
 
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ABovsh_Keenetic-Router-Pro)
 [![Reliability](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=reliability_rating)](https://sonarcloud.io/component_measures?id=ABovsh_Keenetic-Router-Pro&metric=reliability_rating)
@@ -10,366 +79,4 @@
 [![Maintainability](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=sqale_rating)](https://sonarcloud.io/component_measures?id=ABovsh_Keenetic-Router-Pro&metric=sqale_rating)
 [![Coverage](https://img.shields.io/sonar/coverage/ABovsh_Keenetic-Router-Pro?server=https%3A%2F%2Fsonarcloud.io&style=for-the-badge&logo=sonarcloud&label=coverage)](https://sonarcloud.io/component_measures?id=ABovsh_Keenetic-Router-Pro&metric=coverage)
 
-Home Assistant custom integration for Keenetic routers. It focuses on local polling, router diagnostics, mesh monitoring, presence tracking, WAN status, traffic counters, firmware updates, and selected client controls.
-
-The integration is local-polling first and has no cloud dependency for direct LAN use. KeenDNS protected mode is optional and only used when you explicitly choose that connection mode.
-
-## Why this fork
-
-An actively maintained, hardened fork of the original Keenetic Router Pro integration — rebuilt around current Home Assistant patterns, tightened for security and privacy, and gentler on the router. It keeps the domain name (`keenetic_router_pro`), so your existing dashboards, automations, and entity history carry over without changes.
-
-### Practical reasons to use it
-
-- **Works with current Home Assistant patterns.** The integration uses
-  config-entry `runtime_data`, modern reauth/reconfigure helpers, unload-safe
-  listeners, and cancellation-safe async paths, so reloads, shutdowns and
-  credential changes behave like a maintained HA integration.
-- **Safer by default.** Diagnostics, debug logs, API response excerpts and
-  client object representations redact router passwords, cookies, Basic Auth
-  headers, MACs, SSIDs, BSSIDs and Wi-Fi PSKs. Password fields are masked, old
-  passwords are not pre-filled, plaintext-HTTP setups raise a Repair issue, and
-  direct mesh updates accept only literal node addresses with challenge auth.
-- **More reliable authentication.** Direct connections support Basic Auth and
-  NDW2 challenge auth with session-cookie reuse, one-shot reauth after expired
-  cookies, and automatic mesh-node cookie refresh after 401 responses.
-- **Scales to a busy network.** Options let you create the per-client sensor
-  family in full, cut back to presence-adjacent facts, or skip it entirely —
-  so a sixty-client network does not have to become four hundred entities.
-  Connect, disconnect and WAN-failover fire as Home Assistant events, so
-  automations trigger directly instead of watching entity state.
-- **Ready for KeeneticOS 5.1.9.** When firmware refuses an old port-79
-  path, a Repair explains how to reconfigure instead of asking for the
-  password again. Remote routers work through their own KeenDNS name over
-  HTTPS with challenge auth.
-- **Lower router load.** Slow data such as mesh topology, firmware info,
-  host policies, NDNS and IPsec diagnostics is cached across ticks. Client
-  totals reuse already-fetched client data, and interface stats are polled
-  only for interfaces that back enabled entities. On KeeneticOS 5.x the
-  per-tick reads are batched into a single composite RCI request,
-  cutting HTTP round-trips by ~10×. The firmware update check asks Keenetic's
-  update service once a day rather than every few minutes.
-- **Gentle on your Home Assistant database.** Entities never publish
-  attributes that change on every poll — no monotonic counters, router
-  timestamps or nested payload snapshots — because Home Assistant records a new
-  history row whenever the state *or any attribute* changes. Where a value is
-  worth keeping it gets its own entity instead. Router gauges are published on
-  a slower cadence than they are polled, and percentages are whole numbers, so
-  they stop writing a row for every tenth of a percent. On a three-router
-  install this cut the integration's recorder writes by roughly a third.
-  Router and mesh memory ignore one-point fluctuations. Only Internet
-  Downtime and provider Downtime create statistics. All other sensors, including
-  CPU, memory, client counts and traffic, keep ordinary history for the period
-  configured in Home Assistant recorder. VPN tunnel downtime uses ordinary
-  history too.
-- **No third-party dependencies.** The integration installs nothing into your
-  Home Assistant environment (upstream pulls in `icmplib`, `pyqrcode` and
-  `pypng`).
-- **Better WAN and VPN visibility.** Per-uplink devices expose status,
-  enabled state, role, public IP, uptime, counters and throughput. VLAN WAN
-  interfaces and IPsec crypto-map throughput are handled, and VPN controls are
-  grouped with the interface or WAN device they belong to.
-- **Mesh is treated as a first-class surface.** Mesh nodes and ports can appear
-  dynamically without restarting Home Assistant, removed nodes become
-  unavailable instead of stale, sustained topology or interface-stat failures
-  expire affected measurements, nodes recover on their own after a router
-  reboot, retired nodes can be deleted from the UI, firmware update entities
-  support controller and extender flows, and mesh unique IDs are scoped to the
-  HA config entry.
-- **Useful diagnostics, not just raw counters.** The fork adds DNS proxy
-  health and failed-request sensors, IPsec VICI out-of-memory diagnostics,
-  ping-check aware WAN interpretation, WireGuard/IPsec state sensors, and
-  downtime totals: Downtime per WAN (the provider's link was lost, or it was
-  up without internet) and Internet Downtime (no WAN with internet). Time
-  the router itself could not be read is never counted. They keep long-term
-  statistics, so a statistics card shows the total for any week, month or
-  year and which provider was the most reliable.
-- **Presence and client controls are less noisy.** Client lookups use a
-  precomputed MAC index, per-client entities skip no-op state writes, selected
-  client presence is based on Keenetic's own link/active state, and
-  tracked-client uptime/last-seen sensors update on their own cadence.
-- **Actively maintained and regression-tested.** The fork ships a steady stream
-  of reliability, security and accuracy fixes, and is covered by automated checks
-  for API parsing, authentication lifecycle, configuration flows, mesh entities,
-  translations, statistics classes, diagnostics redaction and cancellation
-  safety — see the [changelog](CHANGELOG.md) for the full history.
-
-### Removed surface area
-
-- **QR-code image platform removed** — generating Wi-Fi QR codes from HA is rarely useful when the router already shows them.
-- **USB storage polling removed** — this required frequent polling of optional components that may not be present, adding load and noise.
-- **English only** — the upstream shipped mixed-language source comments and non-English translations. Everything here is English.
-
-### Upstream features not carried over
-
-_Nothing outstanding._ The per-client bandwidth limit (upstream 1.3.8) is
-implemented here as of 1.9.0 — see **Bandwidth Limit** under Entities.
-
-## Features
-
-- Local polling through the Keenetic RCI API.
-- Per-client bandwidth limit (`number`) writing the router's traffic shaper.
-- Events for client connect/disconnect and WAN failover.
-- Basic Auth and NDW2 challenge authentication.
-- Config flow, reauthentication, and reconfigure support.
-- Main router sensors for CPU, memory, uptime, firmware, WAN state, IP, PPPoE uptime, active connections, ports, Wi-Fi radio temperature, and traffic.
-- Mesh node sensors for state, CPU, memory, uptime, firmware, clients, local IP, ports, and traffic.
-- Router-based device tracking for selected clients.
-- Wi-Fi, VPN, and client policy controls where supported by the router firmware.
-- Firmware update entities for the controller and mesh nodes.
-- WireGuard and IPsec diagnostic sensors.
-- IPsec VICI OOM Total: a count of `IpSec::Vici::Stats: out of memory`
-  events from the router log, persisted across HA restarts. Disabled by
-  default on new installations: it stays at 0 on a healthy router.
-- WAN and IPsec throughput shown in Mbit/s with automatic unit conversion (kbit/s ↔ Mbit/s ↔ Gbit/s) in the HA entity UI.
-- WAN interface devices group status, public IP, role, traffic counters,
-  throughput and enable/disable control for each uplink.
-- VPN controls are grouped with the VPN/interface device they control and use
-  a single `Enabled` switch. VPN uplinks share the same WAN device as their
-  WAN status sensors, without duplicate WireGuard controls.
-
-Removed from this fork: QR image entities, USB polling, and bundled non-English translations.
-
-## Install With HACS
-
-1. In HACS, add this repository as a custom integration repository:
-   `https://github.com/abovsh/Keenetic-Router-Pro`
-2. Install **Keenetic Router Pro**.
-3. Restart Home Assistant.
-4. Go to **Settings > Devices & services > Add integration**.
-5. Search for **Keenetic Router Pro**.
-
-HACS installs this integration from the `keenetic_router_pro.zip` release asset attached to each published release.
-
-## Configuration
-
-Required fields:
-
-| Field | Description | Example |
-| --- | --- | --- |
-| Connection mode | Direct/local API or KeenDNS protected web app | `Direct / local` |
-| Host | Router IP address or host name | `192.168.1.1` |
-| Port | Router web port, direct mode only | `80` |
-| Username | Router admin username | `admin` |
-| Password | Router admin password | `********` |
-| SSL | Use HTTPS for router API calls, direct mode only | `off` |
-| Use challenge authentication | Enable NDW2 challenge authentication, direct mode only | `on` |
-
-Turn on **challenge authentication**. The router web port on KeeneticOS 5.1.9
-and newer accepts only challenge auth, as do newer models such as Hero. If
-the stored setting is wrong, the integration tries the other scheme once.
-
-### KeeneticOS 5.1.9 and newer
-
-KeeneticOS 5.1.9 closed the unauthenticated API port 79. Setups that reach the
-router through a port forward to `79`, or through a KeenDNS web app whose
-upstream is `127.0.0.1:79`, stop working after the update. The integration then
-shows the Repair **"Keenetic router refuses the configured API address"**; the
-password is not the problem. A KeenDNS web app that points at the web interface
-does not help either: the router refuses it with "insufficient security level".
-
-Use **Direct / local** mode with the router web interface and challenge
-authentication:
-
-| Where Home Assistant runs | Host | Port | SSL |
-| --- | --- | --- | --- |
-| Same LAN as the router | Router LAN address, e.g. `192.168.1.1` | `80` | off |
-| Same LAN, encrypted | Router KeenDNS name, e.g. `myrouter.keenetic.pro` | `443` | on |
-| Remote site over VPN | Router LAN address reached through the VPN | `80` | off |
-| Remote site over the internet | Router KeenDNS name | `443` | on |
-
-- For HTTPS, always enter the **KeenDNS name**, not an IP address. The router
-  presents its certificate only for that name. On the LAN, make the name
-  resolve to the router's local address, for example with a static DNS record
-  on the router that serves Home Assistant's DNS.
-- For internet access, allow web interface access from the internet over
-  **HTTPS only** on the router. Then create a dedicated user that has only
-  the **Web interface** permission and a long random password.
-- The user needs the **Web interface** permission. An account with only
-  `HTTP Proxy` permission is rejected.
-
-### KeenDNS protected web app (KeeneticOS 5.1.8 and older)
-
-The integration can also connect through a KeenDNS **Password protected** web
-application. This is useful when Home Assistant cannot reach the router over
-LAN/VPN, but the router is published through a protected KeenDNS hostname.
-
-Tested working shape:
-
-```text
-Home Assistant -> https://<app>.<domain>.keenetic.pro/rci/...
-KeenDNS protected app -> This Keenetic device, internal HTTP app port
-```
-
-Use these Home Assistant settings:
-
-| Field | Value |
-| --- | --- |
-| Connection mode | `KeenDNS protected web app` |
-| Host | The protected app hostname, e.g. `rsi.example.keenetic.pro` |
-
-In this mode the form hides port, SSL, and challenge-auth options. The
-integration always uses external HTTPS on port `443` with Basic Auth, matching
-the tested KeenDNS protected web-app behavior.
-
-On the router, publish the app as:
-
-- Client: `This Keenetic device`
-- Internal app protocol: `HTTP`
-- Internal app port: the working RCI/web app port for this publication
-- External access: HTTPS KeenDNS hostname
-- User permission: `HTTP Proxy`
-
-Live testing showed that a user with only `HTTP Proxy` permission could access
-`/rci/show/...`, `/rci/parse`, and management commands through the protected
-app. Treat that account like a management credential. Use a dedicated random
-password and rotate it after sharing verbose curl logs, because Basic Auth
-headers in logs can be decoded.
-
-## Polling
-
-- Fast tier: every `60s` — link state, client presence, IP neighbours, and
-  each WAN's link, address, ping check and failover.
-- Medium tier: every `120s` — Wi-Fi, WireGuard, VPN tunnels, WAN traffic and
-  throughput, interface counters, CPU, memory, connection counts.
-- Slow tier: every `180s` — mesh nodes, IPsec tunnels, per-client policies.
-- Very slow tier: every `900s` — firmware version, KeenDNS, DNS proxy.
-- Firmware update check: once every `24h`.
-- Ping presence tracking: default `5s`, configurable from `5` to `300s`.
-
-Every tier above the fast one is cached between refreshes, so a slower tier
-costs the router nothing on the ticks it is skipped. The intervals are fixed:
-there is no adaptive backoff that quietly stretches them on a quiet router.
-
-## Recorder load
-
-This integration is deliberately quiet in your Home Assistant database.
-Home Assistant writes a history row whenever an entity's state **or any of its
-attributes** changes, so an attribute that moves every poll costs a row every
-poll even when the entity itself has not changed. Nothing here publishes one:
-counters that only ever go up live on their own sensors, gauges are rounded and
-published on a slower tier than they are polled, uptime and Wi-Fi session
-sensors report when the session started rather than counting seconds (one row
-per reboot or reconnect), and Last Seen is set once when a client goes
-offline. Traffic
-counters, throughput and the connection-count gauge each hold their last
-published value until it moves by a meaningful amount, so a busy link does not
-write a row per poll for a change no graph can render. The counters of a WAN
-without link, a site-to-site tunnel that is not established or a WireGuard
-profile that is down are unavailable rather than 0, which records no
-long-term statistics while the link is down.
-
-If you want to cut it further:
-
-- Set **Per-client sensors** to `basic` or `off` in the integration options.
-  On a large network this family is most of the entity count.
-- Leave the per-client RX / TX / Link Speed entities disabled — new
-  installations already ship them that way.
-- Or exclude the diagnostics wholesale:
-
-```yaml
-recorder:
-  exclude:
-    entity_globs:
-      - sensor.*_rx_throughput
-      - sensor.*_tx_throughput
-      - sensor.*_cpu_load
-      - sensor.*_memory_usage
-      - sensor.*_active_connections
-```
-
-## Security Notes
-
-- Keep the router management API reachable only from Home Assistant.
-- Prefer LAN-only access.
-- If you expose a custom management port, restrict it with firewall rules to the Home Assistant IP.
-- Do not expose router management to WAN without strict firewall rules.
-- For internet access to the router, use HTTPS only and a dedicated user with
-  only the Web interface permission.
-- For KeenDNS protected web-app access on KeeneticOS 5.1.8 and older, use
-  external HTTPS only. Plain HTTP sends Basic Auth credentials without
-  transport encryption.
-
-### Credential handling
-
-Home Assistant stores integration credentials in plain text at
-`/config/.storage/core.config_entries`. That is an HA-wide design choice
-and is not specific to this integration. What this integration does on
-top of that:
-
-- The password input in the config flow (setup, reauth, reconfigure) is
-  rendered as a masked field (`TextSelectorType.PASSWORD`).
-- The API client overrides `__repr__` so accidental log statements that
-  include the client object cannot leak the password.
-- Request-payload summaries and HTTP response excerpts in debug logs
-  are redacted for known sensitive keys (`password`, `cookie`,
-  `authorization`, `psk`, `secret`, `key`).
-- The HA *Download diagnostics* button on the config entry produces a
-  JSON dump that runs through `async_redact_data`, stripping
-  credentials, MACs, SSIDs, BSSIDs, PSKs, session cookies and
-  authorization headers. Diagnostics are redacted before export, but avoid
-  sharing router diagnostics publicly unless you have reviewed them.
-  Redaction reduces accidental exposure; it cannot make every router-specific
-  payload safe to publish.
-- Nothing is written into `custom_components/keenetic_router_pro/` at
-  runtime — no credential cache, no state file.
-
-See [`SECURITY.md`](SECURITY.md) for recommended file permissions on
-`/config/.storage/` and the password rotation procedure.
-
-## Entities
-
-Common entity groups:
-
-- Router device: router-wide health, firmware, reboot, client totals, ports,
-  Wi-Fi radio temperature and legacy WAN summary sensors kept for compatibility.
-- WAN interface devices: per-uplink connectivity, enable switch, public IP,
-  uptime, downtime, traffic counters and throughput. Provider, role and
-  interface name are attributes of the Connected sensor; their separate
-  sensors and the Enabled binary sensor are opt-in on new installations.
-- VPN interface devices: VPN state and enable/disable control for VPN profiles
-  that are not WAN uplinks.
-- IPsec crypto-map devices: site-to-site tunnel state, IKE state, traffic,
-  throughput and enable/disable control.
-- Sensors: router health, WAN state, traffic, ports, Wi-Fi radio temperature, mesh diagnostics, VPN diagnostics, client details.
-- Binary sensors: firmware/update availability, mesh/client/connectivity status.
-- Switches: Wi-Fi networks, WAN interfaces, VPN profiles, client blocks where supported.
-- Selects: client connection policy where supported.
-- Buttons: router and mesh node reboot.
-- Update entities: controller and mesh firmware updates.
-- Device trackers: selected client presence via Keenetic link/active state.
-
-Exact entity availability depends on router model, firmware version, enabled Keenetic components, and selected tracked clients. Optional firmware features may appear unavailable or use cached data on routers or KeeneticOS builds that do not expose the corresponding endpoint.
-
-## Troubleshooting
-
-If setup fails:
-
-1. Verify host, port, username, and password.
-2. Confirm the router web management API is enabled.
-3. Turn on **challenge authentication**.
-4. On KeeneticOS 5.1.9 and newer, a "refuses the configured API address" error
-   means the entry still points at port 79 or at a KeenDNS web app. Reconfigure
-   it as described in "KeeneticOS 5.1.9 and newer".
-5. Check that Home Assistant can reach the router over the configured port.
-
-If HACS download fails:
-
-1. Make sure HACS has this repository as a custom integration repository.
-2. Remove the repository from HACS and add it again after updating this fork.
-3. Clear any failed pending download and retry.
-4. Confirm `hacs.json` only contains the integration name and `render_readme`.
-
-For debug logs:
-
-```yaml
-logger:
-  default: warning
-  logs:
-    custom_components.keenetic_router_pro: debug
-```
-
-Sensitive values are redacted from integration logs where practical.
-
-## License
-
-MIT License.
+</details>

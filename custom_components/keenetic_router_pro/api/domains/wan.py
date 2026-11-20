@@ -48,7 +48,6 @@ class WanMixin:
                 interfaces = await self.async_get_interfaces()
             iface_list = _normalize_interfaces(interfaces)
 
-        # ---------- yardımcı: sonuç oluştur ----------
         def _build_result(
             iface: Dict[str, Any], wan_type: str
         ) -> Dict[str, Any]:
@@ -72,12 +71,10 @@ class WanMixin:
                 "link": link_state,
             }
 
-        # ---------- yardımcı: WAN keyword eşleşmesi ----------
         WAN_KEYWORDS = ("wan", "internet", "isp", "broadband")
 
         def _is_wan_iface(iface: Dict[str, Any]) -> bool:
-            """Interface'in WAN olup olmadığını birden fazla ipucuyla belirle."""
-            # security-level: public → Keenetic'te WAN demek
+            """Identify an uplink by its security level, role, or interface names."""
             sec = str(iface.get("security-level") or "").lower()
             if sec == "public":
                 return True
@@ -88,7 +85,7 @@ class WanMixin:
                     return True
             elif str(role or "").lower() in UPLINK_ROLE_TOKENS:
                 return True
-            # İsim tabanlı arama
+            # Fall back to names on firmware that omits the uplink role.
             name_fields = [
                 iface.get("name"),
                 iface.get("ifname"),

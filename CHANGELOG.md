@@ -1670,11 +1670,10 @@ This release exists so HACS accepts installs again.
   unit conversion (kbit/s ↔ Mbit/s ↔ Gbit/s) directly in the entity
   customisation dialog — no template tricks needed.
 
-## 1.3.0 - Fork hardening and performance
+## 1.3.0 - Security and performance
 
-This is the first release of the maintained fork. The Home Assistant domain
-stays `keenetic_router_pro` so existing dashboards, automations, and entity
-history carry over unchanged from the upstream version.
+The integration retains the Home Assistant domain `keenetic_router_pro`,
+preserving existing dashboards, automations, and entity history.
 
 ### Security
 
@@ -1724,4 +1723,4 @@ history carry over unchanged from the upstream version.
 
 - Lighter, more practical README focused on install / config /
   troubleshooting.
-- Manifest documentation and issue-tracker links repointed to the fork.
+- Manifest documentation and issue-tracker links updated to point to this repository.
