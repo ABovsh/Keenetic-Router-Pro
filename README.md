@@ -1,73 +1,117 @@
-# Keenetic Router Pro
+<p align="center"><img src="https://brands.home-assistant.io/keenetic_router_pro/icon.png" width="80" height="80" alt=""></p>
 
-Monitor and control your Keenetic router, mesh extenders, and connected devices from Home Assistant. Direct LAN connections have no cloud dependency.
+<h1 align="center">Keenetic Router Pro</h1>
 
-![Version](https://img.shields.io/badge/version-1.20.0-blue?style=for-the-badge)
-![Home Assistant 2024.5 or newer](https://img.shields.io/badge/Home%20Assistant-2024.5%2B-41BDF5?style=for-the-badge&logo=home-assistant)
+<p align="center">Know when your internet switches providers, when a device comes home,<br>and when a mesh extender goes offline. All from Home Assistant.</p>
 
-[Features](#features) · [Install](#install-with-hacs) · [Connect your router](#connect-your-router) · [Dashboard and automation examples](#dashboard-and-automation-examples) · [Troubleshooting](#troubleshooting)
+<p align="center">
+  <a href="https://github.com/ABovsh/Keenetic-Router-Pro/releases"><img src="https://img.shields.io/badge/version-1.20.0-blue" alt="Version 1.20.0"></a>
+  <img src="https://img.shields.io/badge/Home%20Assistant-2024.5%2B-18BCF2?logo=homeassistant&logoColor=white" alt="Home Assistant 2024.5 or newer">
+</p>
 
-## Features
+## What you can do
 
-- **Internet and failover.** See the active uplink, public IP, throughput, and traffic totals. Compare downtime by provider and see how long the whole site lost internet. Trigger an automation when the router switches uplinks.
-- **Presence and client controls.** Track selected devices, see when they were last online, and trigger automations when clients connect or disconnect. Block internet access, assign a connection policy, or set a bandwidth limit.
-- **Mesh monitoring.** See which extenders are online, how many clients each serves, and how much traffic crosses its ports. New extenders appear as the controller discovers them.
-- **VPN monitoring and control.** Check WireGuard and IPsec tunnel state and traffic. Enable or disable supported profiles from Home Assistant.
-- **Router and Wi-Fi diagnostics.** Monitor CPU load, memory use, active connections, radio temperature, and DNS proxy failures. Switch supported Wi-Fi networks on or off.
-- **Firmware and maintenance.** Check for and install firmware updates on the router and supported mesh extenders, or reboot a device from Home Assistant.
+- **Compare internet providers.** See which WAN is active, how fast it is, and how much downtime each provider had this month.
+- **Track devices at home.** See who’s connected and when they were last seen. Set a bandwidth limit, block access, or assign a connection policy.
+- **Check your mesh.** Find offline extenders, see how many clients each serves, and check port traffic.
+- **Manage VPNs.** Monitor WireGuard and IPsec traffic and switch supported tunnels on or off.
+- **Check router health.** Watch CPU, memory, Wi-Fi temperature, and DNS failures. Toggle Wi-Fi, install firmware updates, or reboot a router or extender.
 
-Available entities and controls depend on the router model, installed KeeneticOS components, and selected clients.
+Home Assistant polls the router on your LAN with no cloud dependency. Available controls depend on your model and KeeneticOS components.
 
-## Install with HACS
+## Quick start
 
-1. In **HACS**, open **Custom repositories** from the menu. Enter `https://github.com/ABovsh/Keenetic-Router-Pro` and choose **Integration** as the repository type.
-2. Find **Keenetic Router Pro** in HACS, download it, then restart Home Assistant.
-3. Open **Settings → Devices & services → Add integration** and select **Keenetic Router Pro**.
+### 1. Download in HACS
 
-## Connect your router
+[![Open Keenetic Router Pro in HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ABovsh&repository=Keenetic-Router-Pro&category=integration)
 
-For a router on your LAN or reachable over a VPN, choose **Direct / local**. Enter the address and port of the router’s **web interface**. Use an account with **Web interface** permission and enable **Use challenge authentication**. KeeneticOS 5.1.9 and newer require challenge authentication on the web port.
-
-| How you reach the router | Host | Port¹ | Use SSL |
-| --- | --- | --- | --- |
-| HTTPS on your LAN or over VPN | Router’s KeenDNS name, resolving to its LAN address | 443 | On |
-| HTTP on your LAN or over VPN | Router’s LAN address, for example `192.168.1.1` | 80 | Off |
-| HTTPS over the internet | Router’s own KeenDNS name | 443 | On |
-
-¹ Enter your configured web port if you changed it. For HTTPS, the hostname must match the router certificate. For internet access, use a dedicated account with a strong password, allow **HTTPS only**, and restrict access to Home Assistant’s source address where possible.
-
-Select the clients you want to track and finish setup. Open the integration’s **Devices** list and select the router to see its firmware, health, and connected-client count.
+Download **Keenetic Router Pro**, then restart Home Assistant.
 
 <details>
-<summary>Connecting through a KeenDNS protected web app on KeeneticOS 5.1.8 or older</summary>
+<summary>Add the repository manually</summary>
 
-Choose **KeenDNS protected web app** if you already publish the API through a password-protected KeenDNS application. On the router, set its target to **This Keenetic device**, select **HTTP** for the internal application and use the internal port serving the API. Give a dedicated account **HTTP Proxy** permission. That account can issue management commands through the app.
+In HACS, open **⋮ → Custom repositories**. Paste the URL below, select **Integration**, and choose **Add**. Open the new repository and download it.
 
-In Home Assistant, enter the **app hostname** and its credentials. This mode uses HTTPS on external port 443 and Basic Auth. On KeeneticOS 5.1.9 and newer, use the direct connection settings above.
+```text
+https://github.com/ABovsh/Keenetic-Router-Pro
+```
 
 </details>
 
-## Dashboard and automation examples
+### 2. Connect your router
 
-**Compare providers.** Add each uplink’s **Downtime** sensor to a Home Assistant statistics card and compare the change over the same week or month. Use **Internet Downtime** for the whole site. Time when Home Assistant cannot read the router is excluded.
+[![Add Keenetic Router Pro to Home Assistant](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=keenetic_router_pro)
 
-**Get a failover notification.** In the automation editor, add a **Device** trigger, select the router, and choose **switches to a different WAN**. Add a notification action. The same router offers triggers for clients connecting and disconnecting.
+You can also open **Settings → Devices & services → Add integration** and search for **Keenetic Router Pro**.
 
-**Choose how much client history to keep.** In the integration options, set **Per-client sensors** to `basic` for IP address, session, last seen, and connection type, or `full` for all client sensors. Choose `off` to skip this sensor family while keeping presence tracking and client controls.
+1. Choose **Direct / local** and enter the address you use for the router’s web interface. If you changed its web port, use that port here.
+   - **HTTPS:** Enter the router’s KeenDNS name, set port `443`, and turn on **Use SSL**. On your LAN, the name must resolve to the router’s LAN address.
+   - **HTTP on your LAN or VPN:** Enter the router’s LAN address, such as `192.168.1.1`, set port `80`, and leave **Use SSL** off.
+2. Sign in with a router account that has **Web interface** permission. Turn on **Use challenge authentication**.
+3. Select the clients you want to track. Open the router under **Devices** to see its first readings.
 
-## Troubleshooting
+<details>
+<summary>Connecting from outside your home</summary>
 
-| Symptom | What to check |
-| --- | --- |
-| Repair says **Keenetic router refuses the configured API address** | After a KeeneticOS 5.1.9 upgrade, a forward to port 79 or a protected app targeting it stops working. Open **Reconfigure**, choose **Direct / local**, enter the router web address, and enable challenge authentication. |
-| HTTPS works in a browser but setup fails | Check that Home Assistant resolves the KeenDNS hostname to the intended address and can reach its HTTPS port. Enter the hostname covered by the certificate. |
-| Credentials are rejected | Sign in to the router web interface with the same account. Direct mode requires **Web interface** permission. **HTTP Proxy** permission applies to the older protected-app setup. |
-| HACS cannot download the integration | Check the custom repository URL and select a published version. HACS downloads the release asset named `keenetic_router_pro.zip`. |
-| A sensor appears slow to update | Link state and router-reported presence are polled every minute. Traffic and system gauges refresh less often, and firmware update checks run daily. |
+Over a VPN, use the same steps as on your LAN. For direct internet access, use the router’s own KeenDNS name and HTTPS. On the router, allow internet access to the web interface over **HTTPS only**, use a dedicated account with a strong password, and restrict access to Home Assistant’s source address where possible.
 
-For a support request, download diagnostics from the integration entry and review the file before sharing it. For credentials, redaction, and private vulnerability reports, see the [security policy](SECURITY.md).
+</details>
 
-## Project
+<details>
+<summary>Using a KeenDNS protected web app on KeeneticOS 5.1.8 or older</summary>
+
+On the router, publish **This Keenetic device** as a password-protected web app. Choose **HTTP** and the internal port that serves the API. Give a dedicated account **HTTP Proxy** permission. This account can issue management commands.
+
+In Home Assistant, choose **KeenDNS protected web app** and enter the app hostname and credentials. This mode uses HTTPS on port 443 with Basic Auth. For KeeneticOS 5.1.9 or newer, use **Direct / local**.
+
+</details>
+
+## Try it
+
+**Get a notification when backup internet takes over**
+
+1. Create an automation and add a **Device** trigger.
+2. Select your router and choose **switches to a different WAN**.
+3. Add a notification action for your phone and save.
+
+**See which provider had the most downtime**
+
+Add each WAN’s **Downtime** sensor to a statistics card and compare the change over the same month. **Internet Downtime** measures how long *all* uplinks lacked internet. Time when Home Assistant couldn’t read the router is excluded.
+
+## Help
+
+<details>
+<summary>The router refuses the configured API address</summary>
+
+If this Repair appears after upgrading to KeeneticOS 5.1.9, open **Reconfigure**. Replace the old port-79 forward or protected app with the router’s web address, choose **Direct / local**, and enable challenge authentication.
+
+</details>
+
+<details>
+<summary>HTTPS or sign-in fails</summary>
+
+Check that Home Assistant can resolve and reach the hostname on the router certificate. Try signing in to the router’s web interface with the same credentials. Direct connections require **Web interface** permission.
+
+</details>
+
+<details>
+<summary>HACS can’t download the integration</summary>
+
+Check the custom repository URL and choose a published version. HACS downloads the release asset named `keenetic_router_pro.zip`.
+
+</details>
+
+<details>
+<summary>I have too many client sensors, or a reading updates slowly</summary>
+
+In the integration options, set **Per-client sensors** to `basic` for IP, session, last seen, and connection type. Choose `off` to keep only presence and controls, or `full` for all client sensors.
+
+Link state and router-reported presence refresh every minute. Traffic and system gauges refresh less often. Firmware update checks run daily.
+
+</details>
+
+For a support request, download diagnostics from the integration entry and review the file before sharing. See the [security policy](SECURITY.md) for private vulnerability reports.
+
 
 [Release notes](CHANGELOG.md) · [Apache License 2.0](LICENSE) · [Report an issue](https://github.com/ABovsh/Keenetic-Router-Pro/issues)
 
