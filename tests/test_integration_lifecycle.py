@@ -153,7 +153,7 @@ def test_setup_entry_starts_client_forwards_platforms_and_fires_new_device(
     monkeypatch.setattr(integration, "KeeneticCoordinator", _FakeCoordinator)
     monkeypatch.setattr(
         integration,
-        "async_get_clientsession",
+        "async_get_keenetic_session",
         lambda hass: "shared-session",
     )
     monkeypatch.setattr(
@@ -231,7 +231,7 @@ def test_setup_entry_maps_client_startup_errors(
     monkeypatch.setattr(integration, "KeeneticClient", _FakeClient)
     monkeypatch.setattr(
         integration,
-        "async_get_clientsession",
+        "async_get_keenetic_session",
         lambda hass: "shared-session",
     )
 
@@ -274,7 +274,7 @@ def test_setup_entry_does_not_create_http_repair_for_loopback_or_ssl(
     monkeypatch.setattr(integration, "KeeneticCoordinator", _FakeCoordinator)
     monkeypatch.setattr(
         integration,
-        "async_get_clientsession",
+        "async_get_keenetic_session",
         lambda hass: "shared-session",
     )
     monkeypatch.setattr(

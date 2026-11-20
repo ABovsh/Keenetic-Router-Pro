@@ -16,7 +16,6 @@ from homeassistant.exceptions import (
     ConfigEntryNotReady,
 )
 from homeassistant.helpers import config_validation as cv, issue_registry as ir
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import (
     KeeneticApiError,
@@ -24,6 +23,7 @@ from .api import (
     KeeneticClient,
     KeeneticRciBlockedError,
 )
+from .http_session import async_get_keenetic_session
 from .const import (
     DOMAIN,
     DEFAULT_PORT,
@@ -589,7 +589,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     use_ssl: bool = bool(data.get("ssl", DEFAULT_SSL))
 
-    session = async_get_clientsession(hass)
+    session = async_get_keenetic_session(hass)
 
     # Construct the client and coerce the port inside the try: a corrupted or
     # legacy entry with a non-numeric port or malformed host raises here, and

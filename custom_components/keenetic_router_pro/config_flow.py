@@ -23,7 +23,6 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import AbortFlow, FlowResult
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers import selector
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.service_info.ssdp import SsdpServiceInfo
 from homeassistant.helpers.device_registry import format_mac
 
@@ -34,6 +33,7 @@ from .api import (
     KeeneticRciBlockedError,
     normalize_connection_target,
 )
+from .http_session import async_get_keenetic_session
 from .const import (
     DOMAIN,
     DEFAULT_PORT,
@@ -344,7 +344,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, data: dict[str, Any]
     ) -> tuple[KeeneticClient, dict[str, Any], dict[str, Any]]:
         """Connect to the router and return client plus core identity data."""
-        session = async_get_clientsession(self.hass)
+        session = async_get_keenetic_session(self.hass)
         client = KeeneticClient(
             host=data[CONF_HOST],
             username=data[CONF_USERNAME],
@@ -819,7 +819,7 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
         available_clients: list[dict[str, Any]] = []
         if client is None:
             data = self._config_entry.data
-            session = async_get_clientsession(self.hass)
+            session = async_get_keenetic_session(self.hass)
             try:
                 client = KeeneticClient(
                     # .get(): a legacy/damaged entry missing a stored field

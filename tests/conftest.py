@@ -168,6 +168,7 @@ helpers = types.ModuleType("homeassistant.helpers")
 helpers.__path__ = []  # mark as package so submodule imports resolve
 aiohttp_client = types.ModuleType("homeassistant.helpers.aiohttp_client")
 aiohttp_client.async_get_clientsession = lambda hass: None
+aiohttp_client.async_create_clientsession = lambda hass, **kwargs: None
 aiohttp_client._async_make_resolver = lambda *args, **kwargs: None
 helpers.aiohttp_client = aiohttp_client
 

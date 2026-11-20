@@ -16,6 +16,7 @@ git log.
 
 ### 🐛 Fixed
 
+- **Signing in right after setup or reauthentication no longer fails as rejected credentials.** The integration uses its own HTTP session that keeps no cookies, so a router session cookie from an earlier sign-in is never replayed into the next challenge.
 - **KeeneticOS 5.1.9 no longer causes a false "Authentication expired" prompt.** When the router refuses the configured address because 5.1.9 closed API port 79 (port forwards and KeenDNS proxies to 127.0.0.1:79), Repairs and the setup form now explain how to reconfigure the entry to the router web address with challenge auth instead of asking for the password again.
 
 ## 1.20.0

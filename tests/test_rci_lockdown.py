@@ -111,7 +111,7 @@ def test_setup_reports_lockdown_as_repair_not_reauth(
         _FakeClient, "start_error", KeeneticRciBlockedError("rci-local only")
     )
     monkeypatch.setattr(integration, "KeeneticClient", _FakeClient)
-    monkeypatch.setattr(integration, "async_get_clientsession", lambda hass: None)
+    monkeypatch.setattr(integration, "async_get_keenetic_session", lambda hass: None)
 
     entry = _FakeEntry(
         {"host": TEST_HOST, "username": TEST_USERNAME, "password": TEST_PASSWORD}

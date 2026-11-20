@@ -181,7 +181,7 @@ def test_new_device_listener_skips_tick_after_update_failure(
 
     monkeypatch.setattr(integration, "KeeneticClient", _FakeStartClient)
     monkeypatch.setattr(integration, "KeeneticCoordinator", _FakeListenerCoordinator)
-    monkeypatch.setattr(integration, "async_get_clientsession", lambda hass: "session")
+    monkeypatch.setattr(integration, "async_get_keenetic_session", lambda hass: "session")
     monkeypatch.setattr(
         integration.ir, "async_create_issue", lambda *args, **kwargs: None
     )
