@@ -121,8 +121,6 @@ async def async_setup_entry(
                 )
             )
 
-    _add_wifi_switches(entities)
-
     def _build_dynamic_switches() -> list[SwitchEntity]:
         dynamic_entities: list[SwitchEntity] = []
         _add_wifi_switches(dynamic_entities)
@@ -150,17 +148,12 @@ async def async_setup_entry(
         )
         return dynamic_entities
 
-    entities.extend(_build_dynamic_switches())
-
-    if entities:
-        async_add_entities(entities)
-
     register_dynamic_entities(
         entry,
         coordinator,
         async_add_entities,
         _build_dynamic_switches,
-        add_initial=False,
+        initial_entities=entities,
     )
 
 

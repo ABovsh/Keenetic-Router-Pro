@@ -83,10 +83,10 @@ class _WgLinkActiveMixin(LinkActiveMixin):
         return bool(self._wg.get("enabled"))
 
 
-class KeeneticWgRxSensor(
+class _KeeneticWgTraffic(
     _WgLinkActiveMixin, CounterDeadbandMixin, _BaseWgSensor
 ):
-    """WireGuard RX (received traffic) sensor."""
+    """WireGuard traffic counter; leaves set the direction and field fallbacks."""
     _attr_has_entity_name = True
     # Cumulative counters and their resets remain visible in ordinary history.
     _attr_device_class = SensorDeviceClass.DATA_SIZE
@@ -96,11 +96,11 @@ class KeeneticWgRxSensor(
 
     @property
     def unique_id(self) -> str:
-        return f"{self._entry_id}_wg_{self._wg_name}_rx"
+        return f"{self._entry_id}_wg_{self._wg_name}_{self._direction}"
 
     @property
     def name(self) -> str:
-        return f"WireGuard {self._wg_label} RX"
+        return f"WireGuard {self._wg_label} {self._direction.upper()}"
 
     @property
     def native_unit_of_measurement(self) -> str:
@@ -108,7 +108,7 @@ class KeeneticWgRxSensor(
 
     @property
     def native_value(self) -> float | None:
-        for key in ("rxbytes", "rx", "received"):
+        for key in self._counter_keys:
             raw = coerce_byte_count(self._wg.get(key))
             mib = bytes_to_mib(raw)
             if mib is not None:
@@ -116,34 +116,15 @@ class KeeneticWgRxSensor(
         return self._publish_counter(None)
 
 
-class KeeneticWgTxSensor(
-    _WgLinkActiveMixin, CounterDeadbandMixin, _BaseWgSensor
-):
-    """WireGuard TX (sent traffic) sensor."""
-    _attr_has_entity_name = True
-    # See KeeneticWgRxSensor: ordinary history preserves the counter.
-    _attr_device_class = SensorDeviceClass.DATA_SIZE
+class KeeneticWgRxSensor(_KeeneticWgTraffic):
     _attr_state_class = None
-    # Shared byte step expressed in this sensor's own unit (MiB).
-    _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**2
+    _attr_device_class = SensorDeviceClass.DATA_SIZE
+    _direction = "rx"
+    _counter_keys = ("rxbytes", "rx", "received")
 
-    @property
-    def unique_id(self) -> str:
-        return f"{self._entry_id}_wg_{self._wg_name}_tx"
 
-    @property
-    def name(self) -> str:
-        return f"WireGuard {self._wg_label} TX"
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        return UnitOfInformation.MEGABYTES
-
-    @property
-    def native_value(self) -> float | None:
-        for key in ("txbytes", "tx", "sent"):
-            raw = coerce_byte_count(self._wg.get(key))
-            mib = bytes_to_mib(raw)
-            if mib is not None:
-                return self._publish_counter(mib, raw_value=raw)
-        return self._publish_counter(None)
+class KeeneticWgTxSensor(_KeeneticWgTraffic):
+    _attr_state_class = None
+    _attr_device_class = SensorDeviceClass.DATA_SIZE
+    _direction = "tx"
+    _counter_keys = ("txbytes", "tx", "sent")

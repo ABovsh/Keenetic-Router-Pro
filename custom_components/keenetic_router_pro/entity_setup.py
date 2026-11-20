@@ -74,13 +74,12 @@ def register_dynamic_entities(
     async_add_entities: Callable[[list[EntityT]], None],
     build_entities: Callable[[], list[EntityT]],
     *,
-    add_initial: bool = True,
+    initial_entities: list[EntityT],
 ) -> None:
     """Add current dynamic entities and register a listener for future additions."""
-    if add_initial:
-        initial = build_entities()
-        if initial:
-            async_add_entities(initial)
+    initial_entities.extend(build_entities())
+    if initial_entities:
+        async_add_entities(initial_entities)
 
     @callback
     def _async_add_new_entities() -> None:

@@ -15,8 +15,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
 from homeassistant.const import UnitOfTime, UnitOfInformation, UnitOfDataRate, EntityCategory
 
-from ..const import LINK_STATE_DOWN, LINK_STATE_UP, WAN_STATUS_CONNECTED, WAN_STATUS_LINK_UP
+from ..const import LINK_STATE_UP, WAN_STATUS_CONNECTED, WAN_STATUS_LINK_UP
 from ..const import COUNTER_DEADBAND_BYTES
+from .port import PortSensorMixin
 from ..coordinator import KeeneticCoordinator
 from ..entity import (
     ControllerEntity,
@@ -36,7 +37,6 @@ from ..utils import (
     coerce_seconds,
 )
 
-_ICON_ETHERNET = "mdi:ethernet"
 _ICON_IP_NETWORK = "mdi:ip-network"
 _ICON_WEB_OFF = "mdi:web-off"
 
@@ -249,10 +249,9 @@ class KeeneticLocalIpSensor(ControllerEntity, SensorEntity):
         return self._ip_address
 
 
-class KeeneticMainPortSensor(ControllerEntity, SensorEntity):
+class KeeneticMainPortSensor(PortSensorMixin, ControllerEntity, SensorEntity):
     """Individual main router port sensor."""
     _attr_has_entity_name = True
-    _attr_icon = _ICON_ETHERNET
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
@@ -266,58 +265,12 @@ class KeeneticMainPortSensor(ControllerEntity, SensorEntity):
         self._port_label = port_label
 
     @property
-    def name(self) -> str:
-        """Return name for the sensor."""
-        return f"Port {self._port_label}"
-
-    @property
     def unique_id(self) -> str:
         """Return unique ID for the sensor."""
         return f"{self._entry_id}_port_{self._port_label}"
 
-    @property
-    def native_value(self) -> str | None:
-        """Return port state."""
-        ports = self.coordinator.data.get("port_info", [])
-        for port in ports:
-            if not isinstance(port, dict):
-                continue
-            if str(port.get("label")) == self._port_label:
-                return port.get("link", "unknown")
-        return None
-
-    @property
-    def available(self) -> bool:
-        """Become unavailable when the router no longer reports this port."""
-        return bool(getattr(super(), "available", True)) and self.native_value is not None
-
-    @property
-    def icon(self) -> str:
-        """Return icon based on port state."""
-        state = self.native_value
-        if state == LINK_STATE_UP:
-            return _ICON_ETHERNET
-        if state == LINK_STATE_DOWN:
-            return "mdi:ethernet-off"
-        return _ICON_ETHERNET
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any] | None:
-        """Return additional port attributes."""
-        ports = self.coordinator.data.get("port_info", [])
-        for port in ports:
-            if not isinstance(port, dict):
-                continue
-            if str(port.get("label")) == self._port_label:
-                attrs = {
-                    "label": port.get("label"),
-                    "appearance": port.get("appearance"),
-                }
-                if port.get("link") == LINK_STATE_UP:
-                    attrs["speed"] = port.get("speed")
-                    attrs["duplex"] = port.get("duplex")
-                return attrs
-        return None
+    def _port_rows(self) -> list[Any]:
+        return self.coordinator.data.get("port_info", [])
 
 # =============================================================================
 # Per-WAN interface sensors

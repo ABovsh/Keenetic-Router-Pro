@@ -278,96 +278,61 @@ class KeeneticClientLastSeenSensor(ClientEntity, SensorEntity):
         return self._seen_at
 
 
-class KeeneticClientRxSensor(CounterDeadbandMixin, ClientEntity, SensorEntity):
-    """Received traffic sensor."""
+class _KeeneticClientTraffic(CounterDeadbandMixin, ClientEntity, SensorEntity):
+    """Per-client traffic counter; leaves set the direction."""
     _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.DATA_SIZE
+    _attr_state_class = None
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    # Shared byte step expressed in this sensor's own unit (GiB).
+    _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
+    # Per-client counters move constantly; new installs opt in.
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(
+        self,
+        coordinator: KeeneticCoordinator,
+        entry: ConfigEntry,
+        mac: str,
+        label: str,
+    ) -> None:
+        ClientEntity.__init__(self, coordinator, entry.entry_id, entry.title, mac, label)
+
+    @property
+    def unique_id(self) -> str:
+        return f"{self._entry_id}_client_{self._mac}_{self._direction}"
+
+    @property
+    def name(self) -> str:
+        return self._direction.upper()
+
+    @property
+    def available(self) -> bool:
+        return super().available and _client_counter_available(self._client, self._counter_key)
+
+    @property
+    def native_unit_of_measurement(self) -> str:
+        return UnitOfInformation.GIGABYTES
+
+    @property
+    def native_value(self) -> float | None:
+        client = self._client
+        if not _client_counter_available(client, self._counter_key):
+            return self._publish_counter(None)
+        raw = coerce_byte_count(client.get(self._counter_key))
+        return self._publish_counter(_bytes_to_gb(raw), raw_value=raw)
+
+
+class KeeneticClientRxSensor(_KeeneticClientTraffic):
+    _direction = "rx"
     _attr_icon = "mdi:download-network"
-    _attr_device_class = SensorDeviceClass.DATA_SIZE
-    _attr_state_class = None
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    # Shared byte step expressed in this sensor's own unit (GiB).
-    _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
-    # Per-client counters move constantly; new installs opt in.
-    _attr_entity_registry_enabled_default = False
-
-    def __init__(
-        self,
-        coordinator: KeeneticCoordinator,
-        entry: ConfigEntry,
-        mac: str,
-        label: str,
-    ) -> None:
-        ClientEntity.__init__(self, coordinator, entry.entry_id, entry.title, mac, label)
-
-    @property
-    def unique_id(self) -> str:
-        return f"{self._entry_id}_client_{self._mac}_rx"
-
-    @property
-    def name(self) -> str:
-        return "RX"
-
-    @property
-    def available(self) -> bool:
-        return super().available and _client_counter_available(self._client, "rxbytes")
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        return UnitOfInformation.GIGABYTES
-
-    @property
-    def native_value(self) -> float | None:
-        client = self._client
-        if not _client_counter_available(client, "rxbytes"):
-            return self._publish_counter(None)
-        raw = coerce_byte_count(client.get("rxbytes"))
-        return self._publish_counter(_bytes_to_gb(raw), raw_value=raw)
+    _counter_key = "rxbytes"
 
 
-class KeeneticClientTxSensor(CounterDeadbandMixin, ClientEntity, SensorEntity):
-    """Sent traffic sensor."""
-    _attr_has_entity_name = True
+class KeeneticClientTxSensor(_KeeneticClientTraffic):
+    _direction = "tx"
     _attr_icon = "mdi:upload-network"
-    _attr_device_class = SensorDeviceClass.DATA_SIZE
-    _attr_state_class = None
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    # Shared byte step expressed in this sensor's own unit (GiB).
-    _COUNTER_DEADBAND = COUNTER_DEADBAND_BYTES / 1024**3
-    # Per-client counters move constantly; new installs opt in.
-    _attr_entity_registry_enabled_default = False
-
-    def __init__(
-        self,
-        coordinator: KeeneticCoordinator,
-        entry: ConfigEntry,
-        mac: str,
-        label: str,
-    ) -> None:
-        ClientEntity.__init__(self, coordinator, entry.entry_id, entry.title, mac, label)
-
-    @property
-    def unique_id(self) -> str:
-        return f"{self._entry_id}_client_{self._mac}_tx"
-
-    @property
-    def name(self) -> str:
-        return "TX"
-
-    @property
-    def available(self) -> bool:
-        return super().available and _client_counter_available(self._client, "txbytes")
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        return UnitOfInformation.GIGABYTES
-
-    @property
-    def native_value(self) -> float | None:
-        client = self._client
-        if not _client_counter_available(client, "txbytes"):
-            return self._publish_counter(None)
-        raw = coerce_byte_count(client.get("txbytes"))
-        return self._publish_counter(_bytes_to_gb(raw), raw_value=raw)
+    _counter_key = "txbytes"
 
 
 class KeeneticClientRssiSensor(ClientEntity, SensorEntity):

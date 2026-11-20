@@ -39,15 +39,12 @@ async def async_setup_entry(
         )
         return dynamic_entities
 
-    entities.extend(_build_dynamic_buttons())
-    async_add_entities(entities)
-
     register_dynamic_entities(
         entry,
         coordinator,
         async_add_entities,
         _build_dynamic_buttons,
-        add_initial=False,
+        initial_entities=entities,
     )
 
 

@@ -285,16 +285,12 @@ async def async_setup_entry(
             KeeneticCryptoMapTxThroughputSensor(coordinator, entry, cmap_name),
         ]
 
-    entities.extend(_build_dynamic_sensors())
-
-    async_add_entities(entities)
-
     register_dynamic_entities(
         entry,
         coordinator,
         async_add_entities,
         _build_dynamic_sensors,
-        add_initial=False,
+        initial_entities=entities,
     )
 
 
