@@ -23,7 +23,7 @@ from custom_components.keenetic_router_pro.sensor.system import (
     KeeneticMemoryUsageSensor,
 )
 from custom_components.keenetic_router_pro.sensor.traffic import (
-    KeeneticInterfaceRxSensor,
+    KeeneticWanRxSensor,
 )
 
 MAC = "aa:bb:cc:dd:ee:ff"
@@ -218,33 +218,28 @@ def test_client_wifi_sensors_prefer_mws_band_and_mode() -> None:
     )
 
 
-def test_traffic_sensor_positive_value_attrs_and_sanitized_unique_id() -> None:
-    """Generic interface traffic sensors expose GiB values and stable IDs."""
+def test_traffic_sensor_positive_value_and_attrs() -> None:
+    """Interface traffic sensors expose GiB values, stable IDs and error attrs."""
     coordinator = _coordinator(
         {
             "interface_stats": {
-                "Wireguard0/Office": {
+                "GigabitEthernet1": {
                     "rxbytes": str(3 * 1024**3),
-                    "interface_type": "Wireguard",
+                    "interface_type": "GigabitEthernet",
                     "link": "up",
                     "state": "up",
-                                "rxerrors": "1",
+                    "rxerrors": "1",
                 }
             }
         }
     )
-    sensor = KeeneticInterfaceRxSensor(
-        coordinator,
-        _entry(),
-        "Wireguard0/Office",
-        "Office VPN",
-    )
+    sensor = KeeneticWanRxSensor(coordinator, _entry())
 
-    assert sensor.unique_id == "entry_123_iface_wireguard0_office_rx"
-    assert (sensor.name, sensor.native_value) == ("Office VPN RX", 3.0)
+    assert sensor.unique_id == "entry_123_wan_rx"
+    assert (sensor.name, sensor.native_value) == ("WAN RX", 3.0)
     assert sensor.extra_state_attributes == {
-        "interface": "Wireguard0/Office",
-        "type": "Wireguard",
+        "interface": "GigabitEthernet1",
+        "type": "GigabitEthernet",
         "link": "up",
         "state": "up",
         "rxerrors": "1",

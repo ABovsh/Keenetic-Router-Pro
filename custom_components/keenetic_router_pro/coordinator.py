@@ -14,6 +14,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import KeeneticClient
+from .api.helpers import _normalize_interfaces
 from .const import DOMAIN, FAST_SCAN_INTERVAL
 from .utils import is_client_online
 from .coordinator_parts.derived import (
@@ -695,7 +696,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # fanning out extra router calls. Medium ticks refresh WAN and
             # interface stats, while the slow/very-slow tiers continue to
             # govern the larger diagnostic groups.
-            iface_list = self.client._normalize_interfaces(interfaces)
+            iface_list = _normalize_interfaces(interfaces)
             iface_fp = tuple(
                 (i.get("id"), i.get("type"), i.get("link"), i.get("state"))
                 for i in iface_list

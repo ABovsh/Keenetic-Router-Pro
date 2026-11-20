@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from conftest import TEST_HOST, TEST_HOST_ALT, TEST_PASSWORD, TEST_USERNAME
+from conftest import TEST_HOST_ALT
 
 import asyncio
 from datetime import datetime
@@ -87,11 +87,6 @@ class FakeKeeneticClient:
 
     async def prefetch_tick(self, tree: dict) -> bool:
         return False
-
-    def _normalize_interfaces(self, interfaces: Any) -> list[dict[str, Any]]:
-        return KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)._normalize_interfaces(
-            interfaces
-        )
 
     async def async_get_system_info(self) -> dict[str, Any]:
         return {"hostname": "router", "uptime": 100}

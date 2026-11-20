@@ -83,16 +83,10 @@ def test_dynamic_entity_tracker_reports_new_ids_once() -> None:
     """Shared dynamic setup tracker should mark every id only once."""
     tracker = DynamicEntityTracker()
 
-    assert tracker.mark_mesh_node("node-1") is True
-    assert tracker.mark_mesh_node("node-1") is False
-    assert tracker.mark_mesh_local_ip("node-1") is True
-    assert tracker.mark_mesh_local_ip("node-1") is False
-    assert tracker.mark_mesh_port("node-1", "0") is True
-    assert tracker.mark_mesh_port("node-1", "0") is False
-    assert tracker.mark_wan("PPPoE0") is True
-    assert tracker.mark_wan("PPPoE0") is False
-    assert tracker.mark_vpn("Wireguard0") is True
-    assert tracker.mark_vpn("Wireguard0") is False
+    assert tracker.mark_main_port("1") is True
+    assert tracker.mark_main_port("1") is False
+    assert tracker.mark_wireguard("Wireguard0") is True
+    assert tracker.mark_wireguard("Wireguard0") is False
     assert tracker.mark_crypto_map("SITE") is True
     assert tracker.mark_crypto_map("SITE") is False
 

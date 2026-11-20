@@ -23,7 +23,6 @@ from .utils import (
     is_client_online,
     mesh_unique_id,
     normalize_mac,
-    sanitize_mesh_id,
     usable_ip,
 )
 
@@ -375,7 +374,6 @@ class MeshEntity(_FingerprintedCoordinatorEntity):
         self._entry_id = entry_id
         self._title = title
         self._node_cid = node_cid
-        self._safe_cid = sanitize_mesh_id(node_cid)
 
     def _mesh_unique_id(self, suffix: str) -> str:
         """Return the entry-scoped unique ID for this mesh entity."""
@@ -629,11 +627,6 @@ class ClientEntity(_FingerprintedCoordinatorEntity):
     _NEIGHBOUR_VOLATILE = frozenset(
         {"neighbour", "neighbour-expired", "neighbour-leasetime"}
     )
-
-    def _client_fingerprint(self, client: dict[str, Any] | None) -> dict[str, Any] | None:
-        return _entity_fingerprint(
-            client, self._FINGERPRINT_IGNORE | self._NEIGHBOUR_VOLATILE
-        )
 
     @property
     def _fingerprint_source(self) -> dict[str, Any] | None:

@@ -10,11 +10,11 @@ from typing import Any
 import pytest
 
 from custom_components.keenetic_router_pro.api.domains.clients import ClientsMixin
-from custom_components.keenetic_router_pro.api.helpers import _normalize_interfaces
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.keenetic_router_pro.const import FAST_SCAN_INTERVAL
 from custom_components.keenetic_router_pro.coordinator import KeeneticCoordinator
+from tests.test_compatibility_contracts import EXPECTED_COORDINATOR_KEYS
 from tests.fixtures.clients_rci import CLIENTS, HOST_POLICIES, IP_NEIGHBOURS
 from tests.fixtures.dns_rci import DNS_PROXY, NDNS_INFO
 from tests.fixtures.mesh_rci import MESH_NODES
@@ -78,9 +78,6 @@ class StageFixtureClient:
     async def prefetch_tick(self, tree: dict) -> bool:
         self.prefetch_calls.append(tree)
         return False
-
-    def _normalize_interfaces(self, interfaces: Any) -> list[dict[str, Any]]:
-        return _normalize_interfaces(interfaces)
 
     async def async_get_system_info(self) -> dict[str, Any]:
         self._record_call("system_info")
@@ -222,45 +219,7 @@ async def test_coordinator_pipeline_fixtures_publishes_expected_data_keys() -> N
 
     data = await _updated_data(_coordinator(client))
 
-    assert set(data) == {
-        "system",
-        "traffic_stats",
-        "interfaces",
-        "wifi",
-        "wireguard",
-        "vpn_tunnels",
-        "clients",
-        "clients_stale",
-        "clients_by_mac",
-        "wan_status",
-        "wan_interfaces",
-        "wan_observation_fresh",
-        "wan_by_id",
-        "mesh_nodes",
-        "mesh_nodes_fresh",
-        "mesh_associations",
-        "mesh_nodes_by_cid",
-        "interface_stats",
-        "interface_stats_fresh",
-        "client_stats",
-        "ndns",
-        "host_policies",
-        "policies",
-        "port_info",
-        "ping_check_status",
-        "_iface_fingerprint",
-        "crypto_maps",
-    "crypto_maps_fresh",
-        "dns_proxy",
-    "dns_proxy_fresh",
-        "ipsec_diagnostics",
-        "new_clients",
-    "online_clients",
-    "connected_clients",
-    "disconnected_clients",
-    "active_wan",
-    "wan_failover",
-    }
+    assert set(data) == EXPECTED_COORDINATOR_KEYS
 
 
 async def test_coordinator_serializes_overlapping_refreshes() -> None:

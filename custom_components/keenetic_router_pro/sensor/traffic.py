@@ -57,11 +57,6 @@ class _TrafficSensorBase(
         return stats.get(self._iface_name, {}) or {}
 
     @property
-    def unique_id(self) -> str:
-        safe_name = self._iface_name.replace("/", "_").lower()
-        return f"{self._entry_id}_iface_{safe_name}_{self._direction}"
-
-    @property
     def name(self) -> str:
         return f"{self._iface_label} {self._direction.upper()}"
 
@@ -91,24 +86,6 @@ class _TrafficSensorBase(
             "state": stats.get("state"),
             f"{self._direction}errors": stats.get(f"{self._direction}errors"),
         }
-
-
-class KeeneticInterfaceRxSensor(_TrafficSensorBase):
-    """Incoming traffic sensor for a specific interface."""
-
-    _attr_icon = _ICON_DOWNLOAD
-    _direction = "rx"
-    # One pair per discovered interface floods a fresh install; opt in.
-    _attr_entity_registry_enabled_default = False
-
-
-class KeeneticInterfaceTxSensor(_TrafficSensorBase):
-    """Outgoing traffic sensor for a specific interface."""
-
-    _attr_icon = _ICON_UPLOAD
-    _direction = "tx"
-    # One pair per discovered interface floods a fresh install; opt in.
-    _attr_entity_registry_enabled_default = False
 
 
 class _FixedTrafficSensor(_TrafficSensorBase):

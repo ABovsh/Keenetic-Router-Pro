@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from conftest import client_update_writes
+
 from custom_components.keenetic_router_pro.entity import ClientEntity
 from custom_components.keenetic_router_pro.sensor.client import (
     KeeneticClientConnectionTypeSensor,
@@ -50,12 +52,8 @@ def test_fingerprint_excludes_last_seen_and_uptime() -> None:
     }
     entity = _make_entity(client)
 
-    fp1 = entity._client_fingerprint(client)
-    fp2 = entity._client_fingerprint({**client, "last-seen": 200, "uptime": 75})
-
-    assert fp1 == fp2
-    assert "last-seen" not in fp1
-    assert "uptime" not in fp1
+    noise = {**client, "last-seen": 200, "uptime": 75}
+    assert client_update_writes(entity, client, noise) == 1
 
 
 def test_dedicated_uptime_sensor_fingerprint_includes_uptime() -> None:
@@ -76,12 +74,8 @@ def test_dedicated_uptime_sensor_fingerprint_includes_uptime() -> None:
         "phone",
     )
 
-    fp1 = entity._client_fingerprint(client)
-    fp2 = entity._client_fingerprint({**client, "last-seen": 200, "uptime": 75})
-
-    assert fp1 != fp2
-    assert "uptime" in fp1
-    assert "last-seen" not in fp1
+    assert client_update_writes(entity, client, {**client, "uptime": 75}) == 2
+    assert client_update_writes(entity, {**client, "last-seen": 200, "uptime": 75}) == 0
 
 
 def test_dedicated_last_seen_sensor_fingerprint_includes_last_seen() -> None:
@@ -102,12 +96,8 @@ def test_dedicated_last_seen_sensor_fingerprint_includes_last_seen() -> None:
         "phone",
     )
 
-    fp1 = entity._client_fingerprint(client)
-    fp2 = entity._client_fingerprint({**client, "last-seen": 200, "uptime": 75})
-
-    assert fp1 != fp2
-    assert "last-seen" in fp1
-    assert "uptime" not in fp1
+    assert client_update_writes(entity, client, {**client, "last-seen": 200}) == 2
+    assert client_update_writes(entity, {**client, "last-seen": 200, "uptime": 75}) == 0
 
 
 def test_last_seen_sensor_returns_exact_datetime_for_offline_client() -> None:
@@ -307,18 +297,16 @@ def test_fingerprint_picks_up_link_and_ip_changes() -> None:
     client = {"mac": "aa:bb:cc:00:00:01", "ip": "10.0.0.5", "link": "up"}
     entity = _make_entity(client)
 
-    fp1 = entity._client_fingerprint(client)
-    fp_link = entity._client_fingerprint({**client, "link": "down"})
-    fp_ip = entity._client_fingerprint({**client, "ip": "10.0.0.6"})
-
-    assert fp1 != fp_link
-    assert fp1 != fp_ip
+    link_down = {**client, "link": "down"}
+    new_ip = {**link_down, "ip": "10.0.0.6"}
+    assert client_update_writes(entity, client, link_down, new_ip) == 3
 
 
 def test_fingerprint_returns_none_for_missing_client() -> None:
-    entity = _make_entity({"mac": "aa:bb:cc:00:00:01"})
-    assert entity._client_fingerprint(None) is None
-    assert entity._client_fingerprint({}) is None
+    from custom_components.keenetic_router_pro.entity import _entity_fingerprint
+
+    assert _entity_fingerprint(None, frozenset()) is None
+    assert _entity_fingerprint({}, frozenset()) is None
 
 
 def test_handle_coordinator_update_skips_when_only_noise_changed() -> None:

@@ -581,7 +581,6 @@ def test_entity_base_classes_pin_device_info_lookup_and_availability() -> None:
     assert client.hostname == "Laptop"
     assert client.is_connected is True
     assert client.device_info["name"] == "Laptop (Router)"
-    assert client._client_fingerprint({"last-seen": 1, "uptime": 2, "name": "Laptop"}) == {"name": "Laptop"}
 
     coordinator.data["clients"] = [{"mac": "aa:bb:cc:dd:ee:ff", "hostname": "host.local"}]
     assert client.hostname == "host.local"

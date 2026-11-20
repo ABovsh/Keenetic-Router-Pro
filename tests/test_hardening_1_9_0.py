@@ -21,8 +21,8 @@ from custom_components.keenetic_router_pro.sensor.network import (
     KeeneticWanRxThroughputSensor,
 )
 from custom_components.keenetic_router_pro.sensor.traffic import (
-    KeeneticInterfaceRxSensor,
-    KeeneticInterfaceTxSensor,
+    KeeneticWanRxSensor,
+    KeeneticWanTxSensor,
 )
 from custom_components.keenetic_router_pro.utils import (
     quantize_data_rate,
@@ -74,12 +74,10 @@ def test_traffic_sensor_omits_every_per_poll_counter() -> None:
     coordinator = _coordinator({"interface_stats": stats})
 
     for sensor_cls, direction in (
-        (KeeneticInterfaceRxSensor, "rx"),
-        (KeeneticInterfaceTxSensor, "tx"),
+        (KeeneticWanRxSensor, "rx"),
+        (KeeneticWanTxSensor, "tx"),
     ):
-        attrs = sensor_cls(
-            coordinator, _entry(), "GigabitEthernet1", "WAN"
-        ).extra_state_attributes
+        attrs = sensor_cls(coordinator, _entry()).extra_state_attributes
         assert f"{direction}packets" not in attrs
         assert f"{direction}dropped" not in attrs
         assert attrs[f"{direction}errors"] == 0
@@ -172,8 +170,8 @@ def test_session_start_is_recomputed_after_the_client_drops_out() -> None:
         KeeneticClientRxSensor,
         KeeneticClientTxSensor,
         KeeneticClientTxRateSensor,
-        KeeneticInterfaceRxSensor,
-        KeeneticInterfaceTxSensor,
+        KeeneticWanRxSensor,
+        KeeneticWanTxSensor,
     ],
 )
 def test_high_churn_diagnostics_are_opt_in_for_new_installs(sensor_cls) -> None:

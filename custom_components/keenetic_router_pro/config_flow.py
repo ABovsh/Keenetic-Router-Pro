@@ -45,7 +45,6 @@ from .const import (
     CONF_USE_CHALLENGE_AUTH,
 )
 from .const import (
-    BASIC_CLIENT_SENSOR_KEYS,  # noqa: F401  (re-exported for platform gating)
     CLIENT_SENSORS_BASIC,
     CLIENT_SENSORS_FULL,
     CLIENT_SENSORS_OFF,

@@ -15,6 +15,10 @@ import base64
 
 import pytest
 
+from custom_components.keenetic_router_pro.api.helpers import (
+    _extract_parse_messages,
+    _normalize_interfaces,
+)
 from custom_components.keenetic_router_pro.api import (
     KeeneticApiError,
     KeeneticClient,
@@ -184,7 +188,7 @@ def test_normalize_interfaces_injects_ids_for_dict_payloads() -> None:
     """Dict-shaped /show/interface payloads keep their interface id."""
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
 
-    result = client._normalize_interfaces(
+    result = _normalize_interfaces(
         {
             "Bridge0": {"type": "Bridge", "mac": "aa:bb:cc:dd:ee:ff"},
             "bad": "ignored",
@@ -254,7 +258,7 @@ def test_extract_parse_messages_handles_structured_log_payloads() -> None:
         ]
     }
 
-    lines = KeeneticClient._extract_parse_messages(payload)
+    lines = _extract_parse_messages(payload)
 
     assert lines == [
         "IpSec::Vici::Stats: out of memory [0xcffe02a7].",
@@ -284,16 +288,20 @@ def test_iface_list_kwarg_skips_redundant_normalization() -> None:
     ]
 
     calls = 0
-    real_normalize = client._normalize_interfaces
+    from custom_components.keenetic_router_pro.api.domains import vpn as vpn_module
+
+    real_normalize = vpn_module._normalize_interfaces
 
     def counting_normalize(raw):
         nonlocal calls
         calls += 1
         return real_normalize(raw)
 
-    client._normalize_interfaces = counting_normalize  # type: ignore[assignment]
-
-    result = asyncio.run(client.async_get_wireguard_status(iface_list=normalized))
+    vpn_module._normalize_interfaces = counting_normalize
+    try:
+        result = asyncio.run(client.async_get_wireguard_status(iface_list=normalized))
+    finally:
+        vpn_module._normalize_interfaces = real_normalize
 
     assert calls == 0, "iface_list path must skip _normalize_interfaces"
     assert isinstance(result, dict)

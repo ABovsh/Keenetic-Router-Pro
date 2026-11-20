@@ -17,8 +17,6 @@ from custom_components.keenetic_router_pro.sensor.network import (
     KeeneticWanTxThroughputSensor,
 )
 from custom_components.keenetic_router_pro.sensor.traffic import (
-    KeeneticInterfaceRxSensor,
-    KeeneticInterfaceTxSensor,
     KeeneticLanRxSensor,
     KeeneticLanTxSensor,
     KeeneticWanRxSensor,
@@ -45,8 +43,6 @@ CRYPTO_MAP_FIELD_SENSORS = (
 
 
 TRAFFIC_FIELD_SENSORS = (
-    (KeeneticInterfaceRxSensor, "GigabitEthernet2", "Guest", "rxbytes"),
-    (KeeneticInterfaceTxSensor, "GigabitEthernet2", "Guest", "txbytes"),
     (KeeneticLanRxSensor, "GigabitEthernet0", "LAN", "rxbytes"),
     (KeeneticLanTxSensor, "GigabitEthernet0", "LAN", "txbytes"),
     (KeeneticWanRxSensor, "GigabitEthernet1", "WAN", "rxbytes"),
@@ -102,9 +98,6 @@ def test_traffic_field_sensor_edge_value_returns_none_or_zero(
     coordinator = keenetic_coordinator_factory(
         {"interface_stats": {iface_name: {field: value}}}
     )
-    if sensor_cls in (KeeneticInterfaceRxSensor, KeeneticInterfaceTxSensor):
-        sensor = sensor_cls(coordinator, keenetic_entry, iface_name, iface_label)
-    else:
-        sensor = sensor_cls(coordinator, keenetic_entry)
+    sensor = sensor_cls(coordinator, keenetic_entry)
 
     assert sensor.native_value in (None, 0.0)

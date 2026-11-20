@@ -34,6 +34,7 @@ from test_config_flow_options import (
 )
 from test_coordinator_update_flow import FakeKeeneticClient
 
+from conftest import client_update_writes
 from custom_components.keenetic_router_pro.api import KeeneticAuthError
 from custom_components.keenetic_router_pro.config_flow import KeeneticOptionsFlow
 from custom_components.keenetic_router_pro.coordinator import KeeneticCoordinator
@@ -145,18 +146,14 @@ def test_fingerprint_ignores_volatile_neighbour_fields() -> None:
         "neighbour-leasetime": 99,
     }
 
-    assert entity._client_fingerprint(_NEIGHBOUR_CLIENT) == entity._client_fingerprint(
-        next_tick
-    )
+    assert client_update_writes(entity, _NEIGHBOUR_CLIENT, next_tick) == 1
 
 
 def test_fingerprint_still_reacts_to_meaningful_changes() -> None:
     entity = _client_entity(_NEIGHBOUR_CLIENT)
 
     changed = {**_NEIGHBOUR_CLIENT, "ip": "10.0.0.99"}
-    assert entity._client_fingerprint(_NEIGHBOUR_CLIENT) != entity._client_fingerprint(
-        changed
-    )
+    assert client_update_writes(entity, _NEIGHBOUR_CLIENT, changed) == 2
 
 
 # ---------------------------------------------------------------------------
