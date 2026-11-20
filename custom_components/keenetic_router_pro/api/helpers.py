@@ -117,6 +117,19 @@ def _cookie_header_from_response(resp: aiohttp.ClientResponse) -> str | None:
     return "; ".join(pairs) if pairs else None
 
 
+# ``X-Detail`` codes KeeneticOS 5.1.9+ returns when a request reaches the
+# loopback RCI (``127.0.0.1:79``) from anywhere but the router itself.
+_RCI_LOCKDOWN_DETAILS = ("0x1237", "0x1867", "rci-local only")
+
+
+def _is_rci_lockdown(resp: Any) -> bool:
+    """Return True if a 403 is the firmware's port-79 lockdown, not bad creds."""
+    if getattr(resp, "status", None) != 403:
+        return False
+    detail = str(resp.headers.get("X-Detail", "")).lower()
+    return any(code in detail for code in _RCI_LOCKDOWN_DETAILS)
+
+
 def _is_endpoint_missing(err: BaseException) -> bool:
     """Return True if ``err`` indicates the router did not recognise the RCI endpoint."""
     status = getattr(err, "status", None)

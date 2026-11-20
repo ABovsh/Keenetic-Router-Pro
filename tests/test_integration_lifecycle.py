@@ -14,6 +14,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
 from custom_components.keenetic_router_pro import (
     ISSUE_INSECURE_HTTP,
+    ISSUE_RCI_BLOCKED,
     PLATFORMS,
     async_setup_entry,
     async_unload_entry,
@@ -300,6 +301,7 @@ def test_setup_entry_does_not_create_http_repair_for_loopback_or_ssl(
     assert created_issues == []
     assert deleted_issues == [
         (hass, DOMAIN, f"{ISSUE_INSECURE_HTTP}_{entry.entry_id}"),
+        (hass, DOMAIN, f"{ISSUE_RCI_BLOCKED}_{entry.entry_id}"),
     ]
 
 

@@ -56,7 +56,12 @@ class _ConfigEntryNotReady(HomeAssistantError):
     """Stub for homeassistant.exceptions.ConfigEntryNotReady."""
 
 
+class _ConfigEntryError(HomeAssistantError):
+    """Stub for homeassistant.exceptions.ConfigEntryError."""
+
+
 exceptions.ConfigEntryAuthFailed = _ConfigEntryAuthFailed
+exceptions.ConfigEntryError = _ConfigEntryError
 exceptions.ConfigEntryNotReady = _ConfigEntryNotReady
 
 config_entries = types.ModuleType("homeassistant.config_entries")

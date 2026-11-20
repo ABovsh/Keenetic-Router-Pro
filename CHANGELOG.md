@@ -8,6 +8,12 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## Unreleased
+
+### 🐛 Fixed
+
+- **KeeneticOS 5.1.9 no longer causes a false "Authentication expired" prompt.** When the router refuses the configured address because 5.1.9 closed API port 79 (port forwards and KeenDNS proxies to 127.0.0.1:79), Repairs now explains how to reconfigure the entry to the router web address with challenge auth instead of asking for the password again.
+
 ## 1.20.0
 
 ### ⚠️ Breaking

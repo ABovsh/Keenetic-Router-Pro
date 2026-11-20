@@ -10,11 +10,20 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryError,
+    ConfigEntryNotReady,
+)
 from homeassistant.helpers import config_validation as cv, issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import KeeneticApiError, KeeneticAuthError, KeeneticClient
+from .api import (
+    KeeneticApiError,
+    KeeneticAuthError,
+    KeeneticClient,
+    KeeneticRciBlockedError,
+)
 from .const import (
     DOMAIN,
     DEFAULT_PORT,
@@ -65,6 +74,7 @@ _DEVICE_REGISTRY = "homeassistant.helpers.device_registry"
 
 ISSUE_INSECURE_HTTP = "insecure_http"
 ISSUE_UNSUPPORTED_FEATURES = "unsupported_features"
+ISSUE_RCI_BLOCKED = "rci_blocked"
 
 # Capability latches the API layer flips off the first time the router answers
 # "no such endpoint". Each one silently removes a group of entities, which
@@ -336,6 +346,28 @@ def _is_loopback_host(host: str) -> bool:
 
 
 @callback
+def _async_create_rci_blocked_issue(
+    hass: HomeAssistant, entry: ConfigEntry, host: str
+) -> None:
+    """Explain that the router closed this RCI path; the fix is Reconfigure."""
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        f"{ISSUE_RCI_BLOCKED}_{entry.entry_id}",
+        is_fixable=False,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key=ISSUE_RCI_BLOCKED,
+        translation_placeholders={"title": entry.title, "host": host},
+    )
+
+
+@callback
+def _async_delete_rci_blocked_issue(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Clear the RCI-blocked Repair once the entry connects again."""
+    ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_RCI_BLOCKED}_{entry.entry_id}")
+
+
+@callback
 def _async_update_insecure_http_issue(
     hass: HomeAssistant, entry: ConfigEntry, host: str, use_ssl: bool
 ) -> None:
@@ -574,6 +606,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             use_challenge_auth=bool(data.get(CONF_USE_CHALLENGE_AUTH, False)),
         )
         await client.async_start(session)
+    except KeeneticRciBlockedError as err:
+        # Not a password problem: the reauth form cannot change the address,
+        # and retrying the same path can never succeed.
+        _async_create_rci_blocked_issue(hass, entry, host)
+        raise ConfigEntryError(
+            "The router refuses RCI on this address; reconfigure the entry "
+            "to the router web address with challenge auth"
+        ) from err
     except KeeneticAuthError as err:
         raise ConfigEntryAuthFailed("Keenetic credentials were rejected") from err
     except (KeeneticApiError, ValueError, TypeError) as err:
@@ -594,6 +634,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _async_prune_vpn_switches_shadowed_by_wan(hass, entry, coordinator.data)
 
     _async_update_insecure_http_issue(hass, entry, host, use_ssl)
+    _async_delete_rci_blocked_issue(hass, entry)
 
     # Modern HA pattern: stash strongly-typed runtime data on the entry
     # itself. Platforms read ``entry.runtime_data.coordinator`` instead
