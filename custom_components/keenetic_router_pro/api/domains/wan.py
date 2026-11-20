@@ -143,7 +143,7 @@ class WanMixin:
         Each entry in the returned list contains:
             id                 interface id (PPPoE0, Wireguard0, ...)
             description        human-readable description from the router
-                               UI ("Telekom", "Zurich"), falls back to id
+                               UI (for example, "Primary ISP"), falls back to id
             interface_name     the "interface-name" field (e.g. "ISP")
             type               interface type (PPPoE / Wireguard / ...)
             link_state         "up" / "down"
