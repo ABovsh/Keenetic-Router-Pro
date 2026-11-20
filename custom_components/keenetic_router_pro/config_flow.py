@@ -31,6 +31,7 @@ from .api import (
     KeeneticApiError,
     KeeneticAuthError,
     KeeneticClient,
+    KeeneticRciBlockedError,
     normalize_connection_target,
 )
 from .const import (
@@ -70,7 +71,7 @@ _CONNECTION_MODE_SELECTOR = selector.SelectSelector(
             ),
             selector.SelectOptionDict(
                 value=CONNECTION_MODE_KEENDNS_PROTECTED,
-                label="KeenDNS protected web app",
+                label="KeenDNS protected web app (KeeneticOS 5.1.8 and older)",
             ),
         ],
         mode=selector.SelectSelectorMode.DROPDOWN,
@@ -374,6 +375,8 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """
         try:
             await self._async_connect(new_data)
+        except KeeneticRciBlockedError:
+            return {"base": "rci_blocked"}
         except KeeneticAuthError:
             return {"base": "invalid_auth"}
         except KeeneticApiError:
@@ -546,6 +549,8 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except AbortFlow:
                 # "Already configured" must abort cleanly, not show "unknown".
                 raise
+            except KeeneticRciBlockedError:
+                errors["base"] = "rci_blocked"
             except KeeneticAuthError:
                 errors["base"] = "invalid_auth"
             except KeeneticApiError:

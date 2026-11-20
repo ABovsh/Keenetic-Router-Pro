@@ -10,9 +10,13 @@ git log.
 
 ## Unreleased
 
+### 🔧 Changed
+
+- **Setup guidance for KeeneticOS 5.1.9.** The SSL hint and the plaintext-HTTP Repair tell you to use the router's KeenDNS name for HTTPS, because the router presents its certificate only for that name; the KeenDNS web-app mode is labelled for KeeneticOS 5.1.8 and older.
+
 ### 🐛 Fixed
 
-- **KeeneticOS 5.1.9 no longer causes a false "Authentication expired" prompt.** When the router refuses the configured address because 5.1.9 closed API port 79 (port forwards and KeenDNS proxies to 127.0.0.1:79), Repairs now explains how to reconfigure the entry to the router web address with challenge auth instead of asking for the password again.
+- **KeeneticOS 5.1.9 no longer causes a false "Authentication expired" prompt.** When the router refuses the configured address because 5.1.9 closed API port 79 (port forwards and KeenDNS proxies to 127.0.0.1:79), Repairs and the setup form now explain how to reconfigure the entry to the router web address with challenge auth instead of asking for the password again.
 
 ## 1.20.0
 

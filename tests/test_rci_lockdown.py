@@ -150,3 +150,61 @@ def test_successful_setup_clears_lockdown_repair(
     integration._async_delete_rci_blocked_issue(_hass(), entry)
 
     assert deleted == [f"{integration.ISSUE_RCI_BLOCKED}_{entry.entry_id}"]
+
+
+# --- Config flow: the form must name the real problem, not "bad password" ---
+
+
+async def test_setup_form_reports_rci_blocked() -> None:
+    from test_config_flow_user_step import _connection_input, _flow
+
+    flow = _flow()
+
+    async def blocked(_data: Any) -> None:
+        raise KeeneticRciBlockedError("rci-local only")
+
+    flow._async_connect = blocked
+
+    result = await flow.async_step_connection(_connection_input())
+
+    assert result["errors"] == {"base": "rci_blocked"}
+
+
+async def test_reauth_and_reconfigure_validation_report_rci_blocked() -> None:
+    from unittest.mock import AsyncMock
+
+    from custom_components.keenetic_router_pro.config_flow import (
+        KeeneticRouterProConfigFlow,
+    )
+    from test_config_flow_reauth import _entry
+
+    flow = KeeneticRouterProConfigFlow()
+    flow._async_connect = AsyncMock(side_effect=KeeneticRciBlockedError("blocked"))
+
+    assert await flow._async_validate_and_update(
+        _entry(), dict(_entry().data), "reconfigure"
+    ) == {"base": "rci_blocked"}
+
+
+def test_rci_blocked_form_error_is_translated() -> None:
+    import json
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "custom_components" / "keenetic_router_pro"
+    for name in ("strings.json", "translations/en.json"):
+        errors = json.loads((root / name).read_text())["config"]["error"]
+        assert "5.1.9" in errors["rci_blocked"]
+
+
+def test_keendns_mode_label_names_its_firmware_limit() -> None:
+    from custom_components.keenetic_router_pro import config_flow
+    from custom_components.keenetic_router_pro.const import (
+        CONNECTION_MODE_KEENDNS_PROTECTED,
+    )
+
+    # Test stub: SelectSelector(SelectSelectorConfig(options=[...])).
+    options = config_flow._CONNECTION_MODE_SELECTOR.args[0].kwargs["options"]
+    label = next(
+        o["label"] for o in options if o["value"] == CONNECTION_MODE_KEENDNS_PROTECTED
+    )
+    assert "5.1.8" in label

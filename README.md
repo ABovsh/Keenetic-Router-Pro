@@ -37,9 +37,10 @@ An actively maintained, hardened fork of the original Keenetic Router Pro integr
   so a sixty-client network does not have to become four hundred entities.
   Connect, disconnect and WAN-failover fire as Home Assistant events, so
   automations trigger directly instead of watching entity state.
-- **KeenDNS protected web app support.** You can connect through a protected
-  KeenDNS hostname over HTTPS/443 when Home Assistant cannot reach the router
-  directly over LAN or VPN.
+- **Ready for KeeneticOS 5.1.9.** When firmware refuses an old port-79
+  path, a Repair explains how to reconfigure instead of asking for the
+  password again. Remote routers work through their own KeenDNS name over
+  HTTPS with challenge auth.
 - **Lower router load.** Slow data such as mesh topology, firmware info,
   host policies, NDNS and IPsec diagnostics is cached across ticks. Client
   totals reuse already-fetched client data, and interface stats are polled
@@ -147,15 +148,46 @@ Required fields:
 | --- | --- | --- |
 | Connection mode | Direct/local API or KeenDNS protected web app | `Direct / local` |
 | Host | Router IP address or host name | `192.168.1.1` |
-| Port | Router web/API port, direct mode only | `100` |
+| Port | Router web port, direct mode only | `80` |
 | Username | Router admin username | `admin` |
 | Password | Router admin password | `********` |
 | SSL | Use HTTPS for router API calls, direct mode only | `off` |
-| Use challenge authentication | Enable NDW2 challenge authentication for newer models, direct mode only | `off` |
+| Use challenge authentication | Enable NDW2 challenge authentication, direct mode only | `on` |
 
-Use **challenge authentication** for models/firmware that reject Basic Auth, such as newer Keenetic Hero devices. Older devices usually keep it disabled.
+Turn on **challenge authentication**. The router web port on KeeneticOS 5.1.9
+and newer accepts only challenge auth, as do newer models such as Hero. If
+the stored setting is wrong, the integration tries the other scheme once.
 
-### KeenDNS protected web app
+### KeeneticOS 5.1.9 and newer
+
+KeeneticOS 5.1.9 closed the unauthenticated API port 79. Setups that reach the
+router through a port forward to `79`, or through a KeenDNS web app whose
+upstream is `127.0.0.1:79`, stop working after the update. The integration then
+shows the Repair **"Keenetic router refuses the configured API address"**; the
+password is not the problem. A KeenDNS web app that points at the web interface
+does not help either: the router refuses it with "insufficient security level".
+
+Use **Direct / local** mode with the router web interface and challenge
+authentication:
+
+| Where Home Assistant runs | Host | Port | SSL |
+| --- | --- | --- | --- |
+| Same LAN as the router | Router LAN address, e.g. `192.168.1.1` | `80` | off |
+| Same LAN, encrypted | Router KeenDNS name, e.g. `myrouter.keenetic.pro` | `443` | on |
+| Remote site over VPN | Router LAN address reached through the VPN | `80` | off |
+| Remote site over the internet | Router KeenDNS name | `443` | on |
+
+- For HTTPS, always enter the **KeenDNS name**, not an IP address. The router
+  presents its certificate only for that name. On the LAN, make the name
+  resolve to the router's local address, for example with a static DNS record
+  on the router that serves Home Assistant's DNS.
+- For internet access, allow web interface access from the internet over
+  **HTTPS only** on the router. Then create a dedicated user that has only
+  the **Web interface** permission and a long random password.
+- The user needs the **Web interface** permission. An account with only
+  `HTTP Proxy` permission is rejected.
+
+### KeenDNS protected web app (KeeneticOS 5.1.8 and older)
 
 The integration can also connect through a KeenDNS **Password protected** web
 application. This is useful when Home Assistant cannot reach the router over
@@ -251,8 +283,11 @@ recorder:
 - Prefer LAN-only access.
 - If you expose a custom management port, restrict it with firewall rules to the Home Assistant IP.
 - Do not expose router management to WAN without strict firewall rules.
-- For KeenDNS protected web-app access, use external HTTPS only. Plain HTTP
-  sends Basic Auth credentials without transport encryption.
+- For internet access to the router, use HTTPS only and a dedicated user with
+  only the Web interface permission.
+- For KeenDNS protected web-app access on KeeneticOS 5.1.8 and older, use
+  external HTTPS only. Plain HTTP sends Basic Auth credentials without
+  transport encryption.
 
 ### Credential handling
 
@@ -311,8 +346,11 @@ If setup fails:
 
 1. Verify host, port, username, and password.
 2. Confirm the router web management API is enabled.
-3. Try enabling **challenge authentication** for newer Keenetic models.
-4. Check that Home Assistant can reach the router over the configured port.
+3. Turn on **challenge authentication**.
+4. On KeeneticOS 5.1.9 and newer, a "refuses the configured API address" error
+   means the entry still points at port 79 or at a KeenDNS web app. Reconfigure
+   it as described in "KeeneticOS 5.1.9 and newer".
+5. Check that Home Assistant can reach the router over the configured port.
 
 If HACS download fails:
 
