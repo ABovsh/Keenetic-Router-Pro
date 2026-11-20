@@ -161,11 +161,6 @@ def test_setup_entry_starts_client_forwards_platforms_and_fires_new_device(
         "async_create_issue",
         lambda *args, **kwargs: created_issues.append(kwargs),
     )
-    monkeypatch.setattr(
-        integration,
-        "_async_migrate_mesh_unique_ids",
-        lambda *_args, **_kwargs: None,
-    )
 
     hass = _hass()
     entry = _FakeEntry(
@@ -276,11 +271,6 @@ def test_setup_entry_does_not_create_http_repair_for_loopback_or_ssl(
         integration,
         "async_get_keenetic_session",
         lambda hass: "shared-session",
-    )
-    monkeypatch.setattr(
-        integration,
-        "_async_migrate_mesh_unique_ids",
-        lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
         integration.ir,

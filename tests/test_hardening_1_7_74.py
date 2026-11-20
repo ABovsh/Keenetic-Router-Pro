@@ -185,9 +185,6 @@ def test_new_device_listener_skips_tick_after_update_failure(
     monkeypatch.setattr(
         integration.ir, "async_create_issue", lambda *args, **kwargs: None
     )
-    monkeypatch.setattr(
-        integration, "_async_migrate_mesh_unique_ids", lambda *a, **k: None
-    )
 
     hass = SimpleNamespace(
         config_entries=SimpleNamespace(

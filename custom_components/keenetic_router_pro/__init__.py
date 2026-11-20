@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from contextlib import suppress
 import importlib
 import logging
 from dataclasses import dataclass
@@ -43,7 +42,6 @@ from .coordinator import KeeneticCoordinator
 from .utils import (
     iter_tracked_clients,
     mask_identifier,
-    mesh_unique_id,
     normalize_mac,
     sanitize_mesh_id,
 )
@@ -137,32 +135,6 @@ def _needs_client_data(entry: ConfigEntry) -> bool:
         return True
     return bool(entry.data.get(CONF_TRACKED_CLIENTS) or ())
 
-
-@callback
-def _async_prune_interface_switches(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove the per-interface enable switches 1.10.0 briefly shipped.
-
-    They duplicated switches that already existed for every interface worth
-    toggling — Wi-Fi, WAN, VPN, crypto maps — and because each one carried its
-    own ``device_info`` they added dozens of empty-looking devices to the UI,
-    one per unused access-point slot and per switch port. They are disabled by
-    default, and a disabled entity is never added to its platform again, so
-    nothing removes them on its own; setup has to.
-    """
-    try:
-        er = importlib.import_module(_ENTITY_REGISTRY)
-    except ImportError:
-        return
-    entries_for = getattr(er, "async_entries_for_config_entry", None)
-    if entries_for is None:
-        return
-
-    registry = er.async_get(hass)
-    prefix = f"{entry.entry_id}_interface_"
-    for registry_entry in list(entries_for(registry, entry.entry_id)):
-        unique_id = getattr(registry_entry, "unique_id", "") or ""
-        if unique_id.startswith(prefix) and unique_id.endswith("_enabled"):
-            registry.async_remove(registry_entry.entity_id)
 
 
 @callback
@@ -386,85 +358,6 @@ def _async_update_insecure_http_issue(
         ir.async_delete_issue(hass, DOMAIN, issue_id)
 
 
-@callback
-def _async_migrate_mesh_unique_ids(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    mesh_nodes: list[dict[str, Any]],
-) -> None:
-    """Migrate old truncated mesh unique IDs to entry-scoped full IDs."""
-    try:
-        er = importlib.import_module(_ENTITY_REGISTRY)
-    except ImportError:
-        return
-
-    registry = er.async_get(hass)
-
-    def _move(platform: str, old_uid: str, new_uid: str) -> None:
-        if old_uid == new_uid:
-            return
-        old_entity_id = registry.async_get_entity_id(platform, DOMAIN, old_uid)
-        if old_entity_id is None:
-            return
-        if registry.async_get_entity_id(platform, DOMAIN, new_uid) is not None:
-            return
-        with suppress(ValueError):
-            registry.async_update_entity(old_entity_id, new_unique_id=new_uid)
-
-    for node in mesh_nodes or []:
-        node_cid = node.get("cid") or node.get("id")
-        if not node_cid:
-            continue
-
-        node_id = str(node_cid)
-        old_safe = node_id.replace("-", "_").replace(":", "_")[:16]
-        old_compact = node_id.replace("-", "").replace(":", "")[:16]
-
-        mesh_suffixes = {
-            "uptime_v2": "uptime_v2",
-            "clients_v2": "clients_v2",
-            "local_ip_v2": "local_ip_v2",
-            "cpu_load_v2": "cpu_load_v2",
-            "memory_v2": "memory_v2",
-            "firmware_version_v2": "firmware_version_v2",
-        }
-        for old_suffix, new_suffix in mesh_suffixes.items():
-            _move(
-                "sensor",
-                f"{old_safe}_{old_suffix}",
-                mesh_unique_id(entry.entry_id, node_id, new_suffix),
-            )
-
-        for port in node.get("port", []) or []:
-            port_label = port.get("label") if isinstance(port, dict) else None
-            if port_label is None:
-                continue
-            _move(
-                "sensor",
-                f"{old_safe}_port_{port_label}_v2",
-                mesh_unique_id(entry.entry_id, node_id, f"port_{port_label}_v2"),
-            )
-
-        _move(
-            "binary_sensor",
-            f"{old_safe}_connect_v2",
-            mesh_unique_id(entry.entry_id, node_id, "connect_v2"),
-        )
-        _move(
-            "binary_sensor",
-            f"{entry.entry_id}_mesh_{old_compact}_update_v2",
-            mesh_unique_id(entry.entry_id, node_id, "update_v2"),
-        )
-        _move(
-            "button",
-            f"{old_safe}_reboot_button_v2",
-            mesh_unique_id(entry.entry_id, node_id, "reboot_button_v2"),
-        )
-        _move(
-            "update",
-            f"{old_safe}_firmware_update_v2",
-            mesh_unique_id(entry.entry_id, node_id, "firmware_update_v2"),
-        )
 
 # Per-client sensor unique-id suffixes, split by the ``client_sensors`` option.
 # "basic" keeps the presence-adjacent facts; "full" adds the counters.
@@ -621,14 +514,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator.parent_device_id = _parent_device_id(hass, entry)
     coordinator.needs_client_data = _needs_client_data(entry)
     await coordinator.async_config_entry_first_refresh()
-    _async_migrate_mesh_unique_ids(
-        hass,
-        entry,
-        coordinator.data.get("mesh_nodes", []) if coordinator.data else [],
-    )
-
     _async_prune_client_entities(hass, entry)
-    _async_prune_interface_switches(hass, entry)
     _async_prune_vpn_switches_shadowed_by_wan(hass, entry, coordinator.data)
 
     _async_update_insecure_http_issue(hass, entry, host, use_ssl)

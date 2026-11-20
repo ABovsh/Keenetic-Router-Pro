@@ -13,6 +13,7 @@ git log.
 ### ⚠️ Breaking
 
 - **The IPsec VICI OOM Total, DNS Proxy Status and DNS Proxy Failed Requests sensors are removed.** The integration no longer reads the router log for IPsec memory errors or polls DNS proxy statistics. Existing history stays in the recorder; delete the leftover entities from Settings → Entities, and update dashboards, automations or templates that use them.
+- **Install 1.20.0 first when upgrading from a release older than 1.11.0.** This release no longer converts mesh entity IDs created before 1.7.44 or removes the interface switches that 1.10.0 briefly added; a direct jump would leave duplicate mesh entities.
 
 ### 🔧 Changed
 

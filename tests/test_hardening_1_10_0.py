@@ -554,35 +554,3 @@ def test_stale_device_sweep_counts_disabled_entities_as_alive() -> None:
 
     assert seen["include_disabled"] is True
     assert removed == []
-
-
-def test_interface_enable_switches_are_removed_from_the_registry() -> None:
-    """1.10.0 shipped one per interface, each on its own device.
-
-    They duplicated the Wi-Fi/WAN/VPN switches that already existed and left
-    dozens of empty-looking devices behind. Disabled entities are never added
-    to their platform again, so setup has to delete them explicitly.
-    """
-    from custom_components.keenetic_router_pro import _async_prune_interface_switches
-
-    removed: list[str] = []
-    entries = [
-        SimpleNamespace(
-            entity_id="switch.ap5",
-            unique_id="e1_interface_WifiMaster0/AccessPoint5_enabled",
-        ),
-        SimpleNamespace(entity_id="switch.port1", unique_id="e1_interface_1_enabled"),
-        SimpleNamespace(entity_id="sensor.cpu", unique_id="e1_cpu_load"),
-        SimpleNamespace(entity_id="switch.wifi", unique_id="e1_wifi_WifiMaster0"),
-    ]
-
-    er_mod = types.ModuleType("homeassistant.helpers.entity_registry")
-    er_mod.async_get = lambda _hass: SimpleNamespace(
-        async_remove=lambda entity_id: removed.append(entity_id)
-    )
-    er_mod.async_entries_for_config_entry = lambda _reg, _eid: entries
-
-    with _patched_registries(**{"homeassistant.helpers.entity_registry": er_mod}):
-        _async_prune_interface_switches(None, SimpleNamespace(entry_id="e1"))
-
-    assert removed == ["switch.ap5", "switch.port1"]
