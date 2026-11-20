@@ -24,6 +24,10 @@ from .target import normalize_connection_target
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.api.transport")
 
 
+# Idempotent reads that several consumers of one refresh may issue.
+_SHARED_TICK_READS = frozenset({"ip/hotspot/host"})
+
+
 class _Transport:
 
     def __init__(
@@ -90,6 +94,9 @@ class _Transport:
         # segment) before issuing an HTTP request, so many params-less GETs
         # collapse into a single composite POST. Cleared at end of tick.
         self._tick_cache: Dict[str, Any] | None = None
+        # In-flight reads shared by concurrent consumers within one refresh;
+        # None outside a refresh so commands and flows always read afresh.
+        self._tick_reads: Dict[str, asyncio.Task] | None = None
         # Serialise authentication refreshes so concurrent RCI calls do not
         # race on `_auth_header` / `_authenticated`.
         self._auth_lock: asyncio.Lock = asyncio.Lock()
@@ -267,6 +274,14 @@ class _Transport:
             if cached is not None:
                 return cached
         path = f"{RCI_ROOT}/{subpath.lstrip('/')}"
+        if params is None and self._tick_reads is not None and subpath in _SHARED_TICK_READS:
+            task = self._tick_reads.get(subpath)
+            if task is None:
+                task = asyncio.ensure_future(self._request("GET", path))
+                self._tick_reads[subpath] = task
+            # Shield: one consumer being cancelled must not cancel the read
+            # another consumer of the same refresh is still awaiting.
+            return await asyncio.shield(task)
         return await self._request("GET", path, params=params)
 
     def _lookup_tick_cache(self, subpath: str) -> Any | None:
@@ -291,9 +306,23 @@ class _Transport:
         self._tick_cache = result
         return True
 
-    def clear_tick_cache(self) -> None:
-        """Drop any prefetched tree so the next refresh starts clean."""
+    def begin_tick(self) -> None:
+        """Start a refresh: no prefetched tree yet, reads shared from here."""
         self._tick_cache = None
+        self._tick_reads = {}
+
+    def clear_tick_cache(self) -> None:
+        """Drop the prefetched tree and shared reads at the end of a refresh."""
+        self._tick_cache = None
+        self._clear_tick_reads()
+
+    def _clear_tick_reads(self) -> None:
+        reads, self._tick_reads = self._tick_reads, None
+        for task in (reads or {}).values():
+            if task.done() and not task.cancelled():
+                task.exception()  # retrieved: a failure was already raised to its consumers
+            else:
+                task.cancel()
 
     async def _rci_post(
         self,

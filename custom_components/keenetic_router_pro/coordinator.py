@@ -218,9 +218,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         code expects, and the next tick simply retries them.
         """
         sem = asyncio.Semaphore(4)
-        # Reset any tick cache from a prior refresh; stage 0 below will
-        # repopulate it from a fresh composite POST.
-        self.client.clear_tick_cache()
+        # Start this refresh's tick scope: stage 0 below repopulates the
+        # prefetch cache, and concurrent stage-1 reads of one endpoint share
+        # a single request until the ``finally`` block ends the scope.
+        self.client.begin_tick()
 
         async def _bounded(coro):
             async with sem:
@@ -287,6 +288,13 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         medium_refresh = plan.medium_refresh
         slow_refresh = plan.slow_refresh
         very_slow_refresh = plan.very_slow_refresh
+        # Mesh discovery finds extenders in the client list and the router's
+        # connect/disconnect events diff it, so an entry without client
+        # entities still reads it on the slow (mesh) tier and reuses that
+        # read in between.
+        if not needs_clients and slow_refresh:
+            needs_clients = True
+        clients_reused = not needs_clients
         # Site-to-site IPsec state now comes from ``show/ipsec`` (stroke
         # path), which is OOM-safe — verified by burst-testing 90+
         # rapid calls produce zero ``IpSec::Vici::Stats: out of memory``
@@ -346,7 +354,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     raise
                 except Exception as err:  # noqa: BLE001 — best-effort prefetch
                     _LOGGER.debug("RCI prefetch failed (continuing per-call): %s", err)
-                    self.client.clear_tick_cache()
+                    self.client.begin_tick()
 
             # ---------- Stage 1: independent fetches ----------
             # Mesh nodes intentionally moved to stage 1.5 below so we can
@@ -376,7 +384,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _bounded(self.client.async_get_current_version_info()) if very_slow_refresh else _resolve(_cached_version),
                 _bounded(self.client.async_get_available_version_info()) if update_check_refresh else _resolve(_cached_version_available),
                 _bounded(self.client.async_get_interfaces()),
-                _bounded(self.client.async_get_clients()) if needs_clients else _resolve([]),
+                _bounded(self.client.async_get_clients()) if needs_clients else _resolve(_prev.get("clients", [])),
                 _bounded(self.client.async_get_ip_neighbours()),
                 _bounded(self.client.async_get_host_policies()) if host_policies_refresh else _resolve(_prev.get("host_policies", {})),
                 _bounded(self.client.async_get_policies()) if very_slow_refresh and needs_policies else _resolve(_prev.get("policies", {})),
@@ -793,7 +801,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # On the very first tick every client looks like an arrival; the
             # integration has simply never seen this network before.
             first_tick = not self.data
-            if clients_stale:
+            if clients_stale or clients_reused:
                 # The hotspot table is the PREVIOUS tick's snapshot, re-merged
                 # with this tick's neighbour data — diffing that invents
                 # arrivals and departures the router never reported.

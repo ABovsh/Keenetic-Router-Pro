@@ -80,6 +80,9 @@ class FakeKeeneticClient:
             "PPPoE0": {"passing": False, "status": "fail", "profile": "default"}
         }
 
+    def begin_tick(self) -> None:
+        pass
+
     def clear_tick_cache(self) -> None:
         pass
 

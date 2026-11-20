@@ -230,6 +230,9 @@ class _AlwaysFailingClient:
     _hotspot_subpath_winner: str | None = None
     host = TEST_HOST
 
+    def begin_tick(self) -> None:
+        pass
+
     def clear_tick_cache(self) -> None:
         return None
 

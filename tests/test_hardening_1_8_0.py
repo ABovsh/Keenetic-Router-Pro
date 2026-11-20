@@ -294,6 +294,9 @@ class _UpdateTierFakeClient:
         self.version_available_calls = 0
         self._rci_batch_supported: bool | None = False
 
+    def begin_tick(self) -> None:
+        pass
+
     def clear_tick_cache(self) -> None:
         pass
 

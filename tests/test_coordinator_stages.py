@@ -70,7 +70,11 @@ class StageFixtureClient:
         self._hotspot_subpath_winner: str | None = None
         self.prefetch_calls: list[dict] = []
         self.clear_tick_cache_calls = 0
+        self.begin_tick_calls = 0
         self.calls: dict[str, int] = {}
+
+    def begin_tick(self) -> None:
+        self.begin_tick_calls += 1
 
     def clear_tick_cache(self) -> None:
         self.clear_tick_cache_calls += 1
@@ -697,7 +701,8 @@ async def test_coordinator_clears_prefetch_cache_after_successful_refresh() -> N
 
     await _updated_data(coordinator)
 
-    assert client.clear_tick_cache_calls >= 2
+    assert client.begin_tick_calls == 1
+    assert client.clear_tick_cache_calls >= 1
 
 
 async def test_coordinator_clears_prefetch_cache_after_failed_refresh() -> None:
@@ -714,7 +719,8 @@ async def test_coordinator_clears_prefetch_cache_after_failed_refresh() -> None:
     with pytest.raises(UpdateFailed):
         await _updated_data(coordinator)
 
-    assert client.clear_tick_cache_calls >= 2
+    assert client.begin_tick_calls == 1
+    assert client.clear_tick_cache_calls >= 1
 
 
 async def test_coordinator_critical_failure_stretches_poll_interval_then_restores() -> None:
@@ -859,6 +865,11 @@ async def test_coordinator_does_not_fetch_clients_when_they_are_not_needed() -> 
 
     coordinator = _coordinator(client)
     coordinator.needs_client_data = False
+    # The slow tier still reads clients for mesh discovery and router events
+    # (see test_client_demand_without_sensors); fast ticks must not.
+    coordinator.data = await _updated_data(coordinator)
+    coordinator._refresh_count = 1
+    calls["n"] = 0
     data = await _updated_data(coordinator)
 
     assert calls["n"] == 0
