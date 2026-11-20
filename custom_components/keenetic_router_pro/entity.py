@@ -12,7 +12,7 @@ from .utils import (
     apply_deadband,
     apply_relative_deadband,
     quantize_data_rate,
-    find_client_by_mac,
+    lookup_client,
     find_mesh_node,
     get_main_device_info,
     get_mesh_device_info,
@@ -634,13 +634,7 @@ class ClientEntity(_FingerprintedCoordinatorEntity):
 
     @property
     def _client(self) -> dict[str, Any] | None:
-        data = self.coordinator.data or {}
-        index = data.get("clients_by_mac")
-        if isinstance(index, dict):
-            client = index.get(self._mac)
-            if isinstance(client, dict):
-                return client
-        return find_client_by_mac(data.get("clients"), self._mac)
+        return lookup_client(self.coordinator.data or {}, self._mac)
 
     @property
     def available(self) -> bool:

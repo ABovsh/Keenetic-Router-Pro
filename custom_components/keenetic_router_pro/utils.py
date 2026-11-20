@@ -204,6 +204,20 @@ def find_client_by_mac(clients: Any, mac: str) -> dict[str, Any] | None:
     return None
 
 
+def lookup_client(data: dict, mac: str) -> dict[str, Any] | None:
+    """Return the published client for ``mac``.
+
+    The coordinator's ``clients_by_mac`` indexes every valid MAC in the
+    published list, so a miss there is final; only a snapshot without that
+    index falls back to scanning ``clients``.
+    """
+    index = data.get("clients_by_mac")
+    if isinstance(index, dict):
+        client = index.get(mac)
+        return client if isinstance(client, dict) else None
+    return find_client_by_mac(data.get("clients"), mac)
+
+
 def find_mesh_node(data: dict, cid: str) -> dict[str, Any] | None:
     """Return a mesh node by cid/id using the coordinator index when available."""
     if not cid:
