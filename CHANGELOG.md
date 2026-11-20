@@ -17,6 +17,7 @@ git log.
 
 ### 🔧 Changed
 
+- **Routers without tracked clients stop polling connection policies.** No policy selector exists for them, so the integration skips 576 policy reads a day per router.
 - **Setup guidance for KeeneticOS 5.1.9.** The SSL hint and the plaintext-HTTP Repair tell you to use the router's KeenDNS name for HTTPS, because the router presents its certificate only for that name; the KeenDNS web-app mode is labelled for KeeneticOS 5.1.8 and older.
 
 ### 🐛 Fixed
