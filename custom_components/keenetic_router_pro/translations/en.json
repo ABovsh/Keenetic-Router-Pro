@@ -167,7 +167,7 @@
     },
     "rci_blocked": {
       "title": "Keenetic router refuses the configured API address",
-      "description": "{title} cannot connect: the router at {host} answers every API request with 403 Forbidden. KeeneticOS 5.1.9 closed the unauthenticated API port 79, so a port forward to 79 or a KeenDNS proxy with upstream 127.0.0.1:79 no longer works. Your password is not the problem.\n\nTo fix it:\n1. Open Settings → Devices & services → Keenetic Router Pro → Reconfigure.\n2. Enter the router web address, for example 192.168.1.1 with port 80 (or 443 with SSL).\n3. Turn on Challenge auth and use an account allowed to open the router web interface.\n\nIf you reach the router through a KeenDNS proxy, point the proxy upstream to the web interface instead of port 79, then reload the entry."
+      "description": "{title} cannot connect: the router at {host} answers every API request with 403 Forbidden. KeeneticOS 5.1.9 closed the unauthenticated API port 79, so a port forward to 79 or a KeenDNS proxy with upstream 127.0.0.1:79 no longer works. Your password is not the problem.\n\nTo fix it:\n1. Open Settings → Devices & services → Keenetic Router Pro → Reconfigure.\n2. Enter the router web address, for example 192.168.1.1 with port 80 (or 443 with SSL).\n3. Turn on Challenge auth and use an account allowed to open the router web interface.\n\nA KeenDNS web-app proxy cannot replace port 79: the router refuses the web interface behind a public proxy. For remote routers use an address reached over VPN, or the router's own KeenDNS name with internet access to the web interface allowed."
     }
   },
   "device_automation": {
