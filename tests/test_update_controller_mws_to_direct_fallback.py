@@ -34,7 +34,10 @@ class _Coordinator:
     def request_update_check(self) -> None:
         self.update_checks += 1
 
-    async def async_request_refresh(self) -> None:
+    def request_mesh_refresh(self) -> None:
+        pass
+
+    async def async_request_refresh(self, **_kwargs) -> None:
         self.refreshes += 1
         self.data["mesh_nodes"][0]["firmware"] = "4.3.0"
 
@@ -369,7 +372,10 @@ def test_mesh_update_refresh_failure_is_ignored_during_direct_fallback(
         def request_update_check(self) -> None:
             pass
 
-        async def async_request_refresh(self) -> None:
+        def request_mesh_refresh(self) -> None:
+            pass
+
+        async def async_request_refresh(self, **_kwargs) -> None:
             self.calls += 1
             if self.calls == 1:
                 raise KeeneticApiError("temporary")
@@ -404,7 +410,10 @@ def test_mesh_update_cancel_during_refresh_is_propagated(
         def request_update_check(self) -> None:
             pass
 
-        async def async_request_refresh(self) -> None:
+        def request_mesh_refresh(self) -> None:
+            pass
+
+        async def async_request_refresh(self, **_kwargs) -> None:
             raise asyncio.CancelledError
 
     class Client:

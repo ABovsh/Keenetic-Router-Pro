@@ -17,7 +17,7 @@ def _entry() -> SimpleNamespace:
 
 
 def _coordinator() -> SimpleNamespace:
-    async def async_request_refresh() -> None:
+    async def async_request_refresh(**_kwargs) -> None:
         calls.append("refresh")
 
     def request_host_policies_refresh() -> None:

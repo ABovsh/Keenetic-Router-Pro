@@ -129,6 +129,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # ``request_update_check``. Same pending/token pair as above.
         self._update_check_pending = False
         self._update_check_token = 0
+        # One-shot mesh read (membership and node firmware) for a mesh
+        # firmware install polling its progress. Same pending/token pair.
+        self._mesh_refresh_pending = False
+        self._mesh_refresh_token = 0
         # Consecutive transient critical-fetch failures tolerated so far. A
         # one-off ``system_info`` / ``interfaces`` timeout keeps the last-known
         # snapshot instead of flipping every entity unavailable; reset on the
@@ -174,20 +178,28 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._update_check_pending = True
         self._update_check_token += 1
 
+    def request_mesh_refresh(self) -> None:
+        """Read mesh membership and node firmware on the next tick."""
+        self._mesh_refresh_pending = True
+        self._mesh_refresh_token += 1
+
     def request_full_refresh(self) -> None:
         """Force every fetch tier to run on the next refresh tick."""
         self._full_refresh_pending = True
         self._full_refresh_token += 1
 
-    async def async_request_refresh(self) -> None:
-        """Arm a one-shot all-tier refresh, then run HA's debounced refresh.
+    async def async_request_refresh(self, *, full: bool = True) -> None:
+        """Run HA's debounced refresh, by default with every tier armed.
 
         Every caller in this integration is a write entity confirming a
-        command it just sent to the router, and the values those entities
-        read (Wi-Fi/VPN/WAN state, crypto maps, mesh nodes, firmware
-        version) live outside the fast tier.
+        command it just sent to the router, and the values most of them read
+        (Wi-Fi/VPN/WAN state, crypto maps, firmware version) live outside the
+        fast tier. A caller that already requested the sources it changed
+        (``request_host_policies_refresh``, ``request_mesh_refresh``) passes
+        ``full=False``; the tick then also runs whatever tiers are due.
         """
-        self.request_full_refresh()
+        if full:
+            self.request_full_refresh()
         await super().async_request_refresh()
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -292,7 +304,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # connect/disconnect events diff it, so an entry without client
         # entities still reads it on the slow (mesh) tier and reuses that
         # read in between.
-        if not needs_clients and slow_refresh:
+        pending_mesh_refresh = getattr(self, "_mesh_refresh_pending", False)
+        pending_mesh_refresh_token = getattr(self, "_mesh_refresh_token", 0)
+        mesh_refresh = slow_refresh or pending_mesh_refresh
+        if not needs_clients and mesh_refresh:
             needs_clients = True
         clients_reused = not needs_clients
         # Site-to-site IPsec state now comes from ``show/ipsec`` (stroke
@@ -347,6 +362,8 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     unsupported=unsupported_batch_paths(self.client),
                     include_mesh=getattr(self.client, "_mws_member_supported", None)
                     is True,
+                    mesh_refresh=mesh_refresh,
+                    update_check=update_check_refresh,
                 )
                 try:
                     await self.client.prefetch_tick(batch_tree)
@@ -414,7 +431,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             # Stage 1.5: mesh nodes — needs ``clients`` already fetched so
             # the fallback path can reuse it instead of re-fetching.
-            if slow_refresh:
+            if mesh_refresh:
                 try:
                     mesh_nodes = await _bounded(
                         self.client.async_get_mesh_nodes(clients=clients)
@@ -425,7 +442,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     mesh_nodes = err
             else:
                 mesh_nodes = _prev.get("mesh_nodes", [])
-            mesh_nodes_failed = slow_refresh and isinstance(mesh_nodes, BaseException)
+            mesh_nodes_failed = mesh_refresh and isinstance(mesh_nodes, BaseException)
 
             # Critical fetches default to the previous snapshot, not an empty
             # shape, so a tolerated transient failure (see the grace-window
@@ -445,13 +462,13 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # the API layer now raises instead of returning MAC-keyed
             # fallback nodes (which used to flip mesh unique_ids).
             mesh_nodes = _ok("mesh_nodes", mesh_nodes, _prev.get("mesh_nodes", []))
-            if slow_refresh and not mesh_nodes_failed and isinstance(mesh_nodes, list):
+            if mesh_refresh and not mesh_nodes_failed and isinstance(mesh_nodes, list):
                 mesh_nodes = carry_firmware_available(
                     mesh_nodes, _prev.get("mesh_nodes")
                 )
             mesh_nodes_fresh = self._source_is_fresh(
                 "mesh_nodes",
-                attempted=slow_refresh,
+                attempted=mesh_refresh,
                 failed=mesh_nodes_failed,
             )
             # On a transient fetch failure keep the previous snapshot — an
@@ -743,7 +760,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     ipsec_status_refresh and not crypto_maps_failed,
                 )
 
-            if slow_refresh:
+            if mesh_refresh:
                 mesh_associations_data = mesh_associations(mesh_nodes)
                 mesh_nodes_by_cid = {
                     (n.get("cid") or n.get("id")): n
@@ -856,6 +873,12 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 and self._update_check_token == pending_update_check_token
             ):
                 self._update_check_pending = False
+
+            if (
+                pending_mesh_refresh
+                and self._mesh_refresh_token == pending_mesh_refresh_token
+            ):
+                self._mesh_refresh_pending = False
 
             self._refresh_count += 1
             return {

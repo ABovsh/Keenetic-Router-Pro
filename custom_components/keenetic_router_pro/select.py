@@ -200,7 +200,7 @@ class KeeneticClientPolicySelect(ClientEntity, SelectEntity):
         # the confirming refresh below would republish the stale cached
         # snapshot and the dropdown would snap back to the old value.
         self.coordinator.request_host_policies_refresh()
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_request_refresh(full=False)
 
     def _apply_optimistic_policy(self, policy_id: str | None, access: str) -> None:
         """Publish the router-accepted policy into coordinator data now.

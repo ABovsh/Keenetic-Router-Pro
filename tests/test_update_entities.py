@@ -36,7 +36,10 @@ class _Coordinator:
     def async_add_listener(self, *_args: Any, **_kwargs: Any) -> Any:
         return lambda: None
 
-    async def async_request_refresh(self) -> None:
+    def request_mesh_refresh(self) -> None:
+        pass
+
+    async def async_request_refresh(self, **_kwargs: Any) -> None:
         self.refreshes += 1
         if self.on_refresh:
             self.on_refresh(self)
@@ -275,7 +278,7 @@ def test_mesh_firmware_install_retries_transient_refresh_failures(
     )
     attempts = {"count": 0}
 
-    async def flaky_refresh() -> None:
+    async def flaky_refresh(**_kwargs) -> None:
         coordinator.refreshes += 1
         attempts["count"] += 1
         if attempts["count"] == 1:

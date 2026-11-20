@@ -446,7 +446,8 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
             for _ in range(18):  # ~3 min
                 await asyncio.sleep(10)
                 try:
-                    await self.coordinator.async_request_refresh()
+                    self.coordinator.request_mesh_refresh()
+                    await self.coordinator.async_request_refresh(full=False)
                     updated_node = self._node
                     if updated_node:
                         new_fw = updated_node.get("firmware")
