@@ -136,6 +136,11 @@ def _needs_client_data(entry: ConfigEntry) -> bool:
     return bool(entry.data.get(CONF_TRACKED_CLIENTS) or ())
 
 
+def _needs_policies(entry: ConfigEntry) -> bool:
+    """Return True when setup creates at least one policy selector."""
+    return next(iter_tracked_clients(entry), None) is not None
+
+
 
 @callback
 def _async_prune_vpn_switches_shadowed_by_wan(
@@ -513,6 +518,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = KeeneticCoordinator(hass, client)
     coordinator.parent_device_id = _parent_device_id(hass, entry)
     coordinator.needs_client_data = _needs_client_data(entry)
+    coordinator.needs_policies = _needs_policies(entry)
     await coordinator.async_config_entry_first_refresh()
     _async_prune_client_entities(hass, entry)
     _async_prune_vpn_switches_shadowed_by_wan(hass, entry, coordinator.data)

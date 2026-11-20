@@ -126,7 +126,6 @@ class StageFixtureClient:
         self._record_call("ipsec_status")
         return deepcopy(self.crypto_maps)
 
-
     async def async_get_mesh_nodes(
         self, clients: list[dict[str, Any]] | None = None
     ) -> list[dict[str, Any]]:
@@ -298,8 +297,6 @@ async def test_coordinator_fast_only_tick_skips_medium_slow_and_very_slow_calls(
         "policies",
         "ndns",
         "ipsec_status",
-        "dns_proxy",
-        "ipsec_diagnostics",
         "mesh_nodes",
         "wifi",
         "wireguard",
@@ -354,8 +351,6 @@ async def test_coordinator_medium_tick_refreshes_interface_derived_calls_only() 
         "policies",
         "ndns",
         "ipsec_status",
-        "dns_proxy",
-        "ipsec_diagnostics",
         "mesh_nodes",
     ):
         assert client.calls.get(skipped, 0) == 0
@@ -376,8 +371,6 @@ async def test_coordinator_slow_tick_refreshes_mesh_policies_and_ipsec_status() 
     assert client.calls.get("ipsec_status", 0) == 1
     assert client.calls.get("ping_check", 0) == 1
     assert client.calls.get("available_version", 0) == 0
-    assert client.calls.get("dns_proxy", 0) == 0
-    assert client.calls.get("ipsec_diagnostics", 0) == 0
 
 
 async def test_coordinator_very_slow_tick_refreshes_diagnostics_and_update_data() -> None:

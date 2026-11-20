@@ -104,6 +104,9 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # user wants no client data at all, ``show/ip/hotspot`` — the largest
         # payload of the tick by a wide margin — is not worth fetching.
         self.needs_client_data = True
+        # Policy assignments and labels exist only for the policy selectors,
+        # one per tracked client. Setup clears this for an entry without any.
+        self.needs_policies = True
         # One-shot request to fetch host policies on the next tick even if
         # the slow tier is skipped. Set by write-entities (policy select)
         # right after a router-side change so the UI doesn't wait up to a
@@ -299,7 +302,8 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # for the slow tier.
         pending_host_policies = getattr(self, "_host_policies_refresh_pending", False)
         pending_host_policies_token = getattr(self, "_host_policies_refresh_token", 0)
-        host_policies_refresh = slow_refresh or pending_host_policies
+        needs_policies = getattr(self, "needs_policies", True)
+        host_policies_refresh = needs_policies and (slow_refresh or pending_host_policies)
 
         # Precompute the cached fallbacks for skipped slow-tick fetches
         # outside the gather() call so the fast tick doesn't rebuild
@@ -375,7 +379,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _bounded(self.client.async_get_clients()) if needs_clients else _resolve([]),
                 _bounded(self.client.async_get_ip_neighbours()),
                 _bounded(self.client.async_get_host_policies()) if host_policies_refresh else _resolve(_prev.get("host_policies", {})),
-                _bounded(self.client.async_get_policies()) if very_slow_refresh else _resolve(_prev.get("policies", {})),
+                _bounded(self.client.async_get_policies()) if very_slow_refresh and needs_policies else _resolve(_prev.get("policies", {})),
                 _bounded(self.client.async_get_ndns_info()) if very_slow_refresh else _resolve(_prev.get("ndns", {})),
                 _bounded(self.client.async_get_ping_check_status()),
                 _bounded(self.client.async_get_ipsec_status()) if ipsec_status_refresh else _resolve(_prev.get("crypto_maps", {})),
