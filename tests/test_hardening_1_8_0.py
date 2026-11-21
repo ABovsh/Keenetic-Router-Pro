@@ -477,8 +477,6 @@ class _GaugeFakeClient(_UpdateTierFakeClient):
             "memfree": 1000 - n,
             "mem": n,
             "memory": n,
-            "conntotal": 100,
-            "connfree": 100 - n,
         }
 
 
@@ -491,8 +489,6 @@ _GAUGE_KEYS = (
     "mem",
     "memtotal",
     "memfree",
-    "conntotal",
-    "connfree",
 )
 
 

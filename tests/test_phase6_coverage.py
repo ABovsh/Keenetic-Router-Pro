@@ -54,12 +54,9 @@ from custom_components.keenetic_router_pro.sensor.crypto import (
 )
 from custom_components.keenetic_router_pro.sensor.clients import (
     KeeneticConnectedClientsSensor,
-    KeeneticDisconnectedClientsSensor,
-    KeeneticExtenderCountSensor,
     KeeneticRouterClientsSensor,
 )
 from custom_components.keenetic_router_pro.sensor.system import (
-    KeeneticFirmwareVersionSensor,
     KeeneticMemoryUsageSensor,
     KeeneticUptimeSensor,
 )
@@ -247,15 +244,6 @@ def test_system_and_wifi_sensors_cover_alternate_payload_shapes() -> None:
 
     assert KeeneticMemoryUsageSensor(coordinator, entry).native_value == pytest.approx(75.0)
     assert elapsed_seconds(KeeneticUptimeSensor(coordinator, entry).native_value) == pytest.approx(42, abs=2)
-    firmware = KeeneticFirmwareVersionSensor(coordinator, entry)
-    assert firmware.native_value == "4.2.1"
-    assert firmware.extra_state_attributes == {
-        "release": "4.2.1",
-        "channel": "stable",
-        "architecture": "mips",
-        "ndm_version": "ndm",
-        "bsp_version": "bsp",
-    }
 
     assert KeeneticWifi24TemperatureSensor(coordinator, entry).native_value == pytest.approx(41.5)
     assert KeeneticWifi24TemperatureSensor(coordinator, entry).available is True
@@ -291,11 +279,6 @@ def test_clients_summary_sensors_count_mesh_and_router_clients() -> None:
     router = KeeneticRouterClientsSensor(coordinator, entry)
     assert router.native_value == 2
     assert router.extra_state_attributes["mesh_clients"] == 3
-
-    assert KeeneticDisconnectedClientsSensor(coordinator, entry).native_value == 2
-    extenders = KeeneticExtenderCountSensor(coordinator, entry)
-    assert extenders.native_value == 2
-    assert extenders.extra_state_attributes["connected"] == 1
 
 
 @pytest.mark.parametrize(

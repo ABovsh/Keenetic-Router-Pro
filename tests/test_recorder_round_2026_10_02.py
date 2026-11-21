@@ -20,9 +20,6 @@ from types import SimpleNamespace
 
 
 
-from custom_components.keenetic_router_pro.sensor.network import (
-    KeeneticActiveConnectionsSensor,
-)
 from custom_components.keenetic_router_pro.sensor.system import KeeneticMemoryUsageSensor
 from custom_components.keenetic_router_pro.sensor.traffic import (
     KeeneticLanRxSensor,
@@ -77,30 +74,3 @@ def test_router_memory_drops_latch_when_reading_disappears() -> None:
     assert sensor.native_value is None
     coordinator.data = _memory(360)
     assert sensor.native_value == 36
-
-
-# --- 3. Active connections: band scales with the count ---
-
-
-def _conns(used: int) -> dict:
-    return {"system": {"conntotal": 63488, "connfree": 63488 - used}}
-
-
-def test_active_connections_band_scales_on_a_busy_router() -> None:
-    coordinator = SimpleNamespace(data=_conns(3000))
-    sensor = KeeneticActiveConnectionsSensor(coordinator, _entry())
-    assert sensor.native_value == 3000
-    coordinator.data = _conns(3120)  # +4 %: noise on a busy router
-    assert sensor.native_value == 3000
-    coordinator.data = _conns(3200)  # +6.7 %
-    assert sensor.native_value == 3200
-
-
-def test_active_connections_keeps_fifty_floor_on_a_quiet_router() -> None:
-    coordinator = SimpleNamespace(data=_conns(300))
-    sensor = KeeneticActiveConnectionsSensor(coordinator, _entry())
-    assert sensor.native_value == 300
-    coordinator.data = _conns(340)
-    assert sensor.native_value == 300
-    coordinator.data = _conns(360)
-    assert sensor.native_value == 360

@@ -12,7 +12,6 @@ from custom_components.keenetic_router_pro.binary_sensor import (
     KeeneticMeshNodeSensor,
     KeeneticMeshUpdateSensor,
     KeeneticWanConnectedSensor,
-    KeeneticWanEnabledSensor,
     async_setup_entry,
 )
 from tests.fixtures.mesh_rci import FALLBACK_MESH_NODE
@@ -184,42 +183,6 @@ def test_wan_connected_sensor_exposes_full_ping_check_attributes() -> None:
         ],
         "summary_layers": {"conf": "running", "link": "up"},
     }
-
-
-def test_wan_enabled_sensor_reports_summary_layers() -> None:
-    """WAN enabled sensor follows the interface enabled flag."""
-    sensor = KeeneticWanEnabledSensor(
-        _coordinator(
-            {
-                "wan_interfaces": [
-                    {
-                        "id": "PPPoE0",
-                        "enabled": True,
-                        "summary_layers": {
-                            "conf": "running",
-                            "link": "up",
-                            "ipv4": "running",
-                            "ctrl": "up",
-                        },
-                    }
-                ]
-            }
-        ),
-        _entry(),
-        "PPPoE0",
-    )
-
-    assert (sensor.unique_id, sensor.name, sensor.is_on, sensor.extra_state_attributes) == (
-        "entry_123_wan_PPPoE0_enabled",
-        "Enabled",
-        True,
-        {
-            "conf": "running",
-            "link": "up",
-            "ipv4": "running",
-            "ctrl": "up",
-        },
-    )
 
 
 def test_mesh_binary_sensors_read_fallback_node_payload() -> None:

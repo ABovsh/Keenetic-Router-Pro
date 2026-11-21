@@ -115,23 +115,8 @@
       "mesh_clients": {
         "name": "Clients"
       },
-      "disconnected_clients": {
-        "name": "Disconnected Clients"
-      },
-      "extender_count": {
-        "name": "Extender Count"
-      },
       "pppoe_uptime": {
         "name": "PPPoE Uptime"
-      },
-      "active_connections": {
-        "name": "Active Connections"
-      },
-      "firmware_version": {
-        "name": "Firmware Version"
-      },
-      "mesh_firmware_version": {
-        "name": "Firmware Version"
       },
       "wifi_24_temperature": {
         "name": "Temperature 2.4 GHz"

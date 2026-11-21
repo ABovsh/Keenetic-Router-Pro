@@ -20,7 +20,6 @@ class DynamicEntityTracker:
     """Known-ID registry used by platform setup listeners."""
 
     mesh_nodes: set[str] = field(default_factory=set)
-    mesh_local_ips: set[str] = field(default_factory=set)
     mesh_ports: set[tuple[str, str]] = field(default_factory=set)
     main_ports: set[str] = field(default_factory=set)
     wan_ids: set[str] = field(default_factory=set)

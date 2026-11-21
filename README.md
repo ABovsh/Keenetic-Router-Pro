@@ -50,7 +50,7 @@ there is no cloud dependency and no extra Python package to install.
 ### 📡 Mesh Wi-Fi system
 
 - **Each extender as its own device:** online state, uptime, CPU, memory, clients served, IP address and Ethernet ports.
-- **Mesh System State** and **Extender Count** on the main router.
+- **Mesh System State** on the main router.
 - **Firmware updates and reboot** for every extender from Home Assistant.
 
 ### 🛡️ VPN tunnels
@@ -60,7 +60,7 @@ there is no cloud dependency and no extra Python package to install.
 
 ### 🖥️ Router health and Wi-Fi
 
-- **CPU, memory, uptime, active connections** and the firmware version.
+- **CPU, memory and uptime;** the installed firmware version is on the **Firmware Update** entity.
 - **Wi-Fi radios:** temperature and traffic for 2.4 GHz and 5 GHz; a switch for each Wi-Fi network.
 - **Ethernet ports:** link state, with speed and duplex while the link is up.
 - **LAN and WAN traffic** totals for the router.
@@ -205,14 +205,14 @@ Entity IDs start with the device name, for example `sensor.keenetic_giga_cpu_loa
 
 | Device | Main entities |
 | --- | --- |
-| **Router** | CPU Load, Memory Usage, Uptime, Firmware Version, Active Connections, WAN Status, WAN IP, PPPoE Uptime, WAN Failover Count, Internet Downtime, Total Connected Clients, Connected Clients, Disconnected Clients, Clients, Extender Count, Mesh System State, IP, Port 0…n, LAN/WAN RX/TX, Wi-Fi 2.4/5 GHz Temperature and RX/TX, Wi-Fi network switches, WireGuard tunnel uptime and RX/TX, Update available, Firmware Update, Reboot Router |
+| **Router** | CPU Load, Memory Usage, Uptime, WAN Status, PPPoE Uptime, WAN Failover Count, Internet Downtime, Total Connected Clients, Connected Clients, Clients, Mesh System State, Port 0…n, LAN/WAN RX/TX, Wi-Fi 2.4/5 GHz Temperature and RX/TX, Wi-Fi network switches, WireGuard tunnel uptime and RX/TX, Update available, Firmware Update, Reboot Router |
 | **Uplink (WAN)**, including a VPN tunnel used as an uplink | Connected, Provider, Role, Interface, Public IP, Uptime, Downtime, RX/TX Bytes, RX/TX Throughput, Enabled switch |
 | **Other VPN tunnel** | Enabled switch; WireGuard uptime and RX/TX appear on the router device |
 | **IPsec tunnel** | Connected, Tunnel state, IKE state, RX/TX Bytes, RX/TX Throughput, on/off switch |
-| **Mesh extender** | Connected, Uptime, CPU Load, Memory Usage, Clients, IP, Firmware Version, Port 0…n, Update available, Firmware Update, Reboot |
+| **Mesh extender** | Connected (with the extender's IP), Uptime, CPU Load, Memory Usage, Clients, Port 0…n, Update available, Firmware Update, Reboot |
 | **Tracked client** | Device tracker, Connection Policy, Bandwidth Limit, and the per-client sensors chosen in [Options](#options) |
 
-Some entities start disabled because most users don't need them: WAN RX/TX, PPPoE Uptime, an uplink's Provider, Role, Interface and **Enabled** state sensor, a tunnel's Downtime, per-client RX/TX and TX rate, and the bandwidth limit. Enable them on the entity's settings page.
+Some entities start disabled because most users don't need them: WAN RX/TX, PPPoE Uptime, an uplink's Provider, Role and Interface, a tunnel's Downtime, per-client RX/TX and TX rate, and the bandwidth limit. Enable them on the entity's settings page.
 
 ## How often readings update
 

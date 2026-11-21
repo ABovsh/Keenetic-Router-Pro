@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -145,42 +144,3 @@ class KeeneticUptimeSensor(UptimeMixin, ControllerEntity, SensorEntity):
 
         # Unknown, not 0: a fake 0 would read as a reboot.
         return self._publish_uptime(None)
-
-
-class KeeneticFirmwareVersionSensor(ControllerEntity, SensorEntity):
-    """Current firmware version sensor for the main router."""
-    _attr_has_entity_name = True
-    _attr_translation_key = "firmware_version"
-    _attr_icon = "mdi:package-variant-closed"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
-        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
-
-    @property
-    def unique_id(self) -> str:
-        return f"{self._entry_id}_firmware_version"
-
-    @property
-    def native_value(self) -> str | None:
-        # Single source of truth for firmware precedence (title → release →
-        # ndw4.version) lives on ControllerEntity, which this sensor extends.
-        return self._firmware_version
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any] | None:
-        system = self.coordinator.data.get("system", {}) or {}
-        attrs: dict[str, Any] = {}
-        if system.get("release"):
-            attrs["release"] = system["release"]
-        if system.get("fw-update-sandbox"):
-            attrs["channel"] = system["fw-update-sandbox"]
-        if system.get("arch"):
-            attrs["architecture"] = system["arch"]
-        ndm = system.get("ndm")
-        if isinstance(ndm, dict) and ndm.get("exact"):
-            attrs["ndm_version"] = ndm["exact"]
-        bsp = system.get("bsp")
-        if isinstance(bsp, dict) and bsp.get("exact"):
-            attrs["bsp_version"] = bsp["exact"]
-        return attrs if attrs else None

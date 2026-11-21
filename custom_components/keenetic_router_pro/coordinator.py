@@ -56,8 +56,7 @@ _mesh_associations = mesh_associations
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.coordinator")
 
-# ``show/system`` fields behind the CPU-load, RAM and active-connection
-# sensors. Republished on the medium tier only (see _async_update_data_unlocked).
+# ``show/system`` fields behind the CPU-load and RAM sensors. Republished on the medium tier only (see _async_update_data_unlocked).
 _GAUGE_KEYS = (
     "cpu_load",
     "cpuload",
@@ -67,8 +66,6 @@ _GAUGE_KEYS = (
     "mem",
     "memtotal",
     "memfree",
-    "conntotal",
-    "connfree",
 )
 
 _VERSION_CACHE_KEYS = (

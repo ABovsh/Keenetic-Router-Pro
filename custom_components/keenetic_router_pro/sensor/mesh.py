@@ -174,35 +174,6 @@ class KeeneticMeshClientsSensor(MeshEntity, SensorEntity):
         }
 
 
-class KeeneticMeshLocalIpSensor(MeshEntity, SensorEntity):
-    """Sensor for local IP address of a mesh node."""
-    _attr_has_entity_name = True
-    _attr_name = "IP"
-    _attr_icon = "mdi:ip-network"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(
-        self,
-        coordinator: KeeneticCoordinator,
-        entry: ConfigEntry,
-        node_cid: str,
-        ip_address: str,
-    ) -> None:
-        MeshEntity.__init__(self, coordinator, entry.entry_id, entry.title, node_cid)
-        self._ip_address = ip_address
-
-    @property
-    def unique_id(self) -> str:
-        return self._mesh_unique_id("local_ip_v2")
-
-    @property
-    def native_value(self) -> str | None:
-        node = self._node
-        if node and node.get("ip"):
-            return node.get("ip")
-        return self._ip_address
-
-
 class KeeneticMeshCpuLoadSensor(DeadbandMixin, MeshEntity, SensorEntity):
     """Mesh node CPU load sensor."""
     _attr_has_entity_name = True
@@ -264,41 +235,6 @@ class KeeneticMeshMemorySensor(DeadbandMixin, MeshEntity, SensorEntity):
             return self._apply_deadband(parse_memory_fraction(node.get("memory")))
         return self._apply_deadband(None)
 
-
-class KeeneticMeshFirmwareVersionSensor(MeshEntity, SensorEntity):
-    """Current firmware version sensor for a mesh node."""
-    _attr_has_entity_name = True
-    _attr_translation_key = "mesh_firmware_version"
-    _attr_icon = "mdi:package-variant-closed"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry, node_cid: str) -> None:
-        MeshEntity.__init__(self, coordinator, entry.entry_id, entry.title, node_cid)
-
-    @property
-    def unique_id(self) -> str:
-        return self._mesh_unique_id("firmware_version_v2")
-
-    @property
-    def native_value(self) -> str | None:
-        node = self._node
-        if node:
-            return node.get("firmware")
-        return None
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any] | None:
-        node = self._node
-        if not node:
-            return None
-        attrs: dict[str, Any] = {}
-        if node.get("firmware_available"):
-            attrs["firmware_available"] = node["firmware_available"]
-        if node.get("hw_id"):
-            attrs["hardware_id"] = node["hw_id"]
-        if node.get("model"):
-            attrs["model"] = node["model"]
-        return attrs if attrs else None
 
 class KeeneticMeshPortSensor(PortSensorMixin, MeshEntity, SensorEntity):
     """Individual mesh node port sensor."""

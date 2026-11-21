@@ -22,7 +22,6 @@ from ..coordinator import KeeneticCoordinator
 from ..entity import (
     ControllerEntity,
     CounterDeadbandMixin,
-    DeadbandMixin,
     LinkActiveMixin,
     SourceFreshnessMixin,
     ThroughputDeadbandMixin,
@@ -30,10 +29,8 @@ from ..entity import (
     WanEntity,
 )
 from ..utils import (
-    apply_relative_deadband,
     coerce_byte_count,
     coerce_float,
-    coerce_int,
     coerce_seconds,
 )
 
@@ -100,37 +97,6 @@ class KeeneticWanStatusSensor(ControllerEntity, SensorEntity):
         return attrs if attrs else None
 
 
-class KeeneticWanIpSensor(ControllerEntity, SensorEntity):
-    """WAN IP address sensor."""
-    _attr_has_entity_name = True
-    _attr_icon = _ICON_IP_NETWORK
-
-    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
-        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
-
-    @property
-    def unique_id(self) -> str:
-        return f"{self._entry_id}_wan_ip"
-
-    @property
-    def name(self) -> str:
-        return "WAN IP"
-
-    @property
-    def native_value(self) -> str | None:
-        wan = self.coordinator.data.get("wan_status", {})
-        return wan.get("ip")
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any] | None:
-        wan = self.coordinator.data.get("wan_status", {})
-        return {
-            "interface": wan.get("interface"),
-            "gateway": wan.get("gateway"),
-            "status": wan.get("status"),
-        }
-
-
 class KeeneticPppoeUptimeSensor(UptimeMixin, ControllerEntity, SensorEntity):
     """Uplink session uptime, as the time it started (see ``UptimeMixin``)."""
     _attr_has_entity_name = True
@@ -161,92 +127,6 @@ class KeeneticPppoeUptimeSensor(UptimeMixin, ControllerEntity, SensorEntity):
             "status": wan.get("status"),
             "ip": wan.get("ip"),
         }
-
-
-class KeeneticActiveConnectionsSensor(DeadbandMixin, ControllerEntity, SensorEntity):
-    """Active connections count sensor."""
-    _attr_has_entity_name = True
-    _attr_translation_key = "active_connections"
-    _attr_icon = "mdi:connection"
-    # Active connections is an instantaneous count, not a lifetime total.
-    # MEASUREMENT keeps HA statistics from treating it as a monotonic sum.
-    _attr_state_class = None
-    _attr_suggested_display_precision = 0
-    # A dithering gauge: measured live it walks +31/+70/-97/+54 between
-    # adjacent polls of an otherwise quiet router. 25 was too narrow to catch
-    # that — the gauge stepped straight over it — so 50, still only 0.08 % of
-    # the 63 488-entry conntrack table. On a busy router with thousands of
-    # flows the swing grows with the count, so the band does too: 2026-10-02 a
-    # router at ~3,000 flows still crossed the fixed 50 band 308 times a day.
-    _DEADBAND = 50
-    _DEADBAND_FRACTION = 0.05
-
-    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry) -> None:
-        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
-
-    @property
-    def unique_id(self) -> str:
-        return f"{self._entry_id}_active_connections"
-
-    @property
-    def native_value(self) -> int | None:
-        sys = self.coordinator.data.get("system", {}) or {}
-        # No reading is unknown, not zero: a fake 0 is a valid-looking
-        # measurement in long-term statistics.
-        conntotal = coerce_int(sys.get("conntotal"), None)
-        connfree = coerce_int(sys.get("connfree"), None)
-        if conntotal is None or connfree is None:
-            self._deadband_published = None
-            return None
-        used = max(0, conntotal - connfree)
-        published = apply_relative_deadband(
-            used,
-            getattr(self, "_deadband_published", None),
-            self._DEADBAND_FRACTION,
-            floor=self._DEADBAND,
-        )
-        self._deadband_published = published
-        return int(published)
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any] | None:
-        # Derive from the DEADBANDED value, never the raw one. Both of these
-        # restate the state, so reading the raw counters here meant that on
-        # every tick the deadband held the state the attributes moved anyway
-        # and HA wrote a row carrying nothing — 116 such rows in three hours,
-        # measured after 1.12.0 shipped the deadband without this.
-        used = self.native_value
-        if used is None:
-            return None
-        sys = self.coordinator.data.get("system", {}) or {}
-        conntotal = coerce_int(sys.get("conntotal"), 0)
-        return {
-            "total_capacity": conntotal,
-            "free": max(0, conntotal - used),
-            "used_percent": (
-                round(used * 100.0 / conntotal, 1) if conntotal > 0 else 0
-            ),
-        }
-
-
-class KeeneticLocalIpSensor(ControllerEntity, SensorEntity):
-    """Sensor for local IP address of the router/device."""
-    _attr_has_entity_name = True
-    _attr_name = "IP"
-    _attr_icon = _ICON_IP_NETWORK
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry, ip_address: str) -> None:
-        ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
-        self._ip_address = ip_address
-
-    @property
-    def unique_id(self) -> str:
-        return f"{self._entry_id}_local_ip"
-
-    @property
-    def native_value(self) -> str | None:
-        return self._ip_address
 
 
 class KeeneticMainPortSensor(PortSensorMixin, ControllerEntity, SensorEntity):

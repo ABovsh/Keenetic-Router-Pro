@@ -27,7 +27,6 @@ from custom_components.keenetic_router_pro.sensor.crypto import (
     KeeneticCryptoMapStateSensor,
 )
 from custom_components.keenetic_router_pro.sensor.network import (
-    KeeneticActiveConnectionsSensor,
     KeeneticWanDowntimeSensor,
     KeeneticWanRxBytesSensor,
     KeeneticWanRxThroughputSensor,
@@ -326,37 +325,6 @@ def _dns_payload(sent: int, answered: int) -> dict[str, Any]:
     )
     return {"proxy-status": [{"proxy-name": "System", "proxy-stat": stat}]}
 
-
-
-# ---------- Active connections without conntrack fields ----------
-
-
-@pytest.mark.parametrize(
-    "system",
-    [{}, {"conntotal": 65536}, {"conntotal": "x", "connfree": 1}],
-    ids=["absent", "half", "garbage"],
-)
-def test_active_connections_is_unknown_without_a_valid_conntrack_reading(
-    system, keenetic_entry, keenetic_coordinator_factory
-) -> None:
-    sensor = KeeneticActiveConnectionsSensor(
-        keenetic_coordinator_factory({"system": system}), keenetic_entry
-    )
-    assert sensor.native_value is None
-    assert sensor.extra_state_attributes is None
-
-
-def test_active_connections_keeps_a_valid_zero(
-    keenetic_entry, keenetic_coordinator_factory
-) -> None:
-    sensor = KeeneticActiveConnectionsSensor(
-        keenetic_coordinator_factory(
-            {"system": {"conntotal": 65536, "connfree": 65536}}
-        ),
-        keenetic_entry,
-    )
-    assert sensor.native_value == 0
-    assert sensor.extra_state_attributes["free"] == 65536
 
 
 # ---------- Traffic counters of links that are not up ----------

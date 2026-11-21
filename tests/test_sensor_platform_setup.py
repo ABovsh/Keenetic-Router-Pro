@@ -204,7 +204,6 @@ def test_binary_sensor_setup_skips_bad_payloads_and_adds_dynamic_entities_once()
         "entry_123_mesh_11_22_33_44_55_66_connect_v2",
         "entry_123_mesh_11_22_33_44_55_66_update_v2",
         "entry_123_wan_Wireguard0_connected",
-        "entry_123_wan_Wireguard0_enabled",
         "entry_123_cmap_BRANCH_connected",
     }
 

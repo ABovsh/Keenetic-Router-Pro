@@ -10,8 +10,6 @@ from types import SimpleNamespace
 from custom_components.keenetic_router_pro.sensor.mesh import (
     KeeneticMeshClientsSensor,
     KeeneticMeshCpuLoadSensor,
-    KeeneticMeshFirmwareVersionSensor,
-    KeeneticMeshLocalIpSensor,
     KeeneticMeshMemorySensor,
     KeeneticMeshPortSensor,
     KeeneticMeshSystemStateSensor,
@@ -108,17 +106,8 @@ def test_mesh_node_value_sensors_read_fallback_node_payload() -> None:
         "client_attrs": KeeneticMeshClientsSensor(
             coordinator, entry, node_id
         ).extra_state_attributes,
-        "ip": KeeneticMeshLocalIpSensor(
-            coordinator, entry, node_id, "192.0.2.99"
-        ).native_value,
         "cpu": KeeneticMeshCpuLoadSensor(coordinator, entry, node_id).native_value,
         "memory": KeeneticMeshMemorySensor(coordinator, entry, node_id).native_value,
-        "firmware": KeeneticMeshFirmwareVersionSensor(
-            coordinator, entry, node_id
-        ).native_value,
-        "firmware_attrs": KeeneticMeshFirmwareVersionSensor(
-            coordinator, entry, node_id
-        ).extra_state_attributes,
     }
 
     assert values.pop("uptime") == pytest.approx(120, abs=2)
@@ -131,15 +120,8 @@ def test_mesh_node_value_sensors_read_fallback_node_payload() -> None:
             "model": "Buddy 6",
             "mode": "extender",
         },
-        "ip": "192.0.2.20",
         "cpu": 12.5,
         "memory": 60.0,
-        "firmware": "4.2.0",
-        "firmware_attrs": {
-            "firmware_available": "4.3.0",
-            "hardware_id": "KN-3411",
-            "model": "Buddy 6",
-        },
     }
 
 

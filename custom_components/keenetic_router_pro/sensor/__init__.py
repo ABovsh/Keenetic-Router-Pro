@@ -24,14 +24,10 @@ from .system import (
     KeeneticCpuLoadSensor,
     KeeneticMemoryUsageSensor,
     KeeneticUptimeSensor,
-    KeeneticFirmwareVersionSensor,
 )
 from .network import (
     KeeneticWanStatusSensor,
-    KeeneticWanIpSensor,
     KeeneticPppoeUptimeSensor,
-    KeeneticActiveConnectionsSensor,
-    KeeneticLocalIpSensor,
     KeeneticMainPortSensor,
     KeeneticWanProviderSensor,
     KeeneticWanRoleSensor,
@@ -49,8 +45,6 @@ from .network import (
 from .clients import (
     KeeneticConnectedClientsSensor,
     KeeneticRouterClientsSensor,
-    KeeneticDisconnectedClientsSensor,
-    KeeneticExtenderCountSensor,
 )
 from .wifi import (
     KeeneticWifi24TemperatureSensor,
@@ -66,8 +60,6 @@ from .mesh import (
     KeeneticMeshMemorySensor,
     KeeneticMeshUptimeSensor,
     KeeneticMeshClientsSensor,
-    KeeneticMeshFirmwareVersionSensor,
-    KeeneticMeshLocalIpSensor,
     KeeneticMeshPortSensor,
 )
 from .traffic import (
@@ -116,7 +108,6 @@ async def async_setup_entry(
             KeeneticWanDowntimeSensor(coordinator, entry),
             KeeneticMemoryUsageSensor(coordinator, entry),
             KeeneticUptimeSensor(coordinator, entry),
-            KeeneticFirmwareVersionSensor(coordinator, entry),
         ]
     )
 
@@ -126,12 +117,10 @@ async def async_setup_entry(
     entities.extend(
         [
             KeeneticWanStatusSensor(coordinator, entry),
-            KeeneticWanIpSensor(coordinator, entry),
             KeeneticPppoeUptimeSensor(coordinator, entry),
-            KeeneticActiveConnectionsSensor(coordinator, entry),
         ]
     )
-    # These four count the client tree. When the coordinator has been told not
+    # These two count the client tree. When the coordinator has been told not
     # to fetch it, creating them anyway would be worse than omitting them:
     # they would confidently report zero clients rather than going away.
     if getattr(coordinator, "needs_client_data", True):
@@ -139,8 +128,6 @@ async def async_setup_entry(
             [
                 KeeneticConnectedClientsSensor(coordinator, entry),
                 KeeneticRouterClientsSensor(coordinator, entry),
-                KeeneticDisconnectedClientsSensor(coordinator, entry),
-                KeeneticExtenderCountSensor(coordinator, entry),
             ]
         )
 
@@ -166,9 +153,6 @@ async def async_setup_entry(
         ]
     )
 
-    host = entry.data.get("host") or entry.data.get("ip", "unknown")
-    entities.append(KeeneticLocalIpSensor(coordinator, entry, host))
-
     entities.append(KeeneticMeshSystemStateSensor(coordinator, entry))
 
     tracker = DynamicEntityTracker()
@@ -180,7 +164,6 @@ async def async_setup_entry(
             coordinator,
             entry,
             tracker.mesh_nodes,
-            tracker.mesh_local_ips,
             tracker.mesh_ports,
         )
         for wan in iter_new_items(coordinator, "wan_interfaces", tracker.wan_ids):
@@ -291,7 +274,6 @@ def _add_mesh_sensors(
     coordinator: KeeneticCoordinator,
     entry: ConfigEntry,
     known_mesh_ids: set[str],
-    known_mesh_local_ip_ids: set[str],
     known_mesh_port_keys: set[tuple[str, str]],
 ) -> None:
     """Append sensors for newly discovered mesh nodes and ports."""
@@ -311,14 +293,8 @@ def _add_mesh_sensors(
                     KeeneticMeshMemorySensor(coordinator, entry, node_id),
                     KeeneticMeshUptimeSensor(coordinator, entry, node_id),
                     KeeneticMeshClientsSensor(coordinator, entry, node_id),
-                    KeeneticMeshFirmwareVersionSensor(coordinator, entry, node_id),
                 ]
             )
-
-        node_ip = node.get("ip")
-        if node_ip and node_id not in known_mesh_local_ip_ids:
-            known_mesh_local_ip_ids.add(node_id)
-            entities.append(KeeneticMeshLocalIpSensor(coordinator, entry, node_id, node_ip))
 
         for port in node.get("port", []) or []:
             port_label = port.get("label") if isinstance(port, dict) else None

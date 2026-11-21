@@ -21,7 +21,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from custom_components.keenetic_router_pro.sensor.network import (
-    KeeneticActiveConnectionsSensor,
     KeeneticWanRxBytesSensor,
     KeeneticWanRxThroughputSensor,
 )
@@ -109,28 +108,6 @@ def test_wan_bytes_publishes_a_counter_reset_immediately() -> None:
 
     coordinator.data["wan_by_id"]["PPPoE0"]["rx_bytes"] = 1_024
     assert sensor.native_value == 1_024
-
-
-# --- 3. Active connections: a dithering gauge, 25-connection deadband ---
-
-
-def test_active_connections_holds_small_dither() -> None:
-    coordinator = SimpleNamespace(data={"system": {"conntotal": 63488, "connfree": 63188}})
-    sensor = KeeneticActiveConnectionsSensor(coordinator, _entry())
-    assert sensor.native_value == 300
-
-    # 300 -> 310: measured live, this gauge walks ±30 all day long.
-    coordinator.data["system"] = {"conntotal": 63488, "connfree": 63178}
-    assert sensor.native_value == 300
-
-
-def test_active_connections_publishes_a_real_move() -> None:
-    coordinator = SimpleNamespace(data={"system": {"conntotal": 63488, "connfree": 63188}})
-    sensor = KeeneticActiveConnectionsSensor(coordinator, _entry())
-    assert sensor.native_value == 300
-
-    coordinator.data["system"] = {"conntotal": 63488, "connfree": 63088}
-    assert sensor.native_value == 400
 
 
 # --- 4. Throughput: 5 % band over a 100 kbit/s floor ---
