@@ -6,9 +6,7 @@
 # Non-blocking (always exits 0): this is a feedback loop, not a gate — the
 # pre-push check and CI are the gates.
 #
-# Note: only `ruff check --fix` (the minimal lint set from pyproject.toml), NOT
-# `ruff format` — this fork does not enforce a format standard, so we don't want
-# local edits silently reformatted in ways CI never checks.
+# Use the lint rules in pyproject.toml. CI does not enforce formatting.
 
 set -uo pipefail
 

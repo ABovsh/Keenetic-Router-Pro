@@ -8,7 +8,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import CONF_TRACKED_CLIENTS, LINK_STATE_UP
 from .coordinator import KeeneticCoordinator
 from .entity import ClientEntity
-from .utils import coerce_bool, find_client_by_mac, iter_tracked_clients, usable_ip
+from .utils import coerce_bool, lookup_client, iter_tracked_clients, usable_ip
 
 # Read-only coordinator-driven platform: no writes to serialize, no limit needed.
 PARALLEL_UPDATES = 0
@@ -205,10 +205,4 @@ class KeeneticClientTracker(ClientEntity, ScannerEntity):
 
     @property
     def _client_from_main(self) -> dict[str, Any] | None:
-        data = self._main_coordinator.data or {}
-        index = data.get("clients_by_mac")
-        if isinstance(index, dict):
-            client = index.get(self._mac)
-            if isinstance(client, dict):
-                return client
-        return find_client_by_mac(data.get("clients"), self._mac)
+        return lookup_client(self._main_coordinator.data or {}, self._mac)

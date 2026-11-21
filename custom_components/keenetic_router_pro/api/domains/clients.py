@@ -163,7 +163,7 @@ class ClientsMixin:
     async def async_get_client_stats(self) -> Dict[str, Any]:
         """Get connected/disconnected client counts and per-AP stats.
 
-        Extender/repeater cihazları client sayısından çıkarılır.
+        Client totals exclude extenders and repeaters.
         """
         return self.summarize_client_stats(await self.async_get_clients())
 
@@ -199,7 +199,6 @@ class ClientsMixin:
             e.g. {"aa:bb:cc:dd:ee:ff": {"policy": "Policy1", "access": "permit"}, ...}
         """
         try:
-            # Doğru endpoint: GET /rci/ip/hotspot/host
             data = await self._rci_get("ip/hotspot/host")
         except KeeneticApiError as err:
             if _is_endpoint_missing(err):
@@ -249,7 +248,7 @@ class ClientsMixin:
             cmd = f"ip hotspot host {mac_clean} permit"
             await self._rci_parse(cmd)
         else:
-            # Önce erişimi aç (deny durumundaysa permit'e çevir)
+            # Restore access before assigning a policy to a blocked client.
             cmd = f"ip hotspot host {mac_clean} permit"
             await self._rci_parse(cmd)
 

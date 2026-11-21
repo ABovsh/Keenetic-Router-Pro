@@ -26,24 +26,13 @@ class MeshMixin:
     async def async_get_mesh_nodes(
         self, clients: List[Dict[str, Any]] | None = None
     ) -> List[Dict[str, Any]]:
-        """Get mesh/extender nodes status from mws/member endpoint.
+        """Return mesh members, using the client list as a fallback.
 
-        Bu endpoint tüm mesh üyelerini detaylı bilgileriyle döndürür.
-
-        NOT:
-        Bazı Keenetic modellerinde/firmware'lerinde Wi-Fi System (MWS) controller yoktur.
-        Bu durumda show/mws/member çağrısı router loguna:
-            Core::Scgi::ThreadPool: not found: "member" (http/rci)
-        şeklinde spam basar.
-
-        Çözüm:
-        1) Önce client listesinde extender/repeater var mı bak.
-           Yoksa MWS endpoint'ine hiç gitme.
-        2) MWS endpoint'i "not found" ise desteklenmiyor diye cache'le, tekrar deneme.
+        Query the MWS controller only when the client list contains extenders.
+        Cache a missing endpoint to avoid repeated errors in the router log.
         """
         nodes: List[Dict[str, Any]] = []
 
-        # 1) Önce fallback ile "evde extender var mı?" tespit et
         try:
             fallback_nodes = await self._get_mesh_nodes_from_clients(clients=clients)
         except asyncio.CancelledError:
@@ -52,18 +41,15 @@ class MeshMixin:
             _LOGGER.debug("mesh fallback from clients failed: %s", err)
             fallback_nodes = []
 
-        # Extender yoksa MWS endpoint'ine hiç dokunma (log spam sıfır)
         if not fallback_nodes:
             return nodes
 
-        # Daha önce "desteklemiyor" diye cache'lediysek tekrar deneme
         if self._mws_member_supported is False:
             return fallback_nodes
 
         try:
             data = await self._rci_get("show/mws/member")
 
-            # Endpoint çalıştı
             self._mws_member_supported = True
 
             if not data:

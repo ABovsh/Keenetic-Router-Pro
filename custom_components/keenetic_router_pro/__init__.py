@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from contextlib import suppress
 import importlib
 import logging
 from dataclasses import dataclass
@@ -10,11 +9,20 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
+from homeassistant.exceptions import (
+    ConfigEntryAuthFailed,
+    ConfigEntryError,
+    ConfigEntryNotReady,
+)
 from homeassistant.helpers import config_validation as cv, issue_registry as ir
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .api import KeeneticApiError, KeeneticAuthError, KeeneticClient
+from .api import (
+    KeeneticApiError,
+    KeeneticAuthError,
+    KeeneticClient,
+    KeeneticRciBlockedError,
+)
+from .http_session import async_get_keenetic_session
 from .const import (
     DOMAIN,
     DEFAULT_PORT,
@@ -34,7 +42,6 @@ from .coordinator import KeeneticCoordinator
 from .utils import (
     iter_tracked_clients,
     mask_identifier,
-    mesh_unique_id,
     normalize_mac,
     sanitize_mesh_id,
 )
@@ -65,6 +72,7 @@ _DEVICE_REGISTRY = "homeassistant.helpers.device_registry"
 
 ISSUE_INSECURE_HTTP = "insecure_http"
 ISSUE_UNSUPPORTED_FEATURES = "unsupported_features"
+ISSUE_RCI_BLOCKED = "rci_blocked"
 
 # Capability latches the API layer flips off the first time the router answers
 # "no such endpoint". Each one silently removes a group of entities, which
@@ -72,9 +80,7 @@ ISSUE_UNSUPPORTED_FEATURES = "unsupported_features"
 _CAPABILITY_LABELS: dict[str, str] = {
     "_mws_member_supported": "Mesh (MWS) nodes",
     "_crypto_map_supported": "IPsec site-to-site tunnels",
-    "_ipsec_diagnostics_supported": "IPsec diagnostics",
     "_ping_check_supported": "WAN ping-check status",
-    "_dns_proxy_supported": "DNS proxy statistics",
     "_ndns_supported": "KeenDNS name and certificate",
 }
 
@@ -130,31 +136,10 @@ def _needs_client_data(entry: ConfigEntry) -> bool:
     return bool(entry.data.get(CONF_TRACKED_CLIENTS) or ())
 
 
-@callback
-def _async_prune_interface_switches(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove the per-interface enable switches 1.10.0 briefly shipped.
+def _needs_policies(entry: ConfigEntry) -> bool:
+    """Return True when setup creates at least one policy selector."""
+    return next(iter_tracked_clients(entry), None) is not None
 
-    They duplicated switches that already existed for every interface worth
-    toggling — Wi-Fi, WAN, VPN, crypto maps — and because each one carried its
-    own ``device_info`` they added dozens of empty-looking devices to the UI,
-    one per unused access-point slot and per switch port. They are disabled by
-    default, and a disabled entity is never added to its platform again, so
-    nothing removes them on its own; setup has to.
-    """
-    try:
-        er = importlib.import_module(_ENTITY_REGISTRY)
-    except ImportError:
-        return
-    entries_for = getattr(er, "async_entries_for_config_entry", None)
-    if entries_for is None:
-        return
-
-    registry = er.async_get(hass)
-    prefix = f"{entry.entry_id}_interface_"
-    for registry_entry in list(entries_for(registry, entry.entry_id)):
-        unique_id = getattr(registry_entry, "unique_id", "") or ""
-        if unique_id.startswith(prefix) and unique_id.endswith("_enabled"):
-            registry.async_remove(registry_entry.entity_id)
 
 
 @callback
@@ -336,6 +321,28 @@ def _is_loopback_host(host: str) -> bool:
 
 
 @callback
+def _async_create_rci_blocked_issue(
+    hass: HomeAssistant, entry: ConfigEntry, host: str
+) -> None:
+    """Explain that the router closed this RCI path; the fix is Reconfigure."""
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        f"{ISSUE_RCI_BLOCKED}_{entry.entry_id}",
+        is_fixable=False,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key=ISSUE_RCI_BLOCKED,
+        translation_placeholders={"title": entry.title, "host": host},
+    )
+
+
+@callback
+def _async_delete_rci_blocked_issue(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Clear the RCI-blocked Repair once the entry connects again."""
+    ir.async_delete_issue(hass, DOMAIN, f"{ISSUE_RCI_BLOCKED}_{entry.entry_id}")
+
+
+@callback
 def _async_update_insecure_http_issue(
     hass: HomeAssistant, entry: ConfigEntry, host: str, use_ssl: bool
 ) -> None:
@@ -356,85 +363,6 @@ def _async_update_insecure_http_issue(
         ir.async_delete_issue(hass, DOMAIN, issue_id)
 
 
-@callback
-def _async_migrate_mesh_unique_ids(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    mesh_nodes: list[dict[str, Any]],
-) -> None:
-    """Migrate old truncated mesh unique IDs to entry-scoped full IDs."""
-    try:
-        er = importlib.import_module(_ENTITY_REGISTRY)
-    except ImportError:
-        return
-
-    registry = er.async_get(hass)
-
-    def _move(platform: str, old_uid: str, new_uid: str) -> None:
-        if old_uid == new_uid:
-            return
-        old_entity_id = registry.async_get_entity_id(platform, DOMAIN, old_uid)
-        if old_entity_id is None:
-            return
-        if registry.async_get_entity_id(platform, DOMAIN, new_uid) is not None:
-            return
-        with suppress(ValueError):
-            registry.async_update_entity(old_entity_id, new_unique_id=new_uid)
-
-    for node in mesh_nodes or []:
-        node_cid = node.get("cid") or node.get("id")
-        if not node_cid:
-            continue
-
-        node_id = str(node_cid)
-        old_safe = node_id.replace("-", "_").replace(":", "_")[:16]
-        old_compact = node_id.replace("-", "").replace(":", "")[:16]
-
-        mesh_suffixes = {
-            "uptime_v2": "uptime_v2",
-            "clients_v2": "clients_v2",
-            "local_ip_v2": "local_ip_v2",
-            "cpu_load_v2": "cpu_load_v2",
-            "memory_v2": "memory_v2",
-            "firmware_version_v2": "firmware_version_v2",
-        }
-        for old_suffix, new_suffix in mesh_suffixes.items():
-            _move(
-                "sensor",
-                f"{old_safe}_{old_suffix}",
-                mesh_unique_id(entry.entry_id, node_id, new_suffix),
-            )
-
-        for port in node.get("port", []) or []:
-            port_label = port.get("label") if isinstance(port, dict) else None
-            if port_label is None:
-                continue
-            _move(
-                "sensor",
-                f"{old_safe}_port_{port_label}_v2",
-                mesh_unique_id(entry.entry_id, node_id, f"port_{port_label}_v2"),
-            )
-
-        _move(
-            "binary_sensor",
-            f"{old_safe}_connect_v2",
-            mesh_unique_id(entry.entry_id, node_id, "connect_v2"),
-        )
-        _move(
-            "binary_sensor",
-            f"{entry.entry_id}_mesh_{old_compact}_update_v2",
-            mesh_unique_id(entry.entry_id, node_id, "update_v2"),
-        )
-        _move(
-            "button",
-            f"{old_safe}_reboot_button_v2",
-            mesh_unique_id(entry.entry_id, node_id, "reboot_button_v2"),
-        )
-        _move(
-            "update",
-            f"{old_safe}_firmware_update_v2",
-            mesh_unique_id(entry.entry_id, node_id, "firmware_update_v2"),
-        )
 
 # Per-client sensor unique-id suffixes, split by the ``client_sensors`` option.
 # "basic" keeps the presence-adjacent facts; "full" adds the counters.
@@ -557,7 +485,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     use_ssl: bool = bool(data.get("ssl", DEFAULT_SSL))
 
-    session = async_get_clientsession(hass)
+    session = async_get_keenetic_session(hass)
 
     # Construct the client and coerce the port inside the try: a corrupted or
     # legacy entry with a non-numeric port or malformed host raises here, and
@@ -574,6 +502,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             use_challenge_auth=bool(data.get(CONF_USE_CHALLENGE_AUTH, False)),
         )
         await client.async_start(session)
+    except KeeneticRciBlockedError as err:
+        # Not a password problem: the reauth form cannot change the address,
+        # and retrying the same path can never succeed.
+        _async_create_rci_blocked_issue(hass, entry, host)
+        raise ConfigEntryError(
+            "The router refuses RCI on this address; reconfigure the entry "
+            "to the router web address with challenge auth"
+        ) from err
     except KeeneticAuthError as err:
         raise ConfigEntryAuthFailed("Keenetic credentials were rejected") from err
     except (KeeneticApiError, ValueError, TypeError) as err:
@@ -582,18 +518,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = KeeneticCoordinator(hass, client)
     coordinator.parent_device_id = _parent_device_id(hass, entry)
     coordinator.needs_client_data = _needs_client_data(entry)
+    coordinator.needs_policies = _needs_policies(entry)
     await coordinator.async_config_entry_first_refresh()
-    _async_migrate_mesh_unique_ids(
-        hass,
-        entry,
-        coordinator.data.get("mesh_nodes", []) if coordinator.data else [],
-    )
-
     _async_prune_client_entities(hass, entry)
-    _async_prune_interface_switches(hass, entry)
     _async_prune_vpn_switches_shadowed_by_wan(hass, entry, coordinator.data)
 
     _async_update_insecure_http_issue(hass, entry, host, use_ssl)
+    _async_delete_rci_blocked_issue(hass, entry)
 
     # Modern HA pattern: stash strongly-typed runtime data on the entry
     # itself. Platforms read ``entry.runtime_data.coordinator`` instead

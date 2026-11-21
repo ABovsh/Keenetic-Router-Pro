@@ -11,6 +11,8 @@ from __future__ import annotations
 from conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
 
 import asyncio
+
+import pytest
 from typing import Any
 
 
@@ -52,35 +54,22 @@ def test_is_endpoint_missing_detects_not_found_and_404() -> None:
 
 
 def test_crypto_map_latches_off_after_not_found() -> None:
-    """show/crypto/map must be called once, then never again on the same client."""
+    """A router without IPsec is read once, then never again on the same client."""
     client = _make_client()
-    rec = _RecordingClient(client, raise_not_found_for={"show/crypto/map"})
+    rec = _RecordingClient(client, raise_not_found_for={"show/ipsec", "crypto/map"})
 
     async def run() -> None:
         # First call hits the router and triggers the not-found path.
-        assert await client.async_get_crypto_maps() == {}
+        assert await client.async_get_ipsec_status() == {}
         # Second call must be short-circuited by the capability cache.
-        assert await client.async_get_crypto_maps() == {}
+        assert await client.async_get_ipsec_status() == {}
 
     asyncio.run(run())
-    assert rec.calls == ["show/crypto/map"], (
+    assert sorted(rec.calls) == ["crypto/map", "show/ipsec"], (
         "second call must be skipped after capability latch"
     )
     assert client._crypto_map_supported is False
 
-
-def test_dns_proxy_latches_off_after_not_found() -> None:
-    client = _make_client()
-    rec = _RecordingClient(client, raise_not_found_for={"show/dns-proxy"})
-
-    async def run() -> None:
-        await client.async_get_dns_proxy_status()
-        await client.async_get_dns_proxy_status()
-        await client.async_get_dns_proxy_status()
-
-    asyncio.run(run())
-    assert rec.calls == ["show/dns-proxy"]
-    assert client._dns_proxy_supported is False
 
 
 def test_ping_check_latches_off_after_not_found() -> None:
@@ -121,10 +110,11 @@ def test_capability_caches_do_not_latch_on_transient_errors() -> None:
     client._rci_get = _flaky  # type: ignore[assignment]
 
     async def run() -> None:
-        await client.async_get_crypto_maps()
-        await client.async_get_crypto_maps()
+        for _ in range(2):
+            with pytest.raises(KeeneticApiError):
+                await client.async_get_ipsec_status()
 
     asyncio.run(run())
     # Both polls must reach the router; transient failures must NOT latch.
-    assert len(calls) == 2
+    assert len(calls) == 4
     assert client._crypto_map_supported is not False

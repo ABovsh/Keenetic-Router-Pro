@@ -39,7 +39,6 @@ def test_dynamic_mesh_sensor_helper_adds_new_nodes_and_ports_once() -> None:
     )
     entities: list[SensorEntity] = []
     known_mesh_ids: set[str] = set()
-    known_mesh_local_ip_ids: set[str] = set()
     known_mesh_port_keys: set[tuple[str, str]] = set()
 
     _add_mesh_sensors(
@@ -47,11 +46,10 @@ def test_dynamic_mesh_sensor_helper_adds_new_nodes_and_ports_once() -> None:
         coordinator,
         entry,
         known_mesh_ids,
-        known_mesh_local_ip_ids,
         known_mesh_port_keys,
     )
 
-    assert len(entities) == 7
+    assert len(entities) == 5
     assert len({entity.unique_id for entity in entities}) == len(entities)
 
     _add_mesh_sensors(
@@ -59,11 +57,10 @@ def test_dynamic_mesh_sensor_helper_adds_new_nodes_and_ports_once() -> None:
         coordinator,
         entry,
         known_mesh_ids,
-        known_mesh_local_ip_ids,
         known_mesh_port_keys,
     )
 
-    assert len(entities) == 7
+    assert len(entities) == 5
 
     coordinator.data["mesh_nodes"] = [
         {
@@ -82,11 +79,10 @@ def test_dynamic_mesh_sensor_helper_adds_new_nodes_and_ports_once() -> None:
         coordinator,
         entry,
         known_mesh_ids,
-        known_mesh_local_ip_ids,
         known_mesh_port_keys,
     )
 
-    assert len(entities) == 13
+    assert len(entities) == 10
     assert len({entity.unique_id for entity in entities}) == len(entities)
     assert any(entity.unique_id.endswith("_port_2_v2") for entity in entities)
     assert any(

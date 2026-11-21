@@ -8,6 +8,26 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## Unreleased
+
+### ⚠️ Breaking
+
+- **The IPsec VICI OOM Total, DNS Proxy Status and DNS Proxy Failed Requests sensors are removed.** The integration no longer reads the router log for IPsec memory errors or polls DNS proxy statistics. Existing history stays in the recorder; delete the leftover entities from Settings → Entities, and update dashboards, automations or templates that use them.
+- **Sensors that repeated other entities are removed:** Firmware Version on the router and each extender (shown by the Firmware Update entity), WAN IP (the active uplink's Public IP), the router and extender IP (the configured address and the extender's Connected attribute), each uplink's Enabled binary sensor (its Enabled switch), Disconnected Clients, Extender Count and Active Connections. Existing history stays; delete the leftover entities from Settings → Entities and update anything that uses them.
+- **Install 1.20.0 first when upgrading from a release older than 1.11.0.** This release no longer converts mesh entity IDs created before 1.7.44 or removes the interface switches that 1.10.0 briefly added; a direct jump would leave duplicate mesh entities.
+
+### 🔧 Changed
+
+- **Policy changes and mesh firmware progress checks read only what changed.** Selecting a connection policy re-reads that assignment instead of every router section, and each progress check during an extender firmware install reads only the mesh status.
+- **Routers without tracked clients stop polling connection policies.** No policy selector exists for them, so the integration skips 576 policy reads a day per router.
+- **Setup guidance for KeeneticOS 5.1.9.** The SSL hint and the plaintext-HTTP Repair tell you to use the router's KeenDNS name for HTTPS, because the router presents its certificate only for that name; the KeenDNS web-app mode is labelled for KeeneticOS 5.1.8 and older.
+
+### 🐛 Fixed
+
+- **Mesh extenders and router client triggers work with per-client sensors off.** When no client is tracked and client sensors are off, the client list is still read every 3 minutes, so extenders are discovered and "client connected/disconnected" triggers fire.
+- **Signing in right after setup or reauthentication no longer fails as rejected credentials.** The integration uses its own HTTP session that keeps no cookies, so a router session cookie from an earlier sign-in is never replayed into the next challenge.
+- **KeeneticOS 5.1.9 no longer causes a false "Authentication expired" prompt.** When the router refuses the configured address because 5.1.9 closed API port 79 (port forwards and KeenDNS proxies to 127.0.0.1:79), Repairs and the setup form now explain how to reconfigure the entry to the router web address with challenge auth instead of asking for the password again.
+
 ## 1.20.0
 
 ### ⚠️ Breaking
@@ -1660,11 +1680,10 @@ This release exists so HACS accepts installs again.
   unit conversion (kbit/s ↔ Mbit/s ↔ Gbit/s) directly in the entity
   customisation dialog — no template tricks needed.
 
-## 1.3.0 - Fork hardening and performance
+## 1.3.0 - Security and performance
 
-This is the first release of the maintained fork. The Home Assistant domain
-stays `keenetic_router_pro` so existing dashboards, automations, and entity
-history carry over unchanged from the upstream version.
+The integration retains the Home Assistant domain `keenetic_router_pro`,
+preserving existing dashboards, automations, and entity history.
 
 ### Security
 
@@ -1714,4 +1733,4 @@ history carry over unchanged from the upstream version.
 
 - Lighter, more practical README focused on install / config /
   troubleshooting.
-- Manifest documentation and issue-tracker links repointed to the fork.
+- Manifest documentation and issue-tracker links updated to point to this repository.

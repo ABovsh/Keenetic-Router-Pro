@@ -12,7 +12,7 @@ from .utils import (
     apply_deadband,
     apply_relative_deadband,
     quantize_data_rate,
-    find_client_by_mac,
+    lookup_client,
     find_mesh_node,
     get_main_device_info,
     get_mesh_device_info,
@@ -23,7 +23,6 @@ from .utils import (
     is_client_online,
     mesh_unique_id,
     normalize_mac,
-    sanitize_mesh_id,
     usable_ip,
 )
 
@@ -375,7 +374,6 @@ class MeshEntity(_FingerprintedCoordinatorEntity):
         self._entry_id = entry_id
         self._title = title
         self._node_cid = node_cid
-        self._safe_cid = sanitize_mesh_id(node_cid)
 
     def _mesh_unique_id(self, suffix: str) -> str:
         """Return the entry-scoped unique ID for this mesh entity."""
@@ -630,24 +628,13 @@ class ClientEntity(_FingerprintedCoordinatorEntity):
         {"neighbour", "neighbour-expired", "neighbour-leasetime"}
     )
 
-    def _client_fingerprint(self, client: dict[str, Any] | None) -> dict[str, Any] | None:
-        return _entity_fingerprint(
-            client, self._FINGERPRINT_IGNORE | self._NEIGHBOUR_VOLATILE
-        )
-
     @property
     def _fingerprint_source(self) -> dict[str, Any] | None:
         return self._client
 
     @property
     def _client(self) -> dict[str, Any] | None:
-        data = self.coordinator.data or {}
-        index = data.get("clients_by_mac")
-        if isinstance(index, dict):
-            client = index.get(self._mac)
-            if isinstance(client, dict):
-                return client
-        return find_client_by_mac(data.get("clients"), self._mac)
+        return lookup_client(self.coordinator.data or {}, self._mac)
 
     @property
     def available(self) -> bool:

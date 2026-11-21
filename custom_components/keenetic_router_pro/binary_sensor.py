@@ -6,7 +6,6 @@ from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import FIELD_CONNECTED, LINK_STATE_UP
@@ -46,9 +45,6 @@ async def async_setup_entry(
             dynamic_entities.append(
                 KeeneticWanConnectedSensor(coordinator, entry, wan_id)
             )
-            dynamic_entities.append(
-                KeeneticWanEnabledSensor(coordinator, entry, wan_id)
-            )
         crypto_maps = coordinator.data.get("crypto_maps") or {}
         if not isinstance(crypto_maps, dict):
             crypto_maps = {}
@@ -62,16 +58,12 @@ async def async_setup_entry(
             )
         return dynamic_entities
 
-    entities.extend(_build_dynamic_binary_sensors())
-    if entities:
-        async_add_entities(entities)
-
     register_dynamic_entities(
         entry,
         coordinator,
         async_add_entities,
         _build_dynamic_binary_sensors,
-        add_initial=False,
+        initial_entities=entities,
     )
 
 
@@ -245,57 +237,6 @@ class KeeneticWanConnectedSensor(WanEntity, BinarySensorEntity):
         if layers:
             attrs["summary_layers"] = layers
         return attrs
-
-
-class KeeneticWanEnabledSensor(WanEntity, BinarySensorEntity):
-    """Per-WAN "Enabled" sensor — matches the UI toggle state.
-
-    True when summary.layer.conf is "running" (interface is configured
-    up), False when it's "disabled" (the user has toggled the uplink
-    off in the web UI).
-    """
-
-    _attr_has_entity_name = True
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_icon = "mdi:toggle-switch-variant"
-    # The WAN's Enabled switch shows the same state; new installs opt in.
-    _attr_entity_registry_enabled_default = False
-
-    def __init__(
-        self,
-        coordinator: KeeneticCoordinator,
-        entry: ConfigEntry,
-        wan_id: str,
-    ) -> None:
-        WanEntity.__init__(self, coordinator, entry.entry_id, entry.title, wan_id)
-
-    @property
-    def unique_id(self) -> str:
-        return f"{self._entry_id}_wan_{self._wan_id}_enabled"
-
-    @property
-    def name(self) -> str:
-        return "Enabled"
-
-    @property
-    def is_on(self) -> bool:
-        wan = self._wan
-        if wan is None:
-            return False
-        return bool(wan.get("enabled"))
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any] | None:
-        wan = self._wan
-        if not wan:
-            return None
-        layers = wan.get("summary_layers") or {}
-        return {
-            "conf": layers.get("conf"),
-            "link": layers.get("link"),
-            "ipv4": layers.get("ipv4"),
-            "ctrl": layers.get("ctrl"),
-        }
 
 
 class KeeneticMeshNodeSensor(MeshEntity, BinarySensorEntity):

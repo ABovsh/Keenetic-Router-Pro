@@ -10,20 +10,25 @@ from typing import Any
 import pytest
 
 from custom_components.keenetic_router_pro.api.domains.clients import ClientsMixin
-from custom_components.keenetic_router_pro.api.helpers import _normalize_interfaces
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.keenetic_router_pro.const import FAST_SCAN_INTERVAL
 from custom_components.keenetic_router_pro.coordinator import KeeneticCoordinator
+from tests.test_compatibility_contracts import EXPECTED_COORDINATOR_KEYS
 from tests.fixtures.clients_rci import CLIENTS, HOST_POLICIES, IP_NEIGHBOURS
-from tests.fixtures.dns_rci import DNS_PROXY, NDNS_INFO
+from tests.fixtures.dns_rci import (
+    NDNS_INFO,
+)
 from tests.fixtures.mesh_rci import MESH_NODES
 from tests.fixtures.system_rci import (
     AVAILABLE_VERSION,
     CURRENT_VERSION,
     SYSTEM_INFO,
 )
-from tests.fixtures.vpn_rci import CRYPTO_MAPS, IPSEC_DIAGNOSTICS, VPN_TUNNELS
+from tests.fixtures.vpn_rci import (
+    CRYPTO_MAPS,
+    VPN_TUNNELS,
+)
 from tests.fixtures.vpn_rci import WIREGUARD_STATUS
 from tests.fixtures.wan_rci import (
     INTERFACE_STATS,
@@ -52,8 +57,6 @@ class StageFixtureClient:
         self.ndns_info = deepcopy(NDNS_INFO)
         self.ping_check = deepcopy(PING_CHECK)
         self.crypto_maps = deepcopy(CRYPTO_MAPS)
-        self.dns_proxy = deepcopy(DNS_PROXY)
-        self.ipsec_diagnostics = deepcopy(IPSEC_DIAGNOSTICS)
         self.mesh_nodes = deepcopy(MESH_NODES)
         self.wifi_networks = deepcopy(WIFI_NETWORKS)
         self.wireguard_status = deepcopy(WIREGUARD_STATUS)
@@ -67,7 +70,11 @@ class StageFixtureClient:
         self._hotspot_subpath_winner: str | None = None
         self.prefetch_calls: list[dict] = []
         self.clear_tick_cache_calls = 0
+        self.begin_tick_calls = 0
         self.calls: dict[str, int] = {}
+
+    def begin_tick(self) -> None:
+        self.begin_tick_calls += 1
 
     def clear_tick_cache(self) -> None:
         self.clear_tick_cache_calls += 1
@@ -78,9 +85,6 @@ class StageFixtureClient:
     async def prefetch_tick(self, tree: dict) -> bool:
         self.prefetch_calls.append(tree)
         return False
-
-    def _normalize_interfaces(self, interfaces: Any) -> list[dict[str, Any]]:
-        return _normalize_interfaces(interfaces)
 
     async def async_get_system_info(self) -> dict[str, Any]:
         self._record_call("system_info")
@@ -125,14 +129,6 @@ class StageFixtureClient:
     async def async_get_ipsec_status(self) -> dict[str, Any]:
         self._record_call("ipsec_status")
         return deepcopy(self.crypto_maps)
-
-    async def async_get_dns_proxy_status(self) -> dict[str, Any]:
-        self._record_call("dns_proxy")
-        return deepcopy(self.dns_proxy)
-
-    async def async_get_ipsec_diagnostics(self) -> dict[str, Any]:
-        self._record_call("ipsec_diagnostics")
-        return deepcopy(self.ipsec_diagnostics)
 
     async def async_get_mesh_nodes(
         self, clients: list[dict[str, Any]] | None = None
@@ -222,45 +218,7 @@ async def test_coordinator_pipeline_fixtures_publishes_expected_data_keys() -> N
 
     data = await _updated_data(_coordinator(client))
 
-    assert set(data) == {
-        "system",
-        "traffic_stats",
-        "interfaces",
-        "wifi",
-        "wireguard",
-        "vpn_tunnels",
-        "clients",
-        "clients_stale",
-        "clients_by_mac",
-        "wan_status",
-        "wan_interfaces",
-        "wan_observation_fresh",
-        "wan_by_id",
-        "mesh_nodes",
-        "mesh_nodes_fresh",
-        "mesh_associations",
-        "mesh_nodes_by_cid",
-        "interface_stats",
-        "interface_stats_fresh",
-        "client_stats",
-        "ndns",
-        "host_policies",
-        "policies",
-        "port_info",
-        "ping_check_status",
-        "_iface_fingerprint",
-        "crypto_maps",
-    "crypto_maps_fresh",
-        "dns_proxy",
-    "dns_proxy_fresh",
-        "ipsec_diagnostics",
-        "new_clients",
-    "online_clients",
-    "connected_clients",
-    "disconnected_clients",
-    "active_wan",
-    "wan_failover",
-    }
+    assert set(data) == EXPECTED_COORDINATOR_KEYS
 
 
 async def test_coordinator_serializes_overlapping_refreshes() -> None:
@@ -343,8 +301,6 @@ async def test_coordinator_fast_only_tick_skips_medium_slow_and_very_slow_calls(
         "policies",
         "ndns",
         "ipsec_status",
-        "dns_proxy",
-        "ipsec_diagnostics",
         "mesh_nodes",
         "wifi",
         "wireguard",
@@ -399,8 +355,6 @@ async def test_coordinator_medium_tick_refreshes_interface_derived_calls_only() 
         "policies",
         "ndns",
         "ipsec_status",
-        "dns_proxy",
-        "ipsec_diagnostics",
         "mesh_nodes",
     ):
         assert client.calls.get(skipped, 0) == 0
@@ -421,8 +375,6 @@ async def test_coordinator_slow_tick_refreshes_mesh_policies_and_ipsec_status() 
     assert client.calls.get("ipsec_status", 0) == 1
     assert client.calls.get("ping_check", 0) == 1
     assert client.calls.get("available_version", 0) == 0
-    assert client.calls.get("dns_proxy", 0) == 0
-    assert client.calls.get("ipsec_diagnostics", 0) == 0
 
 
 async def test_coordinator_very_slow_tick_refreshes_diagnostics_and_update_data() -> None:
@@ -443,8 +395,6 @@ async def test_coordinator_very_slow_tick_refreshes_diagnostics_and_update_data(
     assert client.calls.get("available_version", 0) == 0
     assert client.calls.get("policies", 0) == 1
     assert client.calls.get("ndns", 0) == 1
-    assert client.calls.get("dns_proxy", 0) == 1
-    assert client.calls.get("ipsec_diagnostics", 0) == 1
 
 
 @pytest.mark.parametrize(
@@ -740,7 +690,6 @@ async def test_coordinator_calls_prefetch_tick_on_each_refresh() -> None:
     # show/crypto/map: that VICI path is the IPsec OOM source this release
     # avoids by using show/ipsec instead.
     assert "ndns" in show
-    assert "dns-proxy" in show
     assert "crypto" not in show
 
 
@@ -752,7 +701,8 @@ async def test_coordinator_clears_prefetch_cache_after_successful_refresh() -> N
 
     await _updated_data(coordinator)
 
-    assert client.clear_tick_cache_calls >= 2
+    assert client.begin_tick_calls == 1
+    assert client.clear_tick_cache_calls >= 1
 
 
 async def test_coordinator_clears_prefetch_cache_after_failed_refresh() -> None:
@@ -769,7 +719,8 @@ async def test_coordinator_clears_prefetch_cache_after_failed_refresh() -> None:
     with pytest.raises(UpdateFailed):
         await _updated_data(coordinator)
 
-    assert client.clear_tick_cache_calls >= 2
+    assert client.begin_tick_calls == 1
+    assert client.clear_tick_cache_calls >= 1
 
 
 async def test_coordinator_critical_failure_stretches_poll_interval_then_restores() -> None:
@@ -914,6 +865,11 @@ async def test_coordinator_does_not_fetch_clients_when_they_are_not_needed() -> 
 
     coordinator = _coordinator(client)
     coordinator.needs_client_data = False
+    # The slow tier still reads clients for mesh discovery and router events
+    # (see test_client_demand_without_sensors); fast ticks must not.
+    coordinator.data = await _updated_data(coordinator)
+    coordinator._refresh_count = 1
+    calls["n"] = 0
     data = await _updated_data(coordinator)
 
     assert calls["n"] == 0

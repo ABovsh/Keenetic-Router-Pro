@@ -56,7 +56,12 @@ class _ConfigEntryNotReady(HomeAssistantError):
     """Stub for homeassistant.exceptions.ConfigEntryNotReady."""
 
 
+class _ConfigEntryError(HomeAssistantError):
+    """Stub for homeassistant.exceptions.ConfigEntryError."""
+
+
 exceptions.ConfigEntryAuthFailed = _ConfigEntryAuthFailed
+exceptions.ConfigEntryError = _ConfigEntryError
 exceptions.ConfigEntryNotReady = _ConfigEntryNotReady
 
 config_entries = types.ModuleType("homeassistant.config_entries")
@@ -163,6 +168,7 @@ helpers = types.ModuleType("homeassistant.helpers")
 helpers.__path__ = []  # mark as package so submodule imports resolve
 aiohttp_client = types.ModuleType("homeassistant.helpers.aiohttp_client")
 aiohttp_client.async_get_clientsession = lambda hass: None
+aiohttp_client.async_create_clientsession = lambda hass, **kwargs: None
 aiohttp_client._async_make_resolver = lambda *args, **kwargs: None
 helpers.aiohttp_client = aiohttp_client
 
@@ -571,3 +577,28 @@ def elapsed_seconds(started) -> int:
     from datetime import datetime
 
     return round((datetime.now().astimezone() - started).total_seconds())
+
+
+def client_update_writes(entity, *snapshots) -> int:
+    """Feed client snapshots through the live update path; count state writes.
+
+    Each snapshot becomes the entity's indexed client for one coordinator
+    tick, and the write is counted where ``CoordinatorEntity`` would publish.
+    """
+    import custom_components.keenetic_router_pro.entity as entity_module
+
+    writes = 0
+
+    def _count(_self) -> None:
+        nonlocal writes
+        writes += 1
+
+    original = entity_module.CoordinatorEntity._handle_coordinator_update
+    entity_module.CoordinatorEntity._handle_coordinator_update = _count
+    try:
+        for snapshot in snapshots:
+            entity.coordinator.data["clients_by_mac"] = {entity._mac: snapshot}
+            entity._handle_coordinator_update()
+    finally:
+        entity_module.CoordinatorEntity._handle_coordinator_update = original
+    return writes

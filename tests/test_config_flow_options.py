@@ -92,7 +92,7 @@ async def test_options_flow_reuses_runtime_client_for_available_clients() -> Non
             ]
 
     flow = KeeneticOptionsFlow(_entry(RuntimeClient()))
-    flow.hass = SimpleNamespace(config_entries=ConfigEntries())
+    flow.hass = SimpleNamespace(config_entries=ConfigEntries(), data={})
     _pin_flow_result_helpers(flow)
 
     result = await flow.async_step_init()
@@ -192,7 +192,7 @@ async def test_options_flow_creates_temporary_client_without_runtime_client(
     monkeypatch.setattr(config_flow, "KeeneticClient", TemporaryClient)
     entry = _entry()
     flow = KeeneticOptionsFlow(entry)
-    flow.hass = SimpleNamespace(config_entries=ConfigEntries())
+    flow.hass = SimpleNamespace(config_entries=ConfigEntries(), data={})
     _pin_flow_result_helpers(flow)
 
     result = await flow.async_step_init()
@@ -224,7 +224,7 @@ async def test_options_flow_falls_back_to_tracked_clients_when_fetch_fails() -> 
             raise KeeneticApiError("router unavailable")
 
     flow = KeeneticOptionsFlow(_entry(RuntimeClient()))
-    flow.hass = SimpleNamespace(config_entries=ConfigEntries())
+    flow.hass = SimpleNamespace(config_entries=ConfigEntries(), data={})
     _pin_flow_result_helpers(flow)
 
     result = await flow.async_step_init()

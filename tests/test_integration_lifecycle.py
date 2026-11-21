@@ -14,6 +14,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
 from custom_components.keenetic_router_pro import (
     ISSUE_INSECURE_HTTP,
+    ISSUE_RCI_BLOCKED,
     PLATFORMS,
     async_setup_entry,
     async_unload_entry,
@@ -152,18 +153,13 @@ def test_setup_entry_starts_client_forwards_platforms_and_fires_new_device(
     monkeypatch.setattr(integration, "KeeneticCoordinator", _FakeCoordinator)
     monkeypatch.setattr(
         integration,
-        "async_get_clientsession",
+        "async_get_keenetic_session",
         lambda hass: "shared-session",
     )
     monkeypatch.setattr(
         integration.ir,
         "async_create_issue",
         lambda *args, **kwargs: created_issues.append(kwargs),
-    )
-    monkeypatch.setattr(
-        integration,
-        "_async_migrate_mesh_unique_ids",
-        lambda *_args, **_kwargs: None,
     )
 
     hass = _hass()
@@ -230,7 +226,7 @@ def test_setup_entry_maps_client_startup_errors(
     monkeypatch.setattr(integration, "KeeneticClient", _FakeClient)
     monkeypatch.setattr(
         integration,
-        "async_get_clientsession",
+        "async_get_keenetic_session",
         lambda hass: "shared-session",
     )
 
@@ -273,13 +269,8 @@ def test_setup_entry_does_not_create_http_repair_for_loopback_or_ssl(
     monkeypatch.setattr(integration, "KeeneticCoordinator", _FakeCoordinator)
     monkeypatch.setattr(
         integration,
-        "async_get_clientsession",
+        "async_get_keenetic_session",
         lambda hass: "shared-session",
-    )
-    monkeypatch.setattr(
-        integration,
-        "_async_migrate_mesh_unique_ids",
-        lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(
         integration.ir,
@@ -300,6 +291,7 @@ def test_setup_entry_does_not_create_http_repair_for_loopback_or_ssl(
     assert created_issues == []
     assert deleted_issues == [
         (hass, DOMAIN, f"{ISSUE_INSECURE_HTTP}_{entry.entry_id}"),
+        (hass, DOMAIN, f"{ISSUE_RCI_BLOCKED}_{entry.entry_id}"),
     ]
 
 

@@ -186,18 +186,6 @@ def test_client_session_uptime_is_a_timestamp() -> None:
     assert "_attr_state_class" not in assignments
 
 
-def test_active_connections_sensor_keeps_normal_history() -> None:
-    """Active connections is an instantaneous gauge, not a lifetime total.
-
-    Using TOTAL caused HA statistics to treat it as a monotonic sum,
-    producing nonsense long-term graphs.
-    """
-    assignments = _class_assignments(
-        ROOT / "sensor/network.py", "KeeneticActiveConnectionsSensor"
-    )
-    assert assignments.get("_attr_state_class") == "None"
-
-
 @pytest.mark.parametrize(
     "class_name",
     ["KeeneticClientLastSeenSensor"],

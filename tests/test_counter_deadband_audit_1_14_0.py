@@ -30,9 +30,6 @@ from custom_components.keenetic_router_pro.entity import ThroughputDeadbandMixin
 from custom_components.keenetic_router_pro.sensor.crypto import (
     KeeneticCryptoMapRxBytesSensor,
 )
-from custom_components.keenetic_router_pro.sensor.network import (
-    KeeneticActiveConnectionsSensor,
-)
 from custom_components.keenetic_router_pro.sensor.wifi import KeeneticWifi24RxSensor
 from custom_components.keenetic_router_pro.sensor.wireguard import KeeneticWgRxSensor
 
@@ -140,30 +137,6 @@ def test_wifi_counter_holds_below_the_step() -> None:
 
 
 # --- 3. The defect 1.12.0 introduced: attributes outliving the held state ---
-
-
-def test_active_connections_attributes_follow_the_published_value() -> None:
-    """Held state + moving attributes = a row carrying nothing.
-
-    Measured live after 1.12.0: 116 rows in three hours where the state was
-    identical and only ``free`` / ``used_percent`` had moved. Before the
-    deadband these attributes were free, because the state moved with them.
-    """
-    coordinator = SimpleNamespace(data={"system": {"conntotal": 63488, "connfree": 63188}})
-    sensor = KeeneticActiveConnectionsSensor(coordinator, _entry())
-    assert sensor.native_value == 300
-    assert sensor.extra_state_attributes["free"] == 63188
-
-    # Raw count dithers 300 -> 310, inside the deadband: state holds, and the
-    # attributes must hold with it.
-    coordinator.data["system"] = {"conntotal": 63488, "connfree": 63178}
-    assert sensor.native_value == 300
-    assert sensor.extra_state_attributes["free"] == 63188
-
-
-def test_active_connections_deadband_matches_how_far_the_gauge_swings() -> None:
-    """Live deltas between adjacent polls were +31, +70, -97, +54."""
-    assert KeeneticActiveConnectionsSensor._DEADBAND == 50
 
 
 # --- 4. Throughput: the 100 kbit floor was still crossed every poll ---

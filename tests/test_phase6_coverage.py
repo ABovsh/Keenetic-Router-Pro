@@ -17,7 +17,6 @@ from conftest import (
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import aiohttp
 import pytest
 
 from custom_components.keenetic_router_pro.api import (
@@ -25,7 +24,6 @@ from custom_components.keenetic_router_pro.api import (
     KeeneticAuthError,
     KeeneticClient,
 )
-from custom_components.keenetic_router_pro.api.domains.dns import _redact_doh_uri
 from custom_components.keenetic_router_pro.entity import (
     ClientEntity,
     ControllerEntity,
@@ -56,19 +54,9 @@ from custom_components.keenetic_router_pro.sensor.crypto import (
 )
 from custom_components.keenetic_router_pro.sensor.clients import (
     KeeneticConnectedClientsSensor,
-    KeeneticDisconnectedClientsSensor,
-    KeeneticExtenderCountSensor,
     KeeneticRouterClientsSensor,
 )
-from custom_components.keenetic_router_pro.sensor.dns import (
-    KeeneticDnsProxyFailedRequestsSensor,
-    KeeneticDnsProxyStatusSensor,
-)
-from custom_components.keenetic_router_pro.sensor.ipsec import (
-    KeeneticIpsecViciOomTotalSensor,
-)
 from custom_components.keenetic_router_pro.sensor.system import (
-    KeeneticFirmwareVersionSensor,
     KeeneticMemoryUsageSensor,
     KeeneticUptimeSensor,
 )
@@ -227,67 +215,6 @@ async def test_ensure_auth_uses_selected_authenticator() -> None:
     client._async_authenticate_challenge.assert_awaited_once()
 
 
-def test_dns_and_ipsec_diagnostic_sensors_pin_icons_and_bad_counts() -> None:
-    data = {
-        "dns_proxy": {
-            "status": "degraded",
-            "failed_requests": "7",
-            "client_path_uses_doh": True,
-            "proxy_count": 1,
-            "doh_server_count": 1,
-            "dns_server_count": 2,
-            "active_dns_server_count": 1,
-            "requests_sent": 9,
-            "proxies": [{"name": "Proxy"}],
-        },
-        "ipsec_diagnostics": {
-            "status": "warning",
-            "vici_out_of_memory_count": "3",
-            "last_vici_out_of_memory": "now",
-            "last_error_code": "12",
-            "recent_matches": ["vici"],
-            "scanned_log_lines": 100,
-            "command": "show log",
-        },
-    }
-    coordinator = _coordinator(data)
-    entry = _entry()
-
-    dns = KeeneticDnsProxyStatusSensor(coordinator, entry)
-    assert dns.native_value == "degraded"
-    assert dns.icon == "mdi:dns-outline"
-    # failed_requests/requests_sent/active_dns_server_count/proxies were
-    # dropped from the status sensor attrs (they churned every poll, and
-    # failed_requests has its own dedicated sensor below).
-    assert "failed_requests" not in dns.extra_state_attributes
-    assert dns.extra_state_attributes["client_path_uses_doh"] is True
-    assert KeeneticDnsProxyFailedRequestsSensor(coordinator, entry).native_value == 7
-
-    data_with_total = dict(data)
-    data_with_total["ipsec_diagnostics"] = dict(data["ipsec_diagnostics"])
-    data_with_total["ipsec_diagnostics"]["oom_total"] = 42
-    data_with_total["ipsec_diagnostics"]["oom_last_seen"] = "2026-05-27T17:33:48"
-    coord_total = _coordinator(data_with_total)
-    oom = KeeneticIpsecViciOomTotalSensor(coord_total, entry)
-    assert oom.native_value == 42
-    attrs = oom.extra_state_attributes
-    assert attrs["last_event_router_time"] == "2026-05-27T17:33:48"
-
-    empty = _coordinator({"dns_proxy": {}, "ipsec_diagnostics": {}})
-    assert KeeneticDnsProxyStatusSensor(empty, entry).extra_state_attributes is None
-    assert KeeneticDnsProxyFailedRequestsSensor(empty, entry).native_value is None
-    assert KeeneticIpsecViciOomTotalSensor(empty, entry).native_value is None
-
-    bad = _coordinator(
-        {
-            "dns_proxy": {"failed_requests": "bad", "status": "down"},
-            "ipsec_diagnostics": {"oom_total": "bad"},
-        }
-    )
-    assert KeeneticDnsProxyStatusSensor(bad, entry).icon == "mdi:dns-outline"
-    assert KeeneticDnsProxyFailedRequestsSensor(bad, entry).native_value is None
-    assert KeeneticIpsecViciOomTotalSensor(bad, entry).native_value is None
-
 
 def test_system_and_wifi_sensors_cover_alternate_payload_shapes() -> None:
     coordinator = _coordinator(
@@ -317,15 +244,6 @@ def test_system_and_wifi_sensors_cover_alternate_payload_shapes() -> None:
 
     assert KeeneticMemoryUsageSensor(coordinator, entry).native_value == pytest.approx(75.0)
     assert elapsed_seconds(KeeneticUptimeSensor(coordinator, entry).native_value) == pytest.approx(42, abs=2)
-    firmware = KeeneticFirmwareVersionSensor(coordinator, entry)
-    assert firmware.native_value == "4.2.1"
-    assert firmware.extra_state_attributes == {
-        "release": "4.2.1",
-        "channel": "stable",
-        "architecture": "mips",
-        "ndm_version": "ndm",
-        "bsp_version": "bsp",
-    }
 
     assert KeeneticWifi24TemperatureSensor(coordinator, entry).native_value == pytest.approx(41.5)
     assert KeeneticWifi24TemperatureSensor(coordinator, entry).available is True
@@ -361,11 +279,6 @@ def test_clients_summary_sensors_count_mesh_and_router_clients() -> None:
     router = KeeneticRouterClientsSensor(coordinator, entry)
     assert router.native_value == 2
     assert router.extra_state_attributes["mesh_clients"] == 3
-
-    assert KeeneticDisconnectedClientsSensor(coordinator, entry).native_value == 2
-    extenders = KeeneticExtenderCountSensor(coordinator, entry)
-    assert extenders.native_value == 2
-    assert extenders.extra_state_attributes["connected"] == 1
 
 
 @pytest.mark.parametrize(
@@ -433,12 +346,6 @@ def test_client_detail_sensors_pin_online_offline_and_counter_edges() -> None:
     assert KeeneticClientConnectionTypeSensor(missing, entry, mac, "Laptop").native_value == "unknown"
     assert KeeneticClientWifiModeSensor(missing, entry, mac, "Laptop").native_value is None
 
-
-def test_doh_uri_redaction_handles_private_and_invalid_shapes() -> None:
-    assert _redact_doh_uri("https://user:pass@example.test/private/id?token=secret") == "https://example.test/"
-    assert _redact_doh_uri("https://example.test:8443/path") == "https://example.test:8443/"
-    assert _redact_doh_uri("") == ""
-    assert _redact_doh_uri("https://[bad") == ""
 
 
 def test_device_info_helpers_pin_configuration_urls_and_fallbacks() -> None:
@@ -581,7 +488,6 @@ def test_entity_base_classes_pin_device_info_lookup_and_availability() -> None:
     assert client.hostname == "Laptop"
     assert client.is_connected is True
     assert client.device_info["name"] == "Laptop (Router)"
-    assert client._client_fingerprint({"last-seen": 1, "uptime": 2, "name": "Laptop"}) == {"name": "Laptop"}
 
     coordinator.data["clients"] = [{"mac": "aa:bb:cc:dd:ee:ff", "hostname": "host.local"}]
     assert client.hostname == "host.local"
@@ -769,35 +675,3 @@ async def test_wan_network_vpn_wifi_domain_branches_pin_router_shapes() -> None:
         "interface Wireguard0 up",
         "system configuration save",
     ]
-
-
-async def test_dns_proxy_status_handles_collapsed_doh_and_latches_missing_endpoint() -> None:
-    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
-    client._rci_get = AsyncMock(
-        return_value={
-            "proxy-status": [
-                {
-                    "proxy-name": "Proxy",
-                    "proxy-config": "https://dns.example/doh",
-                    # 30 + 10 NX answers of 100 sent: under half -> degraded.
-                    "proxy-stat": "8.8.8.8 53 100 30 10 20ms 30ms 1",
-                    "proxy-https": {
-                        "server-https": {"uri": "https://nextdns.io/private-id?x=1"}
-                    },
-                },
-                "ignored",
-            ]
-        }
-    )
-
-    result = await client.async_get_dns_proxy_status()
-
-    assert result["status"] == "degraded"
-    assert result["doh_server_count"] == 1
-    assert result["failed_requests"] == 60
-    assert result["proxies"][0]["configured_doh_uris"] == ["https://nextdns.io/"]
-
-    client._rci_get = AsyncMock(side_effect=aiohttp.ClientError("404 missing"))
-    assert await client.async_get_dns_proxy_status() == {}
-    assert client._dns_proxy_supported is False
-    assert await client.async_get_dns_proxy_status() == {}

@@ -77,7 +77,6 @@ async def _started_client(*responses: _Response) -> tuple[KeeneticClient, _Sessi
     [
         ("async_get_system_info", [_Response({"hostname": "router"})], ()),
         ("async_get_clients", [_Response({"host": [{"mac": "aa:bb:cc:00:00:01"}]})], ()),
-        ("async_get_dns_proxy_status", [_Response({"proxy-status": []})], ()),
         ("async_get_ping_check_status", [_Response({"pingcheck": []})], ()),
         ("async_start_firmware_update", [_Response({"ndw": {"components": "base"}}), _Response({}), _Response({}, status=204)], ()),
     ],

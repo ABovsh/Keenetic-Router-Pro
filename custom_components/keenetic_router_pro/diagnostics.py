@@ -211,9 +211,7 @@ _CAPABILITY_ATTRS = {
     "rci_batch": "_rci_batch_supported",
     "mws_member": "_mws_member_supported",
     "crypto_map": "_crypto_map_supported",
-    "ipsec_diagnostics": "_ipsec_diagnostics_supported",
     "ping_check": "_ping_check_supported",
-    "dns_proxy": "_dns_proxy_supported",
     "ndns": "_ndns_supported",
 }
 

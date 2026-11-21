@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 
 import pytest
 
@@ -11,14 +10,12 @@ from conftest import TEST_HOST, TEST_PASSWORD, TEST_USERNAME
 
 from custom_components.keenetic_router_pro.api import KeeneticApiError, KeeneticClient
 from custom_components.keenetic_router_pro.api.constants import _RCI_PARSE_ERROR_RE
-from custom_components.keenetic_router_pro.api.parsers.ipsec import parse_ipsec_vici_diagnostics
 from custom_components.keenetic_router_pro.api.parsers.wan import _extract_ip_from_value
 from custom_components.keenetic_router_pro.coordinator_parts.enrichment import _first_stat_int
 from custom_components.keenetic_router_pro.coordinator_parts.derived import (
     build_clients_by_mac,
     counter_rate_bytes_per_second,
 )
-from custom_components.keenetic_router_pro.coordinator_parts.oom import advance_oom_state
 from custom_components.keenetic_router_pro.utils import (
     coerce_float,
     coerce_seconds,
@@ -103,15 +100,6 @@ def test_ping_check_single_profile_dict_not_dropped() -> None:
     assert result  # observations extracted, not silently dropped
 
 
-# S301 — recent_matches returns the newest entries
-def test_ipsec_oom_recent_matches_are_newest() -> None:
-    entries = [
-        {"time": f"t{i}", "message": f"IpSec::Vici::Stats: out of memory [E{i}]"}
-        for i in range(9, -1, -1)
-    ]
-    result = parse_ipsec_vici_diagnostics([], entries=entries)
-    assert "E9" in result["recent_matches"][0]
-
 
 # S302 — dict-shaped address payload yields the IP
 def test_extract_ip_handles_dict_shape() -> None:
@@ -131,13 +119,6 @@ def test_first_stat_int_rejects_bool_and_counter_rate_skips_none() -> None:
     assert counter_rate_bytes_per_second(None, 100, 30.0) == 0.0
     assert counter_rate_bytes_per_second(10**9, False, 30.0) == 0.0
 
-
-# S404 — future-dated OOM events are not counted
-def test_oom_future_event_skipped() -> None:
-    state = {"last_seen_iso": None, "last_seen_count": 0, "total": 0}
-    now = datetime(2026, 6, 1, 12, 0, 0)
-    out = advance_oom_state(state, [("Dec 15 10:00:00", "oom")], now=now)
-    assert out["total"] == 0
 
 
 # S405 — duplicate MAC keeps the online record

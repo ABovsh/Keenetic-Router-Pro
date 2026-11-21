@@ -10,7 +10,6 @@ import asyncio
 
 import pytest
 
-from custom_components.keenetic_router_pro.api.domains.dns import _redact_doh_uri
 from custom_components.keenetic_router_pro.api.domains.vpn import VpnMixin
 from custom_components.keenetic_router_pro.api.domains.wifi import WifiMixin
 from custom_components.keenetic_router_pro.coordinator import (
@@ -36,20 +35,6 @@ def test_list_or_empty_rejects_non_list(bad) -> None:
 def test_dict_or_empty_rejects_non_dict(bad) -> None:
     assert _dict_or_empty(bad) == {}
 
-
-@pytest.mark.parametrize(
-    ("uri", "expected"),
-    [
-        ("https://dns.google/dns-query", "https://dns.google/"),
-        ("https://dns.nextdns.io/abc123secret", "https://dns.nextdns.io/"),
-        ("https://user:pass@dns.example.com/path?x=1", "https://dns.example.com/"),
-        ("https://dns.example.com:8443/q", "https://dns.example.com:8443/"),
-        ("", ""),
-        (None, ""),
-    ],
-)
-def test_redact_doh_uri_strips_secrets(uri, expected) -> None:
-    assert _redact_doh_uri(uri) == expected
 
 
 # --- VPN tunnel parser must survive malformed firmware shapes ---

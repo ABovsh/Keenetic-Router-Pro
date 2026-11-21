@@ -80,5 +80,3 @@ CLIENT_SENSORS_BASIC = "basic"
 CLIENT_SENSORS_OFF = "off"
 # Existing entries default to "full" so nothing disappears on upgrade.
 DEFAULT_CLIENT_SENSORS = CLIENT_SENSORS_FULL
-# The sensors a "basic" install keeps: presence-adjacent facts, no counters.
-BASIC_CLIENT_SENSOR_KEYS = frozenset({"ip", "uptime", "last_seen", "connection_type"})

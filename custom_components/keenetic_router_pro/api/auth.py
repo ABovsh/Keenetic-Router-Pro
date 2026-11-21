@@ -12,10 +12,19 @@ import logging
 from ..const import DOMAIN
 from ..utils import mask_identifier
 from .constants import RCI_ROOT
-from .errors import KeeneticApiError, KeeneticAuthError
-from .helpers import _cookie_header_from_response, _response_summary
+from .errors import KeeneticApiError, KeeneticAuthError, KeeneticRciBlockedError
+from .helpers import (
+    _cookie_header_from_response,
+    _is_rci_lockdown,
+    _response_summary,
+)
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.api.auth")
+
+_RCI_BLOCKED_MESSAGE = (
+    "The router refuses RCI on this address and port (KeeneticOS 5.1.9+ "
+    "closed access through 127.0.0.1:79); use the router web address instead"
+)
 
 
 class _AuthMixin:
@@ -42,6 +51,8 @@ class _AuthMixin:
             async with asyncio.timeout(self._request_timeout):
                 resp = await self._session.get(url, headers=headers)
                 async with resp:
+                    if _is_rci_lockdown(resp):
+                        raise KeeneticRciBlockedError(_RCI_BLOCKED_MESSAGE)
                     if resp.status in (401, 403):
                         text = await resp.text()
                         raise KeeneticAuthError(
@@ -110,6 +121,8 @@ class _AuthMixin:
                     bool(get_resp.headers.get("Set-Cookie")),
                 )
 
+                if _is_rci_lockdown(get_resp):
+                    raise KeeneticRciBlockedError(_RCI_BLOCKED_MESSAGE)
                 if get_resp.status == 403:
                     # This GET carries no credentials, so a refusal cannot be
                     # a wrong password — the host simply has no /auth
@@ -260,7 +273,8 @@ class _AuthMixin:
                 self._use_challenge_auth = not self._use_challenge_auth
                 try:
                     await self._async_authenticate_configured()
-                except KeeneticAuthError:
+                except KeeneticApiError:
+                    # Latch the other scheme only once it has succeeded.
                     self._use_challenge_auth = not self._use_challenge_auth
                     raise
 

@@ -181,12 +181,9 @@ def test_new_device_listener_skips_tick_after_update_failure(
 
     monkeypatch.setattr(integration, "KeeneticClient", _FakeStartClient)
     monkeypatch.setattr(integration, "KeeneticCoordinator", _FakeListenerCoordinator)
-    monkeypatch.setattr(integration, "async_get_clientsession", lambda hass: "session")
+    monkeypatch.setattr(integration, "async_get_keenetic_session", lambda hass: "session")
     monkeypatch.setattr(
         integration.ir, "async_create_issue", lambda *args, **kwargs: None
-    )
-    monkeypatch.setattr(
-        integration, "_async_migrate_mesh_unique_ids", lambda *a, **k: None
     )
 
     hass = SimpleNamespace(
@@ -232,6 +229,9 @@ class _AlwaysFailingClient:
     _rci_batch_supported: bool | None = False
     _hotspot_subpath_winner: str | None = None
     host = TEST_HOST
+
+    def begin_tick(self) -> None:
+        pass
 
     def clear_tick_cache(self) -> None:
         return None

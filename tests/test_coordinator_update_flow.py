@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from conftest import TEST_HOST, TEST_HOST_ALT, TEST_PASSWORD, TEST_USERNAME
+from conftest import TEST_HOST_ALT
 
 import asyncio
-from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 
@@ -17,7 +16,6 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 from custom_components.keenetic_router_pro.api import KeeneticAuthError, KeeneticClient
 from custom_components.keenetic_router_pro.coordinator import (
     KeeneticCoordinator,
-    _advance_oom_state,
     _merge_clients_with_neighbours,
 )
 from custom_components.keenetic_router_pro.device_tracker import KeeneticClientTracker
@@ -82,16 +80,14 @@ class FakeKeeneticClient:
             "PPPoE0": {"passing": False, "status": "fail", "profile": "default"}
         }
 
+    def begin_tick(self) -> None:
+        pass
+
     def clear_tick_cache(self) -> None:
         pass
 
     async def prefetch_tick(self, tree: dict) -> bool:
         return False
-
-    def _normalize_interfaces(self, interfaces: Any) -> list[dict[str, Any]]:
-        return KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)._normalize_interfaces(
-            interfaces
-        )
 
     async def async_get_system_info(self) -> dict[str, Any]:
         return {"hostname": "router", "uptime": 100}
@@ -132,11 +128,6 @@ class FakeKeeneticClient:
             }
         }
 
-    async def async_get_dns_proxy_status(self) -> dict[str, Any]:
-        return {"status": "ok"}
-
-    async def async_get_ipsec_diagnostics(self) -> dict[str, Any]:
-        return {"status": "ok"}
 
     async def async_get_mesh_nodes(
         self, clients: list[dict[str, Any]] | None = None
@@ -429,8 +420,6 @@ def test_coordinator_fast_refresh_reuses_slow_cached_data_and_rates() -> None:
     first["crypto_maps"]["SITE"]["tx_throughput"] = 8.0
     first["host_policies"] = {"cached": {"policy": "Policy1"}}
     first["ndns"] = {"cached": True}
-    first["dns_proxy"] = {"cached": True}
-    first["ipsec_diagnostics"] = {"cached": True}
     coordinator.data = first
     coordinator._refresh_count = 1
 
@@ -438,13 +427,6 @@ def test_coordinator_fast_refresh_reuses_slow_cached_data_and_rates() -> None:
 
     assert second["host_policies"] == {"cached": {"policy": "Policy1"}}
     assert second["ndns"] == {"cached": True}
-    assert second["dns_proxy"] == {"cached": True}
-    # ipsec_diagnostics gets the in-memory OOM tracker state appended on
-    # every tick (even cached), so the cached payload is preserved but
-    # surfaced alongside ``oom_total`` / ``oom_last_seen`` for sensors.
-    assert second["ipsec_diagnostics"]["cached"] is True
-    assert second["ipsec_diagnostics"]["oom_total"] == 0
-    assert second["ipsec_diagnostics"]["oom_last_seen"] is None
     assert second["new_clients"] == set()
     assert second["wan_interfaces"][0]["rx_throughput"] == pytest.approx(9.0)
     assert second["wan_interfaces"][0]["tx_throughput"] == pytest.approx(11.0)
@@ -631,103 +613,6 @@ def test_coordinator_new_client_detection_normalizes_previous_index_keys() -> No
 
     assert second["new_clients"] == set()
 
-
-def test_coordinator_ignores_invalid_stored_oom_timestamp() -> None:
-    """A corrupt Store timestamp should not crash a coordinator refresh."""
-    client = FakeKeeneticClient()
-
-    async def ipsec_diagnostics() -> dict[str, Any]:
-        return {
-            "events": [
-                ("May 1 12:00:00", "IpSec::Vici::Stats: out of memory"),
-            ]
-        }
-
-    client.async_get_ipsec_diagnostics = ipsec_diagnostics  # type: ignore[assignment]
-    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
-    coordinator._oom_state_loaded = True
-    coordinator._oom_state = {"last_seen_iso": "not-a-timestamp", "total": 4}
-    coordinator._oom_store = None  # type: ignore[assignment]
-
-    data = asyncio.run(coordinator._async_update_data())
-
-    assert data["ipsec_diagnostics"]["oom_total"] == 5
-    assert data["ipsec_diagnostics"]["oom_last_seen"].startswith("202")
-
-
-def test_oom_state_counts_new_events_sharing_last_seen_second() -> None:
-    """Keenetic log timestamps have second precision; overlapping windows can add events in the same second."""
-    state = {
-        "last_seen_iso": "2026-05-01T12:00:00",
-        "last_seen_count": 1,
-        "total": 4,
-    }
-    events = [
-        ("May 1 12:00:00", "IpSec::Vici::Stats: out of memory [0xcffe02a7]"),
-        ("May 1 12:00:00", "IpSec::Vici::Stats: out of memory [0xcffe02a7]"),
-        ("May 1 11:59:59", "IpSec::Vici::Stats: out of memory [0xcffe02a7]"),
-    ]
-
-    next_state = _advance_oom_state(
-        state,
-        events,
-        now=datetime(2026, 5, 1, 12, 1, 0),
-    )
-
-    assert next_state == {
-        "last_seen_iso": "2026-05-01T12:00:00",
-        "last_seen_count": 2,
-        "total": 5,
-    }
-
-
-def test_oom_state_ignores_future_watermark_after_clock_rollback() -> None:
-    """A future stored timestamp must not suppress all newly visible log events."""
-    state = {
-        "last_seen_iso": "2026-06-01T00:00:00",
-        "last_seen_count": 1,
-        "total": 4,
-    }
-    events = [
-        ("May 1 12:00:00", "IpSec::Vici::Stats: out of memory [0xcffe02a7]"),
-    ]
-
-    next_state = _advance_oom_state(
-        state,
-        events,
-        now=datetime(2026, 5, 1, 12, 1, 0),
-    )
-
-    assert next_state == {
-        "last_seen_iso": "2026-05-01T12:00:00",
-        "last_seen_count": 1,
-        "total": 5,
-    }
-
-
-def test_oom_state_tolerates_infinite_corrupt_last_seen_count() -> None:
-    """JSON Store accepts Infinity; treating it as corrupt avoids a refresh crash."""
-    state = {
-        "last_seen_iso": "2026-05-01T12:00:00",
-        "last_seen_count": float("inf"),
-        "total": 4,
-    }
-    events = [
-        ("May 1 12:00:00", "IpSec::Vici::Stats: out of memory [0xcffe02a7]"),
-        ("May 1 12:00:00", "IpSec::Vici::Stats: out of memory [0xcffe02a7]"),
-    ]
-
-    next_state = _advance_oom_state(
-        state,
-        events,
-        now=datetime(2026, 5, 1, 12, 1, 0),
-    )
-
-    assert next_state == {
-        "last_seen_iso": "2026-05-01T12:00:00",
-        "last_seen_count": 2,
-        "total": 5,
-    }
 
 
 def test_coordinator_reuses_preserved_clients_for_mesh_on_fetch_failure() -> None:

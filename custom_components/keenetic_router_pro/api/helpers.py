@@ -85,16 +85,6 @@ def iface_label(iface: dict[str, Any], iface_id: Any = None) -> str:
     )
 
 
-def _as_list(value: Any) -> List[Any]:
-    """Normalize a maybe-single Keenetic entry to a list."""
-    if value is None:
-        return []
-    if isinstance(value, list):
-        return value
-    if isinstance(value, dict):
-        return [value]
-    return []
-
 
 def _cookie_header_from_response(resp: aiohttp.ClientResponse) -> str | None:
     """Extract a Cookie header value from Set-Cookie response header(s).
@@ -115,6 +105,19 @@ def _cookie_header_from_response(resp: aiohttp.ClientResponse) -> str | None:
         if "=" in cookie_kv:
             pairs.append(cookie_kv)
     return "; ".join(pairs) if pairs else None
+
+
+# ``X-Detail`` codes KeeneticOS 5.1.9+ returns when a request reaches the
+# loopback RCI (``127.0.0.1:79``) from anywhere but the router itself.
+_RCI_LOCKDOWN_DETAILS = ("0x1237", "0x1867", "rci-local only")
+
+
+def _is_rci_lockdown(resp: Any) -> bool:
+    """Return True if a 403 is the firmware's port-79 lockdown, not bad creds."""
+    if getattr(resp, "status", None) != 403:
+        return False
+    detail = str(resp.headers.get("X-Detail", "")).lower()
+    return any(code in detail for code in _RCI_LOCKDOWN_DETAILS)
 
 
 def _is_endpoint_missing(err: BaseException) -> bool:
@@ -175,53 +178,6 @@ def _normalize_interfaces(raw: Any) -> List[Dict[str, Any]]:
         return _dict_items(raw)
     return []
 
-
-def _extract_log_entries(data: Any) -> List[dict]:
-    """Return ``[{"time": ..., "message": ...}, ...]`` from a log payload.
-
-    Unlike :func:`_extract_parse_messages`, this preserves the per-record
-    ``time`` field emitted by the router's structured ``show/log``
-    response — required by the coordinator's monotonic OOM counter to
-    dedup events against a persisted last-seen timestamp.
-
-    Robust to nesting depth: a record is recognised by having both a
-    ``message`` (string) and a sibling ``time`` field. Order is preserved
-    in document order, which on Keenetic is newest → oldest.
-    """
-    entries: List[dict] = []
-
-    def _walk(v: Any) -> None:
-        if isinstance(v, dict):
-            msg = v.get("message")
-            # KeeneticOS 5.x nests the text one level down
-            # ({"message": {"level", "message"}, "timestamp", "ident", "id"});
-            # the record's time and source stay on the outer dict.
-            inner = msg if isinstance(msg, dict) and isinstance(msg.get("message"), str) else None
-            text = inner["message"] if inner is not None else msg
-            if isinstance(text, str):
-                entries.append({
-                    "time": v.get("time") or v.get("timestamp"),
-                    "level": v.get("level") or (inner or {}).get("level"),
-                    "module": v.get("module") or v.get("service") or v.get("ident"),
-                    "message": text,
-                    "_id": v.get("id"),
-                })
-                return
-            for nested in v.values():
-                _walk(nested)
-        elif isinstance(v, list):
-            for item in v:
-                _walk(item)
-
-    _walk(data)
-    # KeeneticOS 5.x returns records keyed by ascending id, i.e. oldest first;
-    # callers rely on newest first. Order by id whenever every record has one.
-    ids = [entry["_id"] for entry in entries]
-    if ids and all(isinstance(i, int) and not isinstance(i, bool) for i in ids):
-        entries.sort(key=lambda entry: entry["_id"], reverse=True)
-    for entry in entries:
-        del entry["_id"]
-    return entries
 
 
 def _extract_parse_messages(data: Any) -> List[str]:

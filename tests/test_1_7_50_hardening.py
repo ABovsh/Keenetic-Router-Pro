@@ -180,13 +180,6 @@ def test_count_sensors_use_selected_statistics(
     )
 
 
-def test_extender_count_does_not_create_long_term_statistics() -> None:
-    assignments = _class_assignments(
-        ROOT / "sensor/clients.py", "KeeneticExtenderCountSensor"
-    )
-    assert "_attr_state_class" not in assignments
-
-
 @pytest.mark.parametrize("class_name", ["KeeneticWgRxSensor", "KeeneticWgTxSensor"])
 def test_wireguard_byte_sensors_keep_normal_history(class_name: str) -> None:
     assignments = _class_assignments(ROOT / "sensor/wireguard.py", class_name)

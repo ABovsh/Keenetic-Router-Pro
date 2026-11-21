@@ -23,7 +23,7 @@ def test_wireguard_sensors_use_profile_labels_and_byte_counters() -> None:
             "wireguard": {
                 "profiles": {
                     "Wireguard0": {
-                        "label": "Zurich",
+                        "label": "Office",
                         "uptime": "123.9",
                         "rxbytes": str(2 * 1024 * 1024),
                         "tx": str(3 * 1024 * 1024),
@@ -38,11 +38,11 @@ def test_wireguard_sensors_use_profile_labels_and_byte_counters() -> None:
     tx = KeeneticWgTxSensor(coordinator, entry, "Wireguard0")
 
     assert uptime.unique_id == "entry_123_wg_Wireguard0_uptime"
-    assert uptime.name == "WireGuard Zurich Uptime"
+    assert uptime.name == "WireGuard Office Uptime"
     assert elapsed_seconds(uptime.native_value) == pytest.approx(123, abs=2)
-    assert rx.name == "WireGuard Zurich RX"
+    assert rx.name == "WireGuard Office RX"
     assert rx.native_value == pytest.approx(2.0)
-    assert tx.name == "WireGuard Zurich TX"
+    assert tx.name == "WireGuard Office TX"
     assert tx.native_value == pytest.approx(3.0)
 
 

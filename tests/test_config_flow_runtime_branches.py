@@ -174,7 +174,7 @@ async def test_async_connect_constructs_client_and_returns_identity(monkeypatch)
             return {"Bridge0": {"mac": "11:22:33:44:55:66"}}
 
     monkeypatch.setattr(config_flow, "KeeneticClient", Client)
-    monkeypatch.setattr(config_flow, "async_get_clientsession", lambda hass: "session")
+    monkeypatch.setattr(config_flow, "async_get_keenetic_session", lambda hass: "session")
     flow = KeeneticRouterProConfigFlow()
     flow.hass = SimpleNamespace()
 

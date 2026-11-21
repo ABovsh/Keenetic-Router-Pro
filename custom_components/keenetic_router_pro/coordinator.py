@@ -10,10 +10,10 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
-from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import KeeneticClient
+from .api.helpers import _normalize_interfaces
 from .const import DOMAIN, FAST_SCAN_INTERVAL
 from .utils import is_client_online
 from .coordinator_parts.derived import (
@@ -35,7 +35,6 @@ from .coordinator_parts.fetching import (
     next_backoff_interval,
     ok_or_default,
 )
-from .coordinator_parts.oom import advance_oom_state, local_now
 from .coordinator_parts.payloads import (
     dict_or_empty,
     list_or_empty,
@@ -46,11 +45,9 @@ from .coordinator_parts.refresh import (
     refresh_plan,
     unsupported_batch_paths,
 )
-from .utils import coerce_int, normalize_mac
+from .utils import normalize_mac
 
 
-_OOM_STORE_VERSION = 1
-_advance_oom_state = advance_oom_state
 _dict_or_empty = dict_or_empty
 _list_or_empty = list_or_empty
 _counter_rate_bytes_per_second = counter_rate_bytes_per_second
@@ -59,8 +56,7 @@ _mesh_associations = mesh_associations
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.coordinator")
 
-# ``show/system`` fields behind the CPU-load, RAM and active-connection
-# sensors. Republished on the medium tier only (see _async_update_data_unlocked).
+# ``show/system`` fields behind the CPU-load and RAM sensors. Republished on the medium tier only (see _async_update_data_unlocked).
 _GAUGE_KEYS = (
     "cpu_load",
     "cpuload",
@@ -70,8 +66,6 @@ _GAUGE_KEYS = (
     "mem",
     "memtotal",
     "memfree",
-    "conntotal",
-    "connfree",
 )
 
 _VERSION_CACHE_KEYS = (
@@ -107,6 +101,9 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # user wants no client data at all, ``show/ip/hotspot`` — the largest
         # payload of the tick by a wide margin — is not worth fetching.
         self.needs_client_data = True
+        # Policy assignments and labels exist only for the policy selectors,
+        # one per tracked client. Setup clears this for an entry without any.
+        self.needs_policies = True
         # One-shot request to fetch host policies on the next tick even if
         # the slow tier is skipped. Set by write-entities (policy select)
         # right after a router-side change so the UI doesn't wait up to a
@@ -129,6 +126,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # ``request_update_check``. Same pending/token pair as above.
         self._update_check_pending = False
         self._update_check_token = 0
+        # One-shot mesh read (membership and node firmware) for a mesh
+        # firmware install polling its progress. Same pending/token pair.
+        self._mesh_refresh_pending = False
+        self._mesh_refresh_token = 0
         # Consecutive transient critical-fetch failures tolerated so far. A
         # one-off ``system_info`` / ``interfaces`` timeout keeps the last-known
         # snapshot instead of flipping every entity unavailable; reset on the
@@ -142,25 +143,6 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Optional fetch families can fail while the coordinator itself stays
         # healthy. Keep a short grace window, then mark only that source stale.
         self._source_failure_streaks: dict[str, int] = {}
-        # Per-config-entry persistent OOM tracker. The Store key is
-        # derived from the API host so two routers on the same HA
-        # instance keep their counters independent. Schema:
-        #   {"last_seen_iso": "2026-05-27T17:33:48", "last_seen_count": 1, "total": 42}
-        host = getattr(client, "host", None) or "unknown"
-        self._oom_store: Store = Store(
-            hass,
-            _OOM_STORE_VERSION,
-            f"{DOMAIN}_vici_oom_{host}.json",
-        )
-        self._oom_state: dict[str, Any] = {
-            "last_seen_iso": None,
-            "last_seen_count": 0,
-            "total": 0,
-        }
-        self._oom_state_loaded = False
-        self._oom_state_dirty = False
-        self._oom_save_backoff_ticks = 0
-        self._oom_save_retry_after = 0
 
     def _source_is_fresh(self, name: str, *, attempted: bool, failed: bool) -> bool:
         """Track freshness for a tiered optional source by attempted refreshes."""
@@ -193,20 +175,28 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._update_check_pending = True
         self._update_check_token += 1
 
+    def request_mesh_refresh(self) -> None:
+        """Read mesh membership and node firmware on the next tick."""
+        self._mesh_refresh_pending = True
+        self._mesh_refresh_token += 1
+
     def request_full_refresh(self) -> None:
         """Force every fetch tier to run on the next refresh tick."""
         self._full_refresh_pending = True
         self._full_refresh_token += 1
 
-    async def async_request_refresh(self) -> None:
-        """Arm a one-shot all-tier refresh, then run HA's debounced refresh.
+    async def async_request_refresh(self, *, full: bool = True) -> None:
+        """Run HA's debounced refresh, by default with every tier armed.
 
         Every caller in this integration is a write entity confirming a
-        command it just sent to the router, and the values those entities
-        read (Wi-Fi/VPN/WAN state, crypto maps, mesh nodes, firmware
-        version) live outside the fast tier.
+        command it just sent to the router, and the values most of them read
+        (Wi-Fi/VPN/WAN state, crypto maps, firmware version) live outside the
+        fast tier. A caller that already requested the sources it changed
+        (``request_host_policies_refresh``, ``request_mesh_refresh``) passes
+        ``full=False``; the tick then also runs whatever tiers are due.
         """
-        self.request_full_refresh()
+        if full:
+            self.request_full_refresh()
         await super().async_request_refresh()
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -237,9 +227,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         code expects, and the next tick simply retries them.
         """
         sem = asyncio.Semaphore(4)
-        # Reset any tick cache from a prior refresh; stage 0 below will
-        # repopulate it from a fresh composite POST.
-        self.client.clear_tick_cache()
+        # Start this refresh's tick scope: stage 0 below repopulates the
+        # prefetch cache, and concurrent stage-1 reads of one endpoint share
+        # a single request until the ``finally`` block ends the scope.
+        self.client.begin_tick()
 
         async def _bounded(coro):
             async with sem:
@@ -306,6 +297,16 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         medium_refresh = plan.medium_refresh
         slow_refresh = plan.slow_refresh
         very_slow_refresh = plan.very_slow_refresh
+        # Mesh discovery finds extenders in the client list and the router's
+        # connect/disconnect events diff it, so an entry without client
+        # entities still reads it on the slow (mesh) tier and reuses that
+        # read in between.
+        pending_mesh_refresh = getattr(self, "_mesh_refresh_pending", False)
+        pending_mesh_refresh_token = getattr(self, "_mesh_refresh_token", 0)
+        mesh_refresh = slow_refresh or pending_mesh_refresh
+        if not needs_clients and mesh_refresh:
+            needs_clients = True
+        clients_reused = not needs_clients
         # Site-to-site IPsec state now comes from ``show/ipsec`` (stroke
         # path), which is OOM-safe — verified by burst-testing 90+
         # rapid calls produce zero ``IpSec::Vici::Stats: out of memory``
@@ -321,7 +322,8 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # for the slow tier.
         pending_host_policies = getattr(self, "_host_policies_refresh_pending", False)
         pending_host_policies_token = getattr(self, "_host_policies_refresh_token", 0)
-        host_policies_refresh = slow_refresh or pending_host_policies
+        needs_policies = getattr(self, "needs_policies", True)
+        host_policies_refresh = needs_policies and (slow_refresh or pending_host_policies)
 
         # Precompute the cached fallbacks for skipped slow-tick fetches
         # outside the gather() call so the fast tick doesn't rebuild
@@ -357,6 +359,8 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     unsupported=unsupported_batch_paths(self.client),
                     include_mesh=getattr(self.client, "_mws_member_supported", None)
                     is True,
+                    mesh_refresh=mesh_refresh,
+                    update_check=update_check_refresh,
                 )
                 try:
                     await self.client.prefetch_tick(batch_tree)
@@ -364,7 +368,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     raise
                 except Exception as err:  # noqa: BLE001 — best-effort prefetch
                     _LOGGER.debug("RCI prefetch failed (continuing per-call): %s", err)
-                    self.client.clear_tick_cache()
+                    self.client.begin_tick()
 
             # ---------- Stage 1: independent fetches ----------
             # Mesh nodes intentionally moved to stage 1.5 below so we can
@@ -389,22 +393,18 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ndns_info,
                 ping_check_status,
                 crypto_maps,
-                dns_proxy,
-                ipsec_diagnostics,
             ) = await asyncio.gather(
                 _bounded(self.client.async_get_system_info()),
                 _bounded(self.client.async_get_current_version_info()) if very_slow_refresh else _resolve(_cached_version),
                 _bounded(self.client.async_get_available_version_info()) if update_check_refresh else _resolve(_cached_version_available),
                 _bounded(self.client.async_get_interfaces()),
-                _bounded(self.client.async_get_clients()) if needs_clients else _resolve([]),
+                _bounded(self.client.async_get_clients()) if needs_clients else _resolve(_prev.get("clients", [])),
                 _bounded(self.client.async_get_ip_neighbours()),
                 _bounded(self.client.async_get_host_policies()) if host_policies_refresh else _resolve(_prev.get("host_policies", {})),
-                _bounded(self.client.async_get_policies()) if very_slow_refresh else _resolve(_prev.get("policies", {})),
+                _bounded(self.client.async_get_policies()) if very_slow_refresh and needs_policies else _resolve(_prev.get("policies", {})),
                 _bounded(self.client.async_get_ndns_info()) if very_slow_refresh else _resolve(_prev.get("ndns", {})),
                 _bounded(self.client.async_get_ping_check_status()),
                 _bounded(self.client.async_get_ipsec_status()) if ipsec_status_refresh else _resolve(_prev.get("crypto_maps", {})),
-                _bounded(self.client.async_get_dns_proxy_status()) if very_slow_refresh else _resolve(_prev.get("dns_proxy", {})),
-                _bounded(self.client.async_get_ipsec_diagnostics()) if very_slow_refresh else _resolve(_prev.get("ipsec_diagnostics", {})),
                 return_exceptions=True,
             )
 
@@ -428,7 +428,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             # Stage 1.5: mesh nodes — needs ``clients`` already fetched so
             # the fallback path can reuse it instead of re-fetching.
-            if slow_refresh:
+            if mesh_refresh:
                 try:
                     mesh_nodes = await _bounded(
                         self.client.async_get_mesh_nodes(clients=clients)
@@ -439,7 +439,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     mesh_nodes = err
             else:
                 mesh_nodes = _prev.get("mesh_nodes", [])
-            mesh_nodes_failed = slow_refresh and isinstance(mesh_nodes, BaseException)
+            mesh_nodes_failed = mesh_refresh and isinstance(mesh_nodes, BaseException)
 
             # Critical fetches default to the previous snapshot, not an empty
             # shape, so a tolerated transient failure (see the grace-window
@@ -459,13 +459,13 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # the API layer now raises instead of returning MAC-keyed
             # fallback nodes (which used to flip mesh unique_ids).
             mesh_nodes = _ok("mesh_nodes", mesh_nodes, _prev.get("mesh_nodes", []))
-            if slow_refresh and not mesh_nodes_failed and isinstance(mesh_nodes, list):
+            if mesh_refresh and not mesh_nodes_failed and isinstance(mesh_nodes, list):
                 mesh_nodes = carry_firmware_available(
                     mesh_nodes, _prev.get("mesh_nodes")
                 )
             mesh_nodes_fresh = self._source_is_fresh(
                 "mesh_nodes",
-                attempted=slow_refresh,
+                attempted=mesh_refresh,
                 failed=mesh_nodes_failed,
             )
             # On a transient fetch failure keep the previous snapshot — an
@@ -519,112 +519,6 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 }
             else:
                 crypto_maps = _prev.get("crypto_maps", {})
-            # DNS proxy is diagnostic-only and intentionally slow-cadence;
-            # routers without the endpoint should not warn every refresh.
-            # A transient failure keeps the previous snapshot (an empty one
-            # read as "unknown" for a whole 15-minute tier); repeated failures
-            # mark the source stale through ``dns_proxy_fresh``.
-            dns_proxy_fresh = self._source_is_fresh(
-                "dns_proxy",
-                attempted=very_slow_refresh,
-                failed=very_slow_refresh and isinstance(dns_proxy, BaseException),
-            )
-            dns_proxy = dict_or_empty(
-                _ok("dns_proxy", dns_proxy, _prev.get("dns_proxy", {}), silent=True)
-            )
-            # IPsec diagnostics read recent router log lines on the same
-            # very-slow cadence as DNS diagnostics. Missing log access is
-            # non-critical and should not affect normal polling.
-            ipsec_diagnostics = dict_or_empty(
-                _ok(
-                    "ipsec_diagnostics",
-                    ipsec_diagnostics,
-                    _prev.get("ipsec_diagnostics", {}),
-                    silent=True,
-                )
-            )
-            # Monotonic OOM counter — persists across HA restarts via Store,
-            # dedups against the per-event router timestamp so each OOM is
-            # counted exactly once even when polling windows overlap. The
-            # `total` value powers the TOTAL_INCREASING sensor, which lets
-            # HA Statistics derive per-hour / per-day rates and produce
-            # bar-chart "when did problems happen" graphs.
-            if not getattr(self, "_oom_state_loaded", False):
-                if not hasattr(self, "_oom_state"):
-                    self._oom_state = {
-                        "last_seen_iso": None,
-                        "last_seen_count": 0,
-                        "total": 0,
-                    }
-                store = getattr(self, "_oom_store", None)
-                stored = None
-                # A failed load must NOT mark the state loaded: the counter
-                # would stay at 0 for the whole session and the next OOM event
-                # would save that 0 over the real persisted total. Retry on the
-                # next tick instead — a busy .storage/ at boot is transient.
-                loaded = store is None
-                if store is not None:
-                    try:
-                        stored = await store.async_load()
-                        loaded = True
-                    except (OSError, ValueError, TypeError) as err:
-                        _LOGGER.debug("OOM Store load failed: %s — retrying next tick", err)
-                if isinstance(stored, dict):
-                    self._oom_state = {
-                        "last_seen_iso": stored.get("last_seen_iso"),
-                        "last_seen_count": coerce_int(
-                            stored.get("last_seen_count"), 0
-                        ),
-                        "total": coerce_int(stored.get("total"), 0),
-                    }
-                self._oom_state_loaded = loaded
-
-            events = (
-                ipsec_diagnostics.get("events")
-                if very_slow_refresh and ipsec_diagnostics
-                else None
-            )
-            # Advancing on an unloaded state would count up from 0 and then
-            # persist that over the real total. Skip the tick; the events are
-            # still in the router log when the load succeeds.
-            if events and self._oom_state_loaded:
-                next_oom_state = advance_oom_state(
-                    self._oom_state, events, now=local_now()
-                )
-                if next_oom_state != self._oom_state:
-                    self._oom_state = next_oom_state
-                    self._oom_state_dirty = True
-                    self._oom_save_retry_after = 0
-            if getattr(self, "_oom_state_dirty", False) and self._oom_state_loaded:
-                store = getattr(self, "_oom_store", None)
-                retry_after = getattr(self, "_oom_save_retry_after", 0)
-                if retry_after > 0:
-                    self._oom_save_retry_after = retry_after - 1
-                elif store is not None:
-                    try:
-                        await store.async_save(self._oom_state)
-                    except (OSError, TypeError) as err:
-                        delay = min(
-                            max(1, getattr(self, "_oom_save_backoff_ticks", 0) * 2),
-                            15,
-                        )
-                        self._oom_save_backoff_ticks = delay
-                        self._oom_save_retry_after = delay - 1
-                        _LOGGER.debug(
-                            "OOM Store save failed: %s — retrying in %s tick(s)",
-                            err,
-                            delay,
-                        )
-                    else:
-                        self._oom_state_dirty = False
-                        self._oom_save_backoff_ticks = 0
-                        self._oom_save_retry_after = 0
-
-            # Copy before mutating: on non-very-slow ticks this is the SAME
-            # dict object as the currently-published self.data snapshot.
-            ipsec_diagnostics = dict(ipsec_diagnostics)
-            ipsec_diagnostics["oom_total"] = self._oom_state["total"]
-            ipsec_diagnostics["oom_last_seen"] = self._oom_state.get("last_seen_iso")
 
             # Handle critical fetch failures. If the router is unreachable,
             # auth has expired, or the RCI surface is down, ``system_info``
@@ -695,7 +589,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # fanning out extra router calls. Medium ticks refresh WAN and
             # interface stats, while the slow/very-slow tiers continue to
             # govern the larger diagnostic groups.
-            iface_list = self.client._normalize_interfaces(interfaces)
+            iface_list = _normalize_interfaces(interfaces)
             iface_fp = tuple(
                 (i.get("id"), i.get("type"), i.get("link"), i.get("state"))
                 for i in iface_list
@@ -863,7 +757,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     ipsec_status_refresh and not crypto_maps_failed,
                 )
 
-            if slow_refresh:
+            if mesh_refresh:
                 mesh_associations_data = mesh_associations(mesh_nodes)
                 mesh_nodes_by_cid = {
                     (n.get("cid") or n.get("id")): n
@@ -921,7 +815,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # On the very first tick every client looks like an arrival; the
             # integration has simply never seen this network before.
             first_tick = not self.data
-            if clients_stale:
+            if clients_stale or clients_reused:
                 # The hotspot table is the PREVIOUS tick's snapshot, re-merged
                 # with this tick's neighbour data — diffing that invents
                 # arrivals and departures the router never reported.
@@ -977,6 +871,12 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ):
                 self._update_check_pending = False
 
+            if (
+                pending_mesh_refresh
+                and self._mesh_refresh_token == pending_mesh_refresh_token
+            ):
+                self._mesh_refresh_pending = False
+
             self._refresh_count += 1
             return {
                 "system": merged_system,
@@ -1013,9 +913,6 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "_iface_fingerprint": iface_fp,
                 "crypto_maps": crypto_maps,
                 "crypto_maps_fresh": crypto_maps_fresh,
-                "dns_proxy": dns_proxy,
-                "dns_proxy_fresh": dns_proxy_fresh,
-                "ipsec_diagnostics": ipsec_diagnostics,
                 "new_clients": new_macs,
                 "online_clients": online_macs,
                 "connected_clients": connected_macs,

@@ -137,24 +137,12 @@ def test_last_seen_is_fixed_for_the_whole_offline_spell() -> None:
 
 
 def test_low_value_counters_keep_no_statistics() -> None:
-    from custom_components.keenetic_router_pro.sensor.clients import (
-        KeeneticDisconnectedClientsSensor,
-    )
-    from custom_components.keenetic_router_pro.sensor.dns import (
-        KeeneticDnsProxyFailedRequestsSensor,
-    )
-    from custom_components.keenetic_router_pro.sensor.ipsec import (
-        KeeneticIpsecViciOomTotalSensor,
-    )
     from custom_components.keenetic_router_pro.sensor.traffic import (
         KeeneticLanRxSensor,
         KeeneticLanTxSensor,
     )
 
     for cls in (
-        KeeneticDisconnectedClientsSensor,
-        KeeneticDnsProxyFailedRequestsSensor,
-        KeeneticIpsecViciOomTotalSensor,
         KeeneticLanRxSensor,
         KeeneticLanTxSensor,
     ):
@@ -187,9 +175,6 @@ def test_wireguard_counters_keep_normal_history_for_all_profiles() -> None:
 
 
 def test_duplicate_and_static_entities_start_disabled() -> None:
-    from custom_components.keenetic_router_pro.binary_sensor import (
-        KeeneticWanEnabledSensor,
-    )
     from custom_components.keenetic_router_pro.sensor.network import (
         KeeneticPppoeUptimeSensor,
         KeeneticWanInterfaceSensor,
@@ -202,7 +187,6 @@ def test_duplicate_and_static_entities_start_disabled() -> None:
     )
 
     for cls in (
-        KeeneticWanEnabledSensor,
         KeeneticPppoeUptimeSensor,
         KeeneticWanInterfaceSensor,
         KeeneticWanProviderSensor,

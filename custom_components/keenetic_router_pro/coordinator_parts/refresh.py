@@ -61,7 +61,6 @@ _LATCHED_BATCH_PATHS: dict[str, str] = {
     "_ping_check_supported": "show/ping-check",
     "_crypto_map_supported": "show/ipsec",
     "_ndns_supported": "show/ndns",
-    "_dns_proxy_supported": "show/dns-proxy",
 }
 
 
@@ -83,6 +82,8 @@ def build_batch_tree(
     needs_clients: bool = True,
     unsupported: frozenset[str] = frozenset(),
     include_mesh: bool = False,
+    mesh_refresh: bool | None = None,
+    update_check: bool | None = None,
 ) -> dict[str, Any]:
     """Build the composite RCI tree requested at the start of a tick.
 
@@ -92,8 +93,14 @@ def build_batch_tree(
 
     ``unsupported`` names paths the router already refused (see
     ``unsupported_batch_paths``). ``include_mesh`` adds ``show/mws/member`` on
-    the slow tier once the controller is known to serve it.
+    the slow tier once the controller is known to serve it. ``mesh_refresh``
+    and ``update_check`` override the plan when a write requested that read
+    off schedule, so the batch carries it instead of a separate GET.
     """
+    if mesh_refresh is None:
+        mesh_refresh = plan.slow_refresh
+    if update_check is None:
+        update_check = plan.update_check_refresh
     batch_tree: dict[str, Any] = {}
 
     def add(path: str) -> None:
@@ -115,12 +122,11 @@ def build_batch_tree(
     add("show/ping-check")
     if plan.ipsec_status_refresh:
         add("show/ipsec")
-    if plan.slow_refresh and include_mesh:
+    if mesh_refresh and include_mesh:
         add("show/mws/member")
     if plan.very_slow_refresh:
         add("show/version")
         add("show/ndns")
-        add("show/dns-proxy")
-    if plan.update_check_refresh:
+    if update_check:
         add("components/check-update")
     return batch_tree

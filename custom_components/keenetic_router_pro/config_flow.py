@@ -23,7 +23,6 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import AbortFlow, FlowResult
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers import selector
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.service_info.ssdp import SsdpServiceInfo
 from homeassistant.helpers.device_registry import format_mac
 
@@ -31,8 +30,10 @@ from .api import (
     KeeneticApiError,
     KeeneticAuthError,
     KeeneticClient,
+    KeeneticRciBlockedError,
     normalize_connection_target,
 )
+from .http_session import async_get_keenetic_session
 from .const import (
     DOMAIN,
     DEFAULT_PORT,
@@ -44,7 +45,6 @@ from .const import (
     CONF_USE_CHALLENGE_AUTH,
 )
 from .const import (
-    BASIC_CLIENT_SENSOR_KEYS,  # noqa: F401  (re-exported for platform gating)
     CLIENT_SENSORS_BASIC,
     CLIENT_SENSORS_FULL,
     CLIENT_SENSORS_OFF,
@@ -70,7 +70,7 @@ _CONNECTION_MODE_SELECTOR = selector.SelectSelector(
             ),
             selector.SelectOptionDict(
                 value=CONNECTION_MODE_KEENDNS_PROTECTED,
-                label="KeenDNS protected web app",
+                label="KeenDNS protected web app (KeeneticOS 5.1.8 and older)",
             ),
         ],
         mode=selector.SelectSelectorMode.DROPDOWN,
@@ -344,7 +344,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, data: dict[str, Any]
     ) -> tuple[KeeneticClient, dict[str, Any], dict[str, Any]]:
         """Connect to the router and return client plus core identity data."""
-        session = async_get_clientsession(self.hass)
+        session = async_get_keenetic_session(self.hass)
         client = KeeneticClient(
             host=data[CONF_HOST],
             username=data[CONF_USERNAME],
@@ -374,6 +374,8 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """
         try:
             await self._async_connect(new_data)
+        except KeeneticRciBlockedError:
+            return {"base": "rci_blocked"}
         except KeeneticAuthError:
             return {"base": "invalid_auth"}
         except KeeneticApiError:
@@ -546,6 +548,8 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except AbortFlow:
                 # "Already configured" must abort cleanly, not show "unknown".
                 raise
+            except KeeneticRciBlockedError:
+                errors["base"] = "rci_blocked"
             except KeeneticAuthError:
                 errors["base"] = "invalid_auth"
             except KeeneticApiError:
@@ -815,7 +819,7 @@ class KeeneticOptionsFlow(config_entries.OptionsFlow):
         available_clients: list[dict[str, Any]] = []
         if client is None:
             data = self._config_entry.data
-            session = async_get_clientsession(self.hass)
+            session = async_get_keenetic_session(self.hass)
             try:
                 client = KeeneticClient(
                     # .get(): a legacy/damaged entry missing a stored field

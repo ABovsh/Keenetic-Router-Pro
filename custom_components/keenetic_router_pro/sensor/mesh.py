@@ -8,12 +8,12 @@ from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 
-from ..const import FIELD_CONNECTED, LINK_STATE_DOWN, LINK_STATE_UP
+from ..const import FIELD_CONNECTED, LINK_STATE_DOWN
+from .port import PortSensorMixin
 from ..coordinator import KeeneticCoordinator
 from ..entity import ControllerEntity, DeadbandMixin, MeshEntity, UptimeMixin
 from ..utils import coerce_float, coerce_int, coerce_seconds, parse_memory_fraction
 
-_ICON_ETHERNET = "mdi:ethernet"
 
 
 class KeeneticMeshSystemStateSensor(ControllerEntity, SensorEntity):
@@ -174,35 +174,6 @@ class KeeneticMeshClientsSensor(MeshEntity, SensorEntity):
         }
 
 
-class KeeneticMeshLocalIpSensor(MeshEntity, SensorEntity):
-    """Sensor for local IP address of a mesh node."""
-    _attr_has_entity_name = True
-    _attr_name = "IP"
-    _attr_icon = "mdi:ip-network"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(
-        self,
-        coordinator: KeeneticCoordinator,
-        entry: ConfigEntry,
-        node_cid: str,
-        ip_address: str,
-    ) -> None:
-        MeshEntity.__init__(self, coordinator, entry.entry_id, entry.title, node_cid)
-        self._ip_address = ip_address
-
-    @property
-    def unique_id(self) -> str:
-        return self._mesh_unique_id("local_ip_v2")
-
-    @property
-    def native_value(self) -> str | None:
-        node = self._node
-        if node and node.get("ip"):
-            return node.get("ip")
-        return self._ip_address
-
-
 class KeeneticMeshCpuLoadSensor(DeadbandMixin, MeshEntity, SensorEntity):
     """Mesh node CPU load sensor."""
     _attr_has_entity_name = True
@@ -265,45 +236,9 @@ class KeeneticMeshMemorySensor(DeadbandMixin, MeshEntity, SensorEntity):
         return self._apply_deadband(None)
 
 
-class KeeneticMeshFirmwareVersionSensor(MeshEntity, SensorEntity):
-    """Current firmware version sensor for a mesh node."""
-    _attr_has_entity_name = True
-    _attr_translation_key = "mesh_firmware_version"
-    _attr_icon = "mdi:package-variant-closed"
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(self, coordinator: KeeneticCoordinator, entry: ConfigEntry, node_cid: str) -> None:
-        MeshEntity.__init__(self, coordinator, entry.entry_id, entry.title, node_cid)
-
-    @property
-    def unique_id(self) -> str:
-        return self._mesh_unique_id("firmware_version_v2")
-
-    @property
-    def native_value(self) -> str | None:
-        node = self._node
-        if node:
-            return node.get("firmware")
-        return None
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any] | None:
-        node = self._node
-        if not node:
-            return None
-        attrs: dict[str, Any] = {}
-        if node.get("firmware_available"):
-            attrs["firmware_available"] = node["firmware_available"]
-        if node.get("hw_id"):
-            attrs["hardware_id"] = node["hw_id"]
-        if node.get("model"):
-            attrs["model"] = node["model"]
-        return attrs if attrs else None
-
-class KeeneticMeshPortSensor(MeshEntity, SensorEntity):
+class KeeneticMeshPortSensor(PortSensorMixin, MeshEntity, SensorEntity):
     """Individual mesh node port sensor."""
     _attr_has_entity_name = True
-    _attr_icon = _ICON_ETHERNET
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
@@ -318,67 +253,16 @@ class KeeneticMeshPortSensor(MeshEntity, SensorEntity):
         self._port_label = port_label
 
     @property
-    def name(self) -> str:
-        """Return name for the sensor."""
-        return f"Port {self._port_label}"
-
-    @property
     def unique_id(self) -> str:
         """Return unique ID for the sensor."""
         return self._mesh_unique_id(f"port_{self._port_label}_v2")
 
+    def _port_rows(self) -> list[Any]:
+        node = self._node or {}
+        return node.get("port", [])
+
     @property
     def native_value(self) -> str | None:
-        """Return port state."""
-        node = self._node
-        if not node:
+        if not self._node:
             return "unknown"
-
-        ports = node.get("port", [])
-        for port in ports:
-            if not isinstance(port, dict):
-                continue
-            if str(port.get("label")) == self._port_label:
-                return port.get("link", "unknown")
-
-        # Port no longer reported: go unavailable (see ``available``) instead
-        # of publishing a phantom "not_found" state into history.
-        return None
-
-    @property
-    def available(self) -> bool:
-        """Become unavailable when the node no longer reports this port."""
-        return bool(getattr(super(), "available", True)) and self.native_value is not None
-
-    @property
-    def icon(self) -> str:
-        """Return icon based on port state."""
-        state = self.native_value
-        if state == LINK_STATE_UP:
-            return _ICON_ETHERNET
-        if state == LINK_STATE_DOWN:
-            return "mdi:ethernet-off"
-        return _ICON_ETHERNET
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any] | None:
-        """Return additional port attributes."""
-        node = self._node
-        if not node:
-            return None
-
-        ports = node.get("port", [])
-        for port in ports:
-            if not isinstance(port, dict):
-                continue
-            if str(port.get("label")) == self._port_label:
-                attrs = {
-                    "label": port.get("label"),
-                    "appearance": port.get("appearance"),
-                }
-                if port.get("link") == LINK_STATE_UP:
-                    attrs["speed"] = port.get("speed")
-                    attrs["duplex"] = port.get("duplex")
-                return attrs
-
-        return None
+        return super().native_value

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .client import KeeneticClient
-from .errors import KeeneticApiError, KeeneticAuthError
+from .errors import KeeneticApiError, KeeneticAuthError, KeeneticRciBlockedError
 from .helpers import (
     _dict_items,
     _is_endpoint_missing,
@@ -24,6 +24,7 @@ __all__ = [
     "KeeneticApiError",
     "KeeneticAuthError",
     "KeeneticClient",
+    "KeeneticRciBlockedError",
     "KeeneticConnectionTarget",
     "normalize_connection_target",
 ]
