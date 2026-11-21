@@ -41,7 +41,8 @@ async def test_mesh_discovery_receives_the_client_list_with_client_data_off() ->
     await _tick(coordinator, 0)
 
     assert client.calls.get("clients", 0) == 1
-    assert client.mesh_inputs and client.mesh_inputs[0]
+    assert client.mesh_inputs
+    assert client.mesh_inputs[0]
 
 
 async def test_client_list_is_read_on_the_slow_tier_only() -> None:
