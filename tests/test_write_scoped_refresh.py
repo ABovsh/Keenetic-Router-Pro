@@ -18,6 +18,7 @@ import pytest
 import custom_components.keenetic_router_pro.update as update_module
 from custom_components.keenetic_router_pro.coordinator import KeeneticCoordinator
 from custom_components.keenetic_router_pro.coordinator_parts.refresh import (
+    PendingRefreshes,
     build_batch_tree,
     refresh_plan,
 )
@@ -250,7 +251,12 @@ def test_batch_tree_carries_the_requested_mesh_and_update_check_paths() -> None:
     assert "mws" not in plain.get("show", {})
     assert "components" not in plain
 
-    scoped = build_batch_tree(fast, include_mesh=True, mesh_refresh=True, update_check=True)
+    scoped_plan = refresh_plan(
+        first_refresh=False,
+        refresh_count=1,
+        pending=PendingRefreshes(mesh=1, update_check_pending=True, update_check_token=1),
+    )
+    scoped = build_batch_tree(scoped_plan, include_mesh=True)
     assert "member" in scoped["show"]["mws"]
     assert "check-update" in scoped["components"]
 

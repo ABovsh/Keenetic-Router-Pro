@@ -201,7 +201,8 @@ def test_batch_tree_skips_the_client_tree_when_nothing_consumes_it() -> None:
     full = build_batch_tree(plan)
     assert "hotspot" in full["show"]["ip"]
 
-    lean = build_batch_tree(plan, needs_clients=False)
+    lean_plan = refresh_plan(first_refresh=False, refresh_count=1, needs_clients=False)
+    lean = build_batch_tree(lean_plan)
     assert "hotspot" not in lean.get("show", {}).get("ip", {})
     # Everything the router entities need is still requested.
     assert "system" in lean["show"]

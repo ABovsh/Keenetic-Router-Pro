@@ -168,29 +168,17 @@ def unsupported_batch_paths(client: Any) -> frozenset[str]:
 def build_batch_tree(
     plan: RefreshPlan,
     *,
-    needs_clients: bool = True,
     unsupported: frozenset[str] = frozenset(),
     include_mesh: bool = False,
-    mesh_refresh: bool | None = None,
-    update_check: bool | None = None,
 ) -> dict[str, Any]:
     """Build the composite RCI tree from due sources and capability latches."""
-    due = plan.due
-    # Keep explicit overrides for callers constructing a batch directly.
-    for source, override in (
-        (Source.MESH_MEMBERS, mesh_refresh),
-        (Source.CHECK_UPDATE, update_check),
-    ):
-        if override is not None:
-            due = due | {source} if override else due - {source}
-    if not needs_clients:
-        due -= {Source.HOSTS}
-    if not include_mesh:
-        due -= {Source.MESH_MEMBERS}
-
     batch_tree: dict[str, Any] = {}
     for source, path in _BATCH_PATHS.items():
-        if source not in due or path in unsupported:
+        if (
+            source not in plan.due
+            or path in unsupported
+            or (source is Source.MESH_MEMBERS and not include_mesh)
+        ):
             continue
         node = batch_tree
         for part in path.split("/"):

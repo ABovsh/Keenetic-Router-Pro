@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable, Coroutine
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 
@@ -14,18 +16,10 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from .api import KeeneticClient
 from .api.helpers import _normalize_interfaces
 from .const import DOMAIN, FAST_SCAN_INTERVAL
-from .utils import is_client_online
 from .coordinator_parts.derived import (
-    build_clients_by_mac,
     carry_firmware_available,
     counter_rate_bytes_per_second,
     mesh_associations,
-    real_client_macs,
-)
-from .coordinator_parts.enrichment import (
-    carry_wan_samples,
-    enrich_crypto_maps,
-    enrich_wan_interfaces,
 )
 from .coordinator_parts.fetching import (
     FetchFailure,
@@ -41,12 +35,18 @@ from .coordinator_parts.payloads import (
 )
 from .coordinator_parts.refresh import (
     PendingRefreshes,
+    RefreshPlan,
     Source,
     build_batch_tree,
     refresh_plan,
     unsupported_batch_paths,
 )
-from .utils import normalize_mac
+from .coordinator_parts.snapshot import (
+    _InterfaceData,
+    _PrimaryData,
+    _assemble_snapshot,
+    _merge_system,
+)
 
 
 _dict_or_empty = dict_or_empty
@@ -57,17 +57,27 @@ _mesh_associations = mesh_associations
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.coordinator")
 
-# ``show/system`` fields behind the CPU-load and RAM sensors. Republished on the medium tier only (see _async_update_data_unlocked).
-_GAUGE_KEYS = (
-    "cpu_load",
-    "cpuload",
-    "cpu",
-    "cpu-utilization",
-    "memory",
-    "mem",
-    "memtotal",
-    "memfree",
-)
+
+_Bounded = Callable[[Coroutine[Any, Any, Any]], Awaitable[Any]]
+
+
+@dataclass(slots=True)
+class _PrimaryReads:
+    """Independent reads before the mesh and payload resolution stages."""
+
+    system: Any
+    version: Any
+    version_available: Any
+    interfaces: Any
+    clients: Any
+    ip_neighbours: Any
+    host_policies: Any
+    policies: Any
+    ndns_info: Any
+    ping_check_status: Any
+    crypto_maps: Any
+    clients_stale: bool = False
+
 
 _VERSION_CACHE_KEYS = (
     "title",
@@ -212,23 +222,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return await self._async_update_data_unlocked()
 
     async def _async_update_data_unlocked(self) -> dict[str, Any]:
-        """Fetch all router data with bounded, staged parallelism.
-
-        The Keenetic RCI endpoint is a single HTTP surface served by a
-        modest router CPU, so we cap concurrency at 4 in-flight calls
-        with a semaphore. Calls are split into dependency stages:
-
-          * Stage 1 has no dependencies and runs first.
-          * Stage 2 needs ``interfaces`` from stage 1.
-          * Stage 3 performs CPU-only WAN enrichment from already fetched
-            interface statistics.
-
-        Within each stage we use ``asyncio.gather`` with
-        ``return_exceptions=True`` so a single failing endpoint can no
-        longer kill the whole update tick — failed fetches are
-        normalised to safe defaults of the same shape the downstream
-        code expects, and the next tick simply retries them.
-        """
+        """Plan, read, and publish one tick while the update lock is held."""
         plan = refresh_plan(
             first_refresh=self.data is None,
             refresh_count=self._refresh_count,
@@ -263,33 +257,18 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # a single request until the ``finally`` block ends the scope.
         self.client.begin_tick()
 
-        async def _bounded(coro):
+        async def bounded(coro: Coroutine[Any, Any, Any]) -> Any:
             async with sem:
                 return await coro
 
-        _prev = self.data or {}
-        _prev_sys = _prev.get("system") or {}
-
-        async def _resolve(value: Any) -> Any:
-            return value
+        previous = self.data or {}
+        previous_sys = previous.get("system") or {}
 
         # Collected per-tick so we can emit a single warning instead of
         # silently defaulting every failing fetch at debug level.
         failed_fetches: list[FetchFailure] = []
 
-        def _ok(name, value, default, silent: bool = False):
-            """Replace failed fetches with a safe default of the right shape.
-
-            Failures are recorded in ``failed_fetches`` so the tick can
-            emit a single aggregated warning at the end of stage 2, and
-            so critical fetches can be checked for failure explicitly.
-
-            Pass ``silent=True`` for endpoints that legitimately may
-            not exist on all firmwares (e.g. optional components like
-            IPsec site-to-site). The default is still substituted but
-            the failure is not added to the warning aggregate — the
-            api layer is expected to debug-log the reason itself.
-            """
+        def ok(name: str, value: Any, default: Any, *, silent: bool = False) -> Any:
             result = ok_or_default(
                 name,
                 value,
@@ -297,204 +276,17 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 failed_fetches,
                 silent=silent,
             )
-            if isinstance(value, BaseException) and not isinstance(
-                value, asyncio.CancelledError
-            ):
+            if isinstance(value, BaseException) and not isinstance(value, asyncio.CancelledError):
                 _LOGGER.debug("Coordinator fetch %s failed: %s", name, value)
             return result
 
-        clients_reused = Source.HOSTS not in due
-        mesh_due = Source.MESH_MEMBERS in due
-        ipsec_due = Source.IPSEC in due
-        interface_stats_due = Source.INTERFACE_STATS in due
-        if Source.VERSION not in due:
-            _cached_version = {
-                k: _prev_sys.get(k) for k in _VERSION_CACHE_KEYS if k in _prev_sys
-            }
-
-        # ---------- Stage 0: prefetch composite RCI tree ----------
-        # One POST /rci/ replaces up to a dozen GETs on routers whose
-        # firmware supports the composite endpoint (confirmed on KN-1811
-        # 5.00.C.x). On routers that don't support it, ``prefetch_tick``
-        # returns False and stage-1 falls back to per-call GETs as before.
-        # The cache is read by ``_rci_get`` (params-less only) and cleared
-        # in the ``finally`` block below.
         try:
-            if self.client._rci_batch_supported is not False:
-                batch_tree = build_batch_tree(
-                    plan,
-                    unsupported=unsupported_batch_paths(self.client),
-                    include_mesh=getattr(self.client, "_mws_member_supported", None)
-                    is True,
-                )
-                try:
-                    await self.client.prefetch_tick(batch_tree)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as err:  # noqa: BLE001 — best-effort prefetch
-                    _LOGGER.debug("RCI prefetch failed (continuing per-call): %s", err)
-                    self.client.begin_tick()
+            reads = await self._read_primary(
+                plan, previous, previous_sys, bounded, failed_fetches, ok
+            )
+            mesh_nodes = await self._read_mesh(due, reads.clients, previous, bounded)
+            primary = self._resolve_primary(due, reads, mesh_nodes, previous, previous_sys, ok)
 
-            # ---------- Stage 1: independent fetches ----------
-            # Mesh nodes intentionally moved to stage 1.5 below so we can
-            # share the already-fetched ``clients`` list with the mesh
-            # fallback path (avoids a duplicate ``show/ip/hotspot`` round-trip
-            # on routers that have extenders).
-            (
-                system,
-                version,
-                version_available,
-                interfaces,
-                clients,
-                ip_neighbours,
-                host_policies,
-                policies,
-                ndns_info,
-                ping_check_status,
-                crypto_maps,
-            ) = await asyncio.gather(
-                _bounded(self.client.async_get_system_info()),
-                _bounded(self.client.async_get_current_version_info())
-                if Source.VERSION in due else _resolve(_cached_version),
-                _bounded(self.client.async_get_available_version_info())
-                if Source.CHECK_UPDATE in due else _resolve(None),
-                _bounded(self.client.async_get_interfaces()),
-                _bounded(self.client.async_get_clients())
-                if not clients_reused else _resolve(_prev.get("clients", [])),
-                _bounded(self.client.async_get_ip_neighbours()),
-                _bounded(self.client.async_get_host_policies())
-                if Source.HOST_POLICIES in due else _resolve(_prev.get("host_policies", {})),
-                _bounded(self.client.async_get_policies())
-                if Source.POLICIES in due else _resolve(_prev.get("policies", {})),
-                _bounded(self.client.async_get_ndns_info())
-                if Source.NDNS in due else _resolve(_prev.get("ndns", {})),
-                _bounded(self.client.async_get_ping_check_status()),
-                _bounded(self.client.async_get_ipsec_status())
-                if ipsec_due else _resolve(_prev.get("crypto_maps", {})),
-                return_exceptions=True,
-            )
-
-            clients_stale = False
-            if isinstance(clients, asyncio.CancelledError):
-                raise clients
-            if isinstance(clients, BaseException):
-                previous_clients = _prev.get("clients", [])
-                if previous_clients:
-                    failed_fetches.append(FetchFailure("clients", clients))
-                    _LOGGER.debug(
-                        "Coordinator fetch clients failed; preserving previous client snapshot: %s",
-                        clients,
-                    )
-                    clients = previous_clients
-                    clients_stale = True
-                else:
-                    clients = _ok("clients", clients, [])
-            else:
-                clients = _ok("clients", clients, [])
-
-            # Stage 1.5: mesh nodes — needs ``clients`` already fetched so
-            # the fallback path can reuse it instead of re-fetching.
-            if mesh_due:
-                try:
-                    mesh_nodes = await _bounded(
-                        self.client.async_get_mesh_nodes(clients=clients)
-                    )
-                except asyncio.CancelledError:
-                    raise
-                except Exception as err:  # noqa: BLE001
-                    mesh_nodes = err
-            else:
-                mesh_nodes = _prev.get("mesh_nodes", [])
-            mesh_nodes_failed = mesh_due and isinstance(mesh_nodes, BaseException)
-
-            # Critical fetches default to the previous snapshot, not an empty
-            # shape, so a tolerated transient failure (see the grace-window
-            # check below) keeps the last-known values instead of blanking
-            # every entity for one tick. ``_prev_sys`` is the previously
-            # published merged system dict; ``version`` re-merges on top below.
-            system = _ok("system_info", system, dict(_prev_sys))
-            version = _ok("current_version", version, {})
-            available_version_failed = isinstance(version_available, BaseException)
-            version_available = _ok("available_version", version_available, None)
-            interfaces = _ok(
-                "interfaces", interfaces, dict(_prev.get("interfaces", {}))
-            )
-            ip_neighbours = _ok("ip_neighbours", ip_neighbours, [], silent=True)
-            clients = merge_clients_with_neighbours(clients, ip_neighbours)
-            # On a transient mesh fetch failure keep the previous snapshot:
-            # an empty default would flap every mesh entity unavailable, and
-            # the API layer now raises instead of returning MAC-keyed
-            # fallback nodes (which used to flip mesh unique_ids).
-            mesh_nodes = _ok("mesh_nodes", mesh_nodes, _prev.get("mesh_nodes", []))
-            if mesh_due and not mesh_nodes_failed and isinstance(mesh_nodes, list):
-                mesh_nodes = carry_firmware_available(
-                    mesh_nodes, _prev.get("mesh_nodes")
-                )
-            mesh_nodes_fresh = self._source_is_fresh(
-                "mesh_nodes",
-                attempted=mesh_due,
-                failed=mesh_nodes_failed,
-            )
-            # On a transient fetch failure keep the previous snapshot — an
-            # empty default would flip every policy select to "Default"
-            # until the next slow-tier refetch.
-            host_policies_failed = isinstance(host_policies, BaseException)
-            host_policies = dict_or_empty(
-                _ok("host_policies", host_policies, _prev.get("host_policies", {}))
-            )
-            policies = dict_or_empty(
-                _ok("policies", policies, _prev.get("policies", {}))
-            )
-            ndns_info = dict_or_empty(_ok("ndns_info", ndns_info, {}))
-            # Read every tick now: one failed read must not drop every WAN
-            # back to the link heuristic, so keep the last answer.
-            ping_check_failed = isinstance(ping_check_status, BaseException)
-            ping_check_status = dict_or_empty(
-                _ok(
-                    "ping_check_status",
-                    ping_check_status,
-                    _prev.get("ping_check_status", {}),
-                )
-            )
-            # Crypto maps: not every router/firmware has the IPsec component,
-            # so this endpoint may be unavailable. Mark the fetch as silent
-            # so an absent endpoint doesn't produce a warning on every tick —
-            # the api layer already debug-logs the reason. When the slow tier
-            # is skipped, keep the previous snapshot instead of rebuilding it.
-            crypto_maps_failed = ipsec_due and isinstance(crypto_maps, BaseException)
-            crypto_maps_fresh = self._source_is_fresh(
-                "crypto_maps",
-                attempted=ipsec_due,
-                failed=crypto_maps_failed,
-            )
-            if ipsec_due:
-                # On a transient fetch failure keep the previous snapshot —
-                # an empty default would flap every IPsec entity unavailable
-                # and wipe tunnel state for one tick.
-                crypto_maps = {
-                    name: dict(cmap)
-                    for name, cmap in dict_or_empty(
-                        _ok(
-                            "crypto_maps",
-                            crypto_maps,
-                            _prev.get("crypto_maps", {}),
-                            silent=True,
-                        )
-                    ).items()
-                    if isinstance(cmap, dict)
-                }
-            else:
-                crypto_maps = _prev.get("crypto_maps", {})
-
-            # Handle critical fetch failures. If the router is unreachable,
-            # auth has expired, or the RCI surface is down, ``system_info``
-            # and ``interfaces`` are the two calls that MUST succeed — every
-            # downstream computation depends on them. A single transient drop
-            # (e.g. a router-side ``/rci/show/system`` timeout), however, is
-            # tolerated for a few ticks: we keep the last-known snapshot (the
-            # ``_ok`` defaults above already substituted it) rather than flip
-            # every entity unavailable. Auth failures bypass the grace window;
-            # a sustained outage exhausts it and then raises ``UpdateFailed``.
             critical_decision = evaluate_critical_failures(
                 failed_fetches,
                 have_previous_data=self.data is not None,
@@ -504,11 +296,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if critical_decision.action == "auth":
                 raise ConfigEntryAuthFailed(critical_decision.message)
             if critical_decision.action == "fail":
-                # Sustained outage: the grace window is exhausted and this
-                # tick is about to raise UpdateFailed. Stretch the poll
-                # interval so we don't keep hammering a confirmed-down
-                # router every FAST_SCAN_INTERVAL; HA's DataUpdateCoordinator
-                # reschedules from ``self.update_interval`` on its next pass.
+                # Back off after the grace window to reduce load during an outage.
                 self._critical_fail_backoff_count = (
                     getattr(self, "_critical_fail_backoff_count", 0) + 1
                 )
@@ -523,161 +311,16 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # the tick like an exception would — publishing it would flip
             # every WAN/Wi-Fi/port entity to empty/down while staying
             # "available" (ghost-mode update).
-            if not system or not interfaces:
+            if not primary.system or not primary.interfaces:
                 raise UpdateFailed(
                     "Critical router payload empty "
-                    f"(system={bool(system)}, interfaces={bool(interfaces)})"
+                    f"(system={bool(primary.system)}, interfaces={bool(primary.interfaces)})"
                 )
 
-            client_stats = self.client.summarize_client_stats(clients)
+            client_stats = self.client.summarize_client_stats(primary.clients)
+            merged_system = _merge_system(primary, previous_sys, due)
+            links = await self._read_interfaces(due, primary.interfaces, previous, bounded, ok)
 
-            merged_system = {**system, **version}
-            # Router gauges (CPU load, RAM, NAT table) jitter on every fast
-            # tick and were the integration's top recorder writers. They ride
-            # along in the fast ``show/system`` payload, so there is nothing to
-            # save on the wire — publish them on the medium cadence instead.
-            if Source.SYSTEM_GAUGES not in due and _prev_sys:
-                for gauge_key in _GAUGE_KEYS:
-                    if gauge_key in _prev_sys:
-                        merged_system[gauge_key] = _prev_sys[gauge_key]
-                    else:
-                        merged_system.pop(gauge_key, None)
-            if version_available is None:
-                merged_system["release-available"] = _prev_sys.get("release-available")
-                merged_system["fw-update-sandbox"] = _prev_sys.get("fw-update-sandbox")
-                merged_system["fw-update-available"] = _prev_sys.get("fw-update-available")
-            else:
-                merged_system["release-available"] = (
-                    version_available.get("title") or version_available.get("release")
-                )
-                merged_system["fw-update-sandbox"] = version_available.get("sandbox")
-                merged_system["fw-update-available"] = version_available.get(
-                    "update-available", False
-                )
-
-            # ---------- Stage 2: depends on stage-1 `interfaces` ----------
-            # Fast ticks reuse the last published stage-2 snapshot instead of
-            # fanning out extra router calls. Medium ticks refresh WAN and
-            # interface stats, while the slow/very-slow tiers continue to
-            # govern the larger diagnostic groups.
-            iface_list = _normalize_interfaces(interfaces)
-            iface_fp = tuple(
-                (i.get("id"), i.get("type"), i.get("link"), i.get("state"))
-                for i in iface_list
-            )
-            # Rebuild the per-WAN payload EVERY tick: link, address, default
-            # route and ping check are what users alert on, and ``interfaces``
-            # is fetched every tick anyway. This is a
-            # CPU-only transform of the already-fetched ``iface_list``
-            # (``async_get_wan_interfaces`` makes no RCI call when
-            # ``iface_list`` is passed), so it is cheap. It must NOT be
-            # cached on the ``(id, type, link, state)`` interface
-            # fingerprint: that fingerprint excludes the volatile
-            # ``uptime`` / ``ip`` fields, so reusing the cached list froze
-            # every WAN-interface uptime sensor at its value from the last
-            # link flap until the next flap. ``iface_fp`` is still emitted
-            # below for diagnostics/contract consumers.
-            try:
-                wan_interfaces = await _bounded(
-                    self.client.async_get_wan_interfaces(
-                        interfaces=interfaces,
-                        iface_list=iface_list,
-                    )
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception as err:  # noqa: BLE001
-                wan_interfaces = err
-            if interface_stats_due:
-                (
-                    wifi,
-                    wireguard,
-                    vpn_tunnels,
-                    wan_status,
-                    traffic_stats,
-                    port_info,
-                    interface_stats,
-                ) = await asyncio.gather(
-                    _bounded(
-                        self.client.async_get_wifi_networks(
-                            interfaces=interfaces, iface_list=iface_list
-                        )
-                    ),
-                    _bounded(
-                        self.client.async_get_wireguard_status(
-                            interfaces=interfaces, iface_list=iface_list
-                        )
-                    ),
-                    _bounded(
-                        self.client.async_get_vpn_tunnels(
-                            interfaces=interfaces, iface_list=iface_list
-                        )
-                    ),
-                    _bounded(
-                        self.client.async_get_wan_status(
-                            interfaces=interfaces, iface_list=iface_list
-                        )
-                    ),
-                    _bounded(
-                        self.client.async_get_traffic_stats(
-                            interfaces=interfaces, iface_list=iface_list
-                        )
-                    ),
-                    _bounded(self.client.async_get_port_info(interfaces=interfaces)),
-                    _bounded(
-                        self.client.async_get_all_interface_stats(
-                            interfaces=interfaces,
-                            iface_list=iface_list,
-                            wan_interfaces=wan_interfaces
-                            if isinstance(wan_interfaces, list)
-                            else [],
-                        )
-                    ),
-                    return_exceptions=True,
-                )
-            else:
-                wifi = _prev.get("wifi", [])
-                wireguard = _prev.get("wireguard", [])
-                vpn_tunnels = _prev.get("vpn_tunnels", [])
-                wan_status = _prev.get("wan_status", {})
-                traffic_stats = _prev.get("traffic_stats", {})
-                port_info = _prev.get("port_info", [])
-                interface_stats = _prev.get("interface_stats", {})
-
-            interface_stats_failed = isinstance(interface_stats, BaseException)
-            interface_stats_fresh = self._source_is_fresh(
-                "interface_stats",
-                attempted=interface_stats_due,
-                failed=interface_stats_failed,
-            )
-            # On a stage-2 task exception keep the previous snapshot — an
-            # empty default would make every existing entity of that family
-            # unavailable for the tick (same policy as mesh/crypto_maps).
-            wifi = _ok("wifi", wifi, _prev.get("wifi", []))
-            wireguard = _ok("wireguard", wireguard, _prev.get("wireguard", []))
-            vpn_tunnels = _ok("vpn_tunnels", vpn_tunnels, _prev.get("vpn_tunnels", []))
-            wan_status = dict_or_empty(
-                _ok("wan_status", wan_status, _prev.get("wan_status", {}))
-            )
-            wan_interfaces_failed = isinstance(wan_interfaces, BaseException)
-            wan_interfaces = _ok(
-                "wan_interfaces", wan_interfaces, _prev.get("wan_interfaces", [])
-            )
-            traffic_stats = dict_or_empty(
-                _ok("traffic_stats", traffic_stats, _prev.get("traffic_stats", {}))
-            )
-            port_info = list_or_empty(
-                _ok("port_info", port_info, _prev.get("port_info", []))
-            )
-            interface_stats = dict_or_empty(_ok("interface_stats", interface_stats, {}))
-            if interface_stats_failed:
-                interface_stats = _prev.get("interface_stats", {})
-
-            # Emit a single aggregated warning per tick for any non-critical
-            # fetches that fell back to defaults. Keeping this above debug
-            # ensures a user whose router is mostly-working-but-flaky sees
-            # *something* in the default log level instead of silently
-            # getting empty data for the affected entities.
             if failed_fetches:
                 _LOGGER.warning(
                     "Keenetic coordinator: %d fetch(es) failed this tick and "
@@ -686,133 +329,22 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     ", ".join(failure.name for failure in failed_fetches),
                 )
 
-            wan_stats_fresh = interface_stats_due and not interface_stats_failed
-
-            # ---------- WAN enrichment (CPU-only, runs on already-fetched
-            # data — logic unchanged from the sequential implementation) ----------
-            #
-            # We reuse the already-fetched ``interface_stats`` (show/interface/stat
-            # for every interface) instead of firing extra RCI calls. Throughput
-            # is computed as a delta against the previous coordinator tick.
-            if wan_stats_fresh:
-                now_ts = asyncio.get_running_loop().time()
-                wan_interfaces, wan_by_id = enrich_wan_interfaces(
-                    wan_interfaces,
-                    interface_stats,
-                    ping_check_status,
-                    self.data.get("wan_interfaces", []) if self.data else [],
-                    now_ts,
-                )
-            else:
-                # Fresh state, last counter sample: counters and rates are
-                # only re-read on the medium tier.
-                wan_interfaces, wan_by_id = carry_wan_samples(
-                    wan_interfaces,
-                    ping_check_status,
-                    self.data.get("wan_interfaces", []) if self.data else [],
-                )
-
-            # ---------- Crypto map (site-to-site IPsec) enrichment ----------
-            # Same delta pattern as the WAN block above. Counters reset to
-            # zero whenever a phase2 SA rekeys or the tunnel bounces — the
-            # negative-delta clamp keeps throughput sensors from spiking
-            # to absurd negative values on those events.
-            if ipsec_due:
-                now_ts = asyncio.get_running_loop().time()
-                # A failed read re-publishes the previous snapshot, which has
-                # no new sample: carry its rates over instead of computing 0.
-                enrich_crypto_maps(
-                    crypto_maps,
-                    self.data.get("crypto_maps") if self.data else None,
-                    now_ts,
-                    not crypto_maps_failed,
-                )
-
-            if mesh_due:
-                mesh_associations_data = mesh_associations(mesh_nodes)
-                mesh_nodes_by_cid = {
-                    (n.get("cid") or n.get("id")): n
-                    for n in (mesh_nodes if isinstance(mesh_nodes, list) else [])
-                    if isinstance(n, dict) and (n.get("cid") or n.get("id"))
-                }
-            else:
-                mesh_associations_data = _prev.get("mesh_associations", {})
-                mesh_nodes_by_cid = _prev.get("mesh_nodes_by_cid", {})
-
-            # ---------- New-client detection ----------
-            # Build the MAC->client index once and reuse it for both the
-            # new-MAC diff and the output dict. Previously this walked
-            # ``clients`` three times and called ``normalize_mac`` 2N+ times
-            # per tick; one walk now suffices and the index is the same
-            # object that ends up in the coordinator data dict.
-            clients_by_mac = build_clients_by_mac(clients)
-            # Neighbour-only ghosts (ARP/ND records with no hotspot client)
-            # stay in the index for enrichment but never count as "new
-            # devices" — a host that was merely pinged is not a connection.
-            current_macs = real_client_macs(clients_by_mac)
-
-            previous_by_mac = (
-                self.data.get("clients_by_mac", {}) if self.data else {}
+            # Carried WAN values alone are insufficient to detect a fresh outage.
+            wan_observation_fresh = (
+                critical_decision.action == "ok"
+                and not links.wan_interfaces_failed
+                and not primary.ping_check_failed
             )
-            if isinstance(previous_by_mac, dict) and previous_by_mac:
-                previous_macs = {
-                    mac
-                    for mac in (normalize_mac(key) for key in previous_by_mac.keys())
-                    if mac
-                }
-            else:
-                previous_macs = {
-                    normalize_mac(c.get("mac"))
-                    for c in (self.data.get("clients", []) if self.data else [])
-                    if isinstance(c, dict) and c.get("mac")
-                }
-                previous_macs.discard("")
-            new_macs = current_macs - previous_macs
-
-            # ---------- Connect / disconnect / failover events ----------
-            # Automations otherwise have to trigger on entity state and poll
-            # their way to "who just left". These diffs cost one set operation
-            # a tick and nothing at all while the network is quiet.
-            online_macs = {
-                mac
-                for mac, client in clients_by_mac.items()
-                if isinstance(client, dict) and is_client_online(client)
-            }
-            previous_online = (
-                self.data.get("online_clients", set()) if self.data else set()
-            )
-            if not isinstance(previous_online, set):
-                previous_online = set()
-            # On the very first tick every client looks like an arrival; the
-            # integration has simply never seen this network before.
-            first_tick = not self.data
-            if clients_stale or clients_reused:
-                # The hotspot table is the PREVIOUS tick's snapshot, re-merged
-                # with this tick's neighbour data — diffing that invents
-                # arrivals and departures the router never reported.
-                # ClientEntity.available and the device tracker already refuse
-                # to trust a stale tick. Keeping the previous online set also
-                # stops the next healthy tick from firing a phantom reconnect.
-                online_macs = set(previous_online)
-                connected_macs: set[str] = set()
-                disconnected_macs: set[str] = set()
-            else:
-                connected_macs = set() if first_tick else online_macs - previous_online
-                disconnected_macs = set() if first_tick else previous_online - online_macs
-
-            active_wan = next(
-                (
-                    wan_id
-                    for wan_id, wan in wan_by_id.items()
-                    if isinstance(wan, dict) and wan.get("defaultgw")
-                ),
-                None,
-            )
-            previous_wan = self.data.get("active_wan") if self.data else None
-            wan_failover = (
-                {"from": previous_wan, "to": active_wan}
-                if not first_tick and active_wan != previous_wan
-                else None
+            snapshot = _assemble_snapshot(
+                primary,
+                links,
+                due=due,
+                previous=self.data or {},
+                cached=previous,
+                merged_system=merged_system,
+                client_stats=client_stats,
+                wan_observation_fresh=wan_observation_fresh,
+                clock=asyncio.get_running_loop().time,
             )
 
             # A tick that reaches this point did not raise UpdateFailed, so
@@ -822,7 +354,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._critical_fail_backoff_count = 0
                 self.update_interval = timedelta(seconds=FAST_SCAN_INTERVAL)
 
-            if host_policies_failed:
+            if primary.host_policies_failed:
                 self._host_policies_refresh_pending = True
             elif (
                 Source.HOST_POLICIES in due
@@ -833,71 +365,345 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 # so its confirming fetch runs on the very next tick.
                 self._host_policies_refresh_pending = False
 
-            if (
-                pending.full is not None
-                and self._full_refresh_token == pending.full
-            ):
+            if pending.full is not None and self._full_refresh_token == pending.full:
                 self._full_refresh_pending = False
 
             if Source.CHECK_UPDATE in due:
                 self._update_check_retry_token = (
-                    pending.update_check_token if available_version_failed else None
+                    pending.update_check_token if primary.available_version_failed else None
                 )
                 if (
-                    not available_version_failed
+                    not primary.available_version_failed
                     and pending.update_check_pending
                     and self._update_check_token == pending.update_check_token
                 ):
                     self._update_check_pending = False
 
-            if (
-                pending.mesh is not None
-                and self._mesh_refresh_token == pending.mesh
-            ):
+            if pending.mesh is not None and self._mesh_refresh_token == pending.mesh:
                 self._mesh_refresh_pending = False
 
             self._refresh_count += 1
-            return {
-                "system": merged_system,
-                "traffic_stats": traffic_stats,
-                "interfaces": interfaces,
-                "wifi": wifi,
-                "wireguard": wireguard,
-                "vpn_tunnels": vpn_tunnels,
-                "clients": clients,
-                "clients_stale": clients_stale,
-                "clients_by_mac": clients_by_mac,
-                "wan_status": wan_status,
-                "wan_interfaces": wan_interfaces,
-                # Preserved data keeps dashboards stable, but is not evidence
-                # that a provider is still down during an unreadable poll.
-                "wan_observation_fresh": (
-                    critical_decision.action == "ok"
-                    and not wan_interfaces_failed
-                    and not ping_check_failed
-                ),
-                "wan_by_id": wan_by_id,
-                "mesh_nodes": mesh_nodes,
-                "mesh_nodes_fresh": mesh_nodes_fresh,
-                "mesh_associations": mesh_associations_data,
-                "mesh_nodes_by_cid": mesh_nodes_by_cid,
-                "interface_stats": interface_stats,
-                "interface_stats_fresh": interface_stats_fresh,
-                "client_stats": client_stats,
-                "ndns": ndns_info,
-                "host_policies": host_policies,
-                "policies": policies,
-                "port_info": port_info,
-                "ping_check_status": ping_check_status,
-                "_iface_fingerprint": iface_fp,
-                "crypto_maps": crypto_maps,
-                "crypto_maps_fresh": crypto_maps_fresh,
-                "new_clients": new_macs,
-                "online_clients": online_macs,
-                "connected_clients": connected_macs,
-                "disconnected_clients": disconnected_macs,
-                "active_wan": active_wan,
-                "wan_failover": wan_failover,
-            }
+            return snapshot
         finally:
             self.client.clear_tick_cache()
+
+    async def _read_primary(
+        self,
+        plan: RefreshPlan,
+        previous: dict[str, Any],
+        previous_system: dict[str, Any],
+        bounded: _Bounded,
+        failed_fetches: list[FetchFailure],
+        ok: Callable[..., Any],
+    ) -> _PrimaryReads:
+        """Prefetch composite data, then read independent sources."""
+        due = plan.due
+        if Source.VERSION not in due:
+            cached_version = {
+                key: previous_system.get(key)
+                for key in _VERSION_CACHE_KEYS
+                if key in previous_system
+            }
+
+        async def cached(value: Any) -> Any:
+            return value
+
+        # Readers still run independently when composite prefetch is unavailable.
+        if self.client._rci_batch_supported is not False:
+            batch_tree = build_batch_tree(
+                plan,
+                unsupported=unsupported_batch_paths(self.client),
+                include_mesh=getattr(self.client, "_mws_member_supported", None) is True,
+            )
+            try:
+                await self.client.prefetch_tick(batch_tree)
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:  # noqa: BLE001 — best-effort prefetch
+                _LOGGER.debug("RCI prefetch failed (continuing per-call): %s", err)
+                self.client.begin_tick()
+
+        values = await asyncio.gather(
+            bounded(self.client.async_get_system_info()),
+            bounded(self.client.async_get_current_version_info())
+            if Source.VERSION in due
+            else cached(cached_version),
+            bounded(self.client.async_get_available_version_info())
+            if Source.CHECK_UPDATE in due
+            else cached(None),
+            bounded(self.client.async_get_interfaces()),
+            bounded(self.client.async_get_clients())
+            if Source.HOSTS in due
+            else cached(previous.get("clients", [])),
+            bounded(self.client.async_get_ip_neighbours()),
+            bounded(self.client.async_get_host_policies())
+            if Source.HOST_POLICIES in due
+            else cached(previous.get("host_policies", {})),
+            bounded(self.client.async_get_policies())
+            if Source.POLICIES in due
+            else cached(previous.get("policies", {})),
+            bounded(self.client.async_get_ndns_info())
+            if Source.NDNS in due
+            else cached(previous.get("ndns", {})),
+            bounded(self.client.async_get_ping_check_status()),
+            bounded(self.client.async_get_ipsec_status())
+            if Source.IPSEC in due
+            else cached(previous.get("crypto_maps", {})),
+            return_exceptions=True,
+        )
+        reads = _PrimaryReads(*values)
+        # Resolve hosts now so mesh can reuse the hotspot payload.
+        clients = reads.clients
+        if isinstance(clients, asyncio.CancelledError):
+            raise clients
+        if isinstance(clients, BaseException):
+            previous_clients = previous.get("clients", [])
+            if previous_clients:
+                failed_fetches.append(FetchFailure("clients", clients))
+                _LOGGER.debug(
+                    "Coordinator fetch clients failed; preserving previous client snapshot: %s",
+                    clients,
+                )
+                reads.clients = previous_clients
+                reads.clients_stale = True
+                return reads
+        reads.clients = ok("clients", clients, [])
+        return reads
+
+    async def _read_mesh(
+        self,
+        due: frozenset[Source],
+        clients: list[dict[str, Any]],
+        previous: dict[str, Any],
+        bounded: _Bounded,
+    ) -> Any:
+        """Read mesh nodes using the pre-neighbour-merge hotspot snapshot."""
+        if Source.MESH_MEMBERS not in due:
+            return previous.get("mesh_nodes", [])
+        try:
+            return await bounded(self.client.async_get_mesh_nodes(clients=clients))
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:  # noqa: BLE001 — resolved with other tick reads
+            return err
+
+    def _resolve_primary(
+        self,
+        due: frozenset[Source],
+        reads: _PrimaryReads,
+        mesh_nodes: Any,
+        previous: dict[str, Any],
+        previous_system: dict[str, Any],
+        ok: Callable[..., Any],
+    ) -> _PrimaryData:
+        """Resolve failures and record freshness before the dependent reads."""
+        mesh_due = Source.MESH_MEMBERS in due
+        ipsec_due = Source.IPSEC in due
+        mesh_nodes_failed = mesh_due and isinstance(mesh_nodes, BaseException)
+
+        # Critical fetches default to the previous snapshot, not an empty
+        # shape, so a tolerated transient failure (see the grace-window
+        # check below) keeps the last-known values instead of blanking
+        # every entity for one tick. ``previous_system`` is the previously
+        # published merged system dict; ``version`` re-merges on top below.
+        system = ok("system_info", reads.system, dict(previous_system))
+        version = ok("current_version", reads.version, {})
+        available_version_failed = isinstance(reads.version_available, BaseException)
+        version_available = ok("available_version", reads.version_available, None)
+        interfaces = ok("interfaces", reads.interfaces, dict(previous.get("interfaces", {})))
+        ip_neighbours = ok("ip_neighbours", reads.ip_neighbours, [], silent=True)
+        clients = merge_clients_with_neighbours(reads.clients, ip_neighbours)
+        # On a transient mesh fetch failure keep the previous snapshot:
+        # an empty default would flap every mesh entity unavailable, and
+        # the API layer now raises instead of returning MAC-keyed
+        # fallback nodes (which used to flip mesh unique_ids).
+        mesh_nodes = ok("mesh_nodes", mesh_nodes, previous.get("mesh_nodes", []))
+        if mesh_due and not mesh_nodes_failed and isinstance(mesh_nodes, list):
+            mesh_nodes = carry_firmware_available(mesh_nodes, previous.get("mesh_nodes"))
+        mesh_nodes_fresh = self._source_is_fresh(
+            "mesh_nodes",
+            attempted=mesh_due,
+            failed=mesh_nodes_failed,
+        )
+        # On a transient fetch failure keep the previous snapshot — an
+        # empty default would flip every policy select to "Default"
+        # until the next slow-tier refetch.
+        host_policies_failed = isinstance(reads.host_policies, BaseException)
+        host_policies = dict_or_empty(
+            ok("host_policies", reads.host_policies, previous.get("host_policies", {}))
+        )
+        policies = dict_or_empty(ok("policies", reads.policies, previous.get("policies", {})))
+        ndns_info = dict_or_empty(ok("ndns_info", reads.ndns_info, {}))
+        # Read every tick now: one failed read must not drop every WAN
+        # back to the link heuristic, so keep the last answer.
+        ping_check_failed = isinstance(reads.ping_check_status, BaseException)
+        ping_check_status = dict_or_empty(
+            ok(
+                "ping_check_status",
+                reads.ping_check_status,
+                previous.get("ping_check_status", {}),
+            )
+        )
+        # Crypto maps: not every router/firmware has the IPsec component,
+        # so this endpoint may be unavailable. Mark the fetch as silent
+        # so an absent endpoint doesn't produce a warning on every tick —
+        # the api layer already debug-logs the reason. When the slow tier
+        # is skipped, keep the previous snapshot instead of rebuilding it.
+        crypto_maps_failed = ipsec_due and isinstance(reads.crypto_maps, BaseException)
+        crypto_maps_fresh = self._source_is_fresh(
+            "crypto_maps",
+            attempted=ipsec_due,
+            failed=crypto_maps_failed,
+        )
+        if ipsec_due:
+            # On a transient fetch failure keep the previous snapshot —
+            # an empty default would flap every IPsec entity unavailable
+            # and wipe tunnel state for one tick.
+            crypto_maps = {
+                name: dict(cmap)
+                for name, cmap in dict_or_empty(
+                    ok(
+                        "crypto_maps",
+                        reads.crypto_maps,
+                        previous.get("crypto_maps", {}),
+                        silent=True,
+                    )
+                ).items()
+                if isinstance(cmap, dict)
+            }
+        else:
+            crypto_maps = previous.get("crypto_maps", {})
+        return _PrimaryData(
+            system=system,
+            version=version,
+            version_available=version_available,
+            interfaces=interfaces,
+            clients=clients,
+            clients_stale=reads.clients_stale,
+            mesh_nodes=mesh_nodes,
+            mesh_nodes_fresh=mesh_nodes_fresh,
+            host_policies=host_policies,
+            policies=policies,
+            ndns=ndns_info,
+            ping_check_status=ping_check_status,
+            ping_check_failed=ping_check_failed,
+            crypto_maps=crypto_maps,
+            crypto_maps_fresh=crypto_maps_fresh,
+            crypto_maps_failed=crypto_maps_failed,
+            host_policies_failed=host_policies_failed,
+            available_version_failed=available_version_failed,
+        )
+
+    async def _read_interfaces(
+        self,
+        due: frozenset[Source],
+        interfaces: dict[str, Any],
+        previous: dict[str, Any],
+        bounded: _Bounded,
+        ok: Callable[..., Any],
+    ) -> _InterfaceData:
+        """Read interface projections and statistics with one normalized interface list."""
+        interface_stats_due = Source.INTERFACE_STATS in due
+        iface_list = _normalize_interfaces(interfaces)
+        iface_fp = tuple(
+            (i.get("id"), i.get("type"), i.get("link"), i.get("state")) for i in iface_list
+        )
+        # Link, address and uptime can change between statistics samples.
+        # Rebuild WAN state even if the interface fingerprint is unchanged.
+        try:
+            wan_interfaces = await bounded(
+                self.client.async_get_wan_interfaces(
+                    interfaces=interfaces,
+                    iface_list=iface_list,
+                )
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:  # noqa: BLE001
+            wan_interfaces = err
+        if interface_stats_due:
+            (
+                wifi,
+                wireguard,
+                vpn_tunnels,
+                wan_status,
+                traffic_stats,
+                port_info,
+                interface_stats,
+            ) = await asyncio.gather(
+                bounded(
+                    self.client.async_get_wifi_networks(
+                        interfaces=interfaces, iface_list=iface_list
+                    )
+                ),
+                bounded(
+                    self.client.async_get_wireguard_status(
+                        interfaces=interfaces, iface_list=iface_list
+                    )
+                ),
+                bounded(
+                    self.client.async_get_vpn_tunnels(interfaces=interfaces, iface_list=iface_list)
+                ),
+                bounded(
+                    self.client.async_get_wan_status(interfaces=interfaces, iface_list=iface_list)
+                ),
+                bounded(
+                    self.client.async_get_traffic_stats(
+                        interfaces=interfaces, iface_list=iface_list
+                    )
+                ),
+                bounded(self.client.async_get_port_info(interfaces=interfaces)),
+                bounded(
+                    self.client.async_get_all_interface_stats(
+                        interfaces=interfaces,
+                        iface_list=iface_list,
+                        wan_interfaces=wan_interfaces if isinstance(wan_interfaces, list) else [],
+                    )
+                ),
+                return_exceptions=True,
+            )
+        else:
+            wifi = previous.get("wifi", [])
+            wireguard = previous.get("wireguard", [])
+            vpn_tunnels = previous.get("vpn_tunnels", [])
+            wan_status = previous.get("wan_status", {})
+            traffic_stats = previous.get("traffic_stats", {})
+            port_info = previous.get("port_info", [])
+            interface_stats = previous.get("interface_stats", {})
+
+        interface_stats_failed = isinstance(interface_stats, BaseException)
+        interface_stats_fresh = self._source_is_fresh(
+            "interface_stats",
+            attempted=interface_stats_due,
+            failed=interface_stats_failed,
+        )
+        # On a stage-2 task exception keep the previous snapshot — an
+        # empty default would make every existing entity of that family
+        # unavailable for the tick (same policy as mesh/crypto_maps).
+        wifi = ok("wifi", wifi, previous.get("wifi", []))
+        wireguard = ok("wireguard", wireguard, previous.get("wireguard", []))
+        vpn_tunnels = ok("vpn_tunnels", vpn_tunnels, previous.get("vpn_tunnels", []))
+        wan_status = dict_or_empty(ok("wan_status", wan_status, previous.get("wan_status", {})))
+        wan_interfaces_failed = isinstance(wan_interfaces, BaseException)
+        wan_interfaces = ok("wan_interfaces", wan_interfaces, previous.get("wan_interfaces", []))
+        traffic_stats = dict_or_empty(
+            ok("traffic_stats", traffic_stats, previous.get("traffic_stats", {}))
+        )
+        port_info = list_or_empty(ok("port_info", port_info, previous.get("port_info", [])))
+        interface_stats = dict_or_empty(ok("interface_stats", interface_stats, {}))
+        if interface_stats_failed:
+            interface_stats = previous.get("interface_stats", {})
+        return _InterfaceData(
+            fingerprint=iface_fp,
+            wifi=wifi,
+            wireguard=wireguard,
+            vpn_tunnels=vpn_tunnels,
+            wan_status=wan_status,
+            wan_interfaces=wan_interfaces,
+            wan_interfaces_failed=wan_interfaces_failed,
+            traffic_stats=traffic_stats,
+            port_info=port_info,
+            interface_stats=interface_stats,
+            interface_stats_fresh=interface_stats_fresh,
+            interface_stats_failed=interface_stats_failed,
+        )
