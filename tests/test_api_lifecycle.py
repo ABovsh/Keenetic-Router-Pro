@@ -70,6 +70,49 @@ class FakeSession:
         return self.responses.pop(0)
 
 
+@pytest.mark.parametrize("target", ["controller", "mesh_node"])
+async def test_challenge_auth_does_not_follow_post_redirects(
+    target: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A challenge POST redirect must fail without making another request."""
+    challenge = FakeResponse(
+        401, headers={"X-NDM-Challenge": "challenge", "Set-Cookie": "session=abc"}
+    )
+    redirect_body = "private-redirect-body-sentinel"
+    redirect = FakeResponse(
+        307, headers={"Location": "/redirected-auth"}, text=redirect_body
+    )
+    destination = FakeResponse(200)
+
+    class RedirectingSession(FakeSession):
+        async def post(self, url: str, **kwargs: Any) -> FakeResponse:
+            response = await super().post(url, **kwargs)
+            if response is redirect and kwargs.get("allow_redirects", True):
+                return await super().post(response.headers["Location"], **kwargs)
+            return response
+
+    session = RedirectingSession([challenge, redirect, destination])
+    client = KeeneticClient(
+        TEST_HOST, TEST_USERNAME, TEST_PASSWORD, use_challenge_auth=True
+    )
+    client._session = session
+
+    with caplog.at_level("DEBUG"):
+        if target == "controller":
+            with pytest.raises(KeeneticApiError, match=r"status=307") as exc:
+                await client._ensure_auth()
+            assert redirect_body not in str(exc.value)
+            assert not client._authenticated
+        else:
+            assert await client._authenticate_to_node("192.0.2.2") is None
+
+    assert [method for method, _, _ in session.calls] == ["GET", "POST"]
+    assert challenge.closed
+    assert redirect.closed
+    assert "307" in caplog.text
+    assert redirect_body not in caplog.text
+
+
 def test_challenge_auth_closes_get_and_post_responses() -> None:
     """NDW2 auth releases both raw /auth responses."""
     get_resp = FakeResponse(

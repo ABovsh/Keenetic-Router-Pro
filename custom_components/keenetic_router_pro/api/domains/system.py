@@ -535,6 +535,7 @@ class SystemMixin:
                     auth_url,
                     json={"login": self._username, "password": response_hash},
                     headers=post_headers,
+                    allow_redirects=False,
                 )
 
             async with asyncio.timeout(self._request_timeout), post_resp:
