@@ -226,7 +226,10 @@ class KeeneticFirmwareUpdate(ControllerEntity, _FirmwareUpdate):
         available = system.get("fw-available") or system.get("release-available")
         current = system.get("title") or system.get("release")
 
-        if system.get("fw-update-available", True):
+        update_available = system.get("fw-update-available", True)
+        if update_available is None:
+            return None
+        if update_available:
             return _reported_latest_version(available, current)
 
         # No update available → return current so HA shows "up to date"

@@ -122,10 +122,12 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # min). Uses the same pending/token pair as the host-policies request.
         self._full_refresh_pending = False
         self._full_refresh_token = 0
-        # One-shot firmware update check (post-install only) — see
-        # ``request_update_check``. Same pending/token pair as above.
+        # Post-install firmware checks, armed by ``request_update_check``.
         self._update_check_pending = False
         self._update_check_token = 0
+        # A failed check defers its generation to the scheduled very-slow
+        # tier. A newer explicit request can still run immediately.
+        self._update_check_retry_token: int | None = None
         # One-shot mesh read (membership and node firmware) for a mesh
         # firmware install polling its progress. Same pending/token pair.
         self._mesh_refresh_pending = False
@@ -276,6 +278,15 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             first_refresh=self.data is None,
             refresh_count=self._refresh_count,
         )
+        pending_update_check = getattr(self, "_update_check_pending", False)
+        pending_update_check_token = getattr(self, "_update_check_token", 0)
+        update_check_retry_token = getattr(self, "_update_check_retry_token", None)
+        # Use the scheduled tier before a full confirming refresh can force it.
+        update_check_refresh = (
+            plan.update_check_refresh
+            or (pending_update_check and pending_update_check_token != update_check_retry_token)
+            or (plan.very_slow_refresh and update_check_retry_token is not None)
+        )
         # Skipping ``show/ip/hotspot`` in the batch tree only helps if the
         # per-domain client fetch is skipped with it — otherwise it just
         # becomes a separate round trip, which is strictly worse.
@@ -313,13 +324,8 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # events. Polled on the same ``slow_refresh`` cadence as WAN
         # traffic stats so throughput graphs have matching resolution.
         ipsec_status_refresh = plan.ipsec_status_refresh
-        # Consume the one-shot host-policies request (policy select just
-        # wrote a change) so the confirming fetch happens on this tick
-        # instead of waiting for the slow tier.
-        # Consumed only after the tick succeeds (see the end of this method):
-        # a tick that raises must keep the one-shot request armed so the
-        # confirming fetch retries on the very next tick instead of waiting
-        # for the slow tier.
+        # Policy selects request a confirming read outside the slow tier.
+        # Failed reads stay pending for the next tick.
         pending_host_policies = getattr(self, "_host_policies_refresh_pending", False)
         pending_host_policies_token = getattr(self, "_host_policies_refresh_token", 0)
         needs_policies = getattr(self, "needs_policies", True)
@@ -330,18 +336,9 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # these dicts every time. On a non-slow tick the previous
         # version info is reused verbatim; on a slow tick these are
         # discarded and the live RCI fetch result is used instead.
-        pending_update_check = getattr(self, "_update_check_pending", False)
-        pending_update_check_token = getattr(self, "_update_check_token", 0)
-        update_check_refresh = plan.update_check_refresh or pending_update_check
         if not very_slow_refresh:
             _cached_version = {
                 k: _prev_sys.get(k) for k in _VERSION_CACHE_KEYS if k in _prev_sys
-            }
-        if not update_check_refresh:
-            _cached_version_available = {
-                "title": _prev_sys.get("release-available"),
-                "sandbox": _prev_sys.get("fw-update-sandbox"),
-                "update-available": _prev_sys.get("fw-update-available", False),
             }
 
         # ---------- Stage 0: prefetch composite RCI tree ----------
@@ -396,7 +393,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ) = await asyncio.gather(
                 _bounded(self.client.async_get_system_info()),
                 _bounded(self.client.async_get_current_version_info()) if very_slow_refresh else _resolve(_cached_version),
-                _bounded(self.client.async_get_available_version_info()) if update_check_refresh else _resolve(_cached_version_available),
+                _bounded(self.client.async_get_available_version_info()) if update_check_refresh else _resolve(None),
                 _bounded(self.client.async_get_interfaces()),
                 _bounded(self.client.async_get_clients()) if needs_clients else _resolve(_prev.get("clients", [])),
                 _bounded(self.client.async_get_ip_neighbours()),
@@ -448,7 +445,8 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # published merged system dict; ``version`` re-merges on top below.
             system = _ok("system_info", system, dict(_prev_sys))
             version = _ok("current_version", version, {})
-            version_available = _ok("available_version", version_available, {})
+            available_version_failed = isinstance(version_available, BaseException)
+            version_available = _ok("available_version", version_available, None)
             interfaces = _ok(
                 "interfaces", interfaces, dict(_prev.get("interfaces", {}))
             )
@@ -471,6 +469,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # On a transient fetch failure keep the previous snapshot — an
             # empty default would flip every policy select to "Default"
             # until the next slow-tier refetch.
+            host_policies_failed = isinstance(host_policies, BaseException)
             host_policies = dict_or_empty(
                 _ok("host_policies", host_policies, _prev.get("host_policies", {}))
             )
@@ -576,13 +575,18 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         merged_system[gauge_key] = _prev_sys[gauge_key]
                     else:
                         merged_system.pop(gauge_key, None)
-            merged_system["release-available"] = (
-                version_available.get("title") or version_available.get("release")
-            )
-            merged_system["fw-update-sandbox"] = version_available.get("sandbox")
-            merged_system["fw-update-available"] = version_available.get(
-                "update-available", False
-            )
+            if version_available is None:
+                merged_system["release-available"] = _prev_sys.get("release-available")
+                merged_system["fw-update-sandbox"] = _prev_sys.get("fw-update-sandbox")
+                merged_system["fw-update-available"] = _prev_sys.get("fw-update-available")
+            else:
+                merged_system["release-available"] = (
+                    version_available.get("title") or version_available.get("release")
+                )
+                merged_system["fw-update-sandbox"] = version_available.get("sandbox")
+                merged_system["fw-update-available"] = version_available.get(
+                    "update-available", False
+                )
 
             # ---------- Stage 2: depends on stage-1 `interfaces` ----------
             # Fast ticks reuse the last published stage-2 snapshot instead of
@@ -851,9 +855,12 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._critical_fail_backoff_count = 0
                 self.update_interval = timedelta(seconds=FAST_SCAN_INTERVAL)
 
-            if (
-                pending_host_policies
-                and self._host_policies_refresh_token == pending_host_policies_token
+            if host_policies_failed:
+                self._host_policies_refresh_pending = True
+            elif (
+                host_policies_refresh
+                and pending_host_policies
+                and getattr(self, "_host_policies_refresh_token", 0) == pending_host_policies_token
             ):
                 # A newer request that arrived mid-tick keeps the flag armed
                 # so its confirming fetch runs on the very next tick.
@@ -865,11 +872,16 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ):
                 self._full_refresh_pending = False
 
-            if (
-                pending_update_check
-                and self._update_check_token == pending_update_check_token
-            ):
-                self._update_check_pending = False
+            if update_check_refresh:
+                self._update_check_retry_token = (
+                    pending_update_check_token if available_version_failed else None
+                )
+                if (
+                    not available_version_failed
+                    and pending_update_check
+                    and self._update_check_token == pending_update_check_token
+                ):
+                    self._update_check_pending = False
 
             if (
                 pending_mesh_refresh
