@@ -204,7 +204,7 @@ def test_coordinator_first_refresh_builds_enriched_payload() -> None:
             "neighbour-leasetime": 129,
         },
     }
-    assert data["new_clients"] == {"aa:bb:cc:dd:ee:ff"}
+    assert data["new_clients"] == set()
     assert data["mesh_nodes"] == client.mesh_nodes
     assert data["wan_interfaces"][0]["id"] == "PPPoE0"
     assert data["wan_interfaces"][0]["internet_access"] is False
@@ -568,9 +568,8 @@ def test_coordinator_new_client_detection_normalizes_mac_formats() -> None:
     client = FakeKeeneticClient()
     coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
 
-    first = asyncio.run(coordinator._async_update_data())
-    first["clients"] = [{"mac": "AA-BB-CC-DD-EE-FF"}]
-    coordinator.data = first
+    client.clients = [{"mac": "AA-BB-CC-DD-EE-FF"}]
+    coordinator.data = asyncio.run(coordinator._async_update_data())
 
     client.clients = [{"mac": "aa:bb:cc:dd:ee:ff", "active": True}]
 
@@ -582,6 +581,10 @@ def test_coordinator_new_client_detection_normalizes_mac_formats() -> None:
 def test_coordinator_new_client_detection_rejects_non_mac_tokens() -> None:
     """IPv6/link-local neighbour tokens and blanks must not become client IDs."""
     client = FakeKeeneticClient()
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+    client.clients = []
+    coordinator.data = asyncio.run(coordinator._async_update_data())
+
     client.clients = [
         {"mac": "fe80::1", "active": True},
         {"mac": "", "active": True},
@@ -591,20 +594,19 @@ def test_coordinator_new_client_detection_rejects_non_mac_tokens() -> None:
         {"mac": "fe80::2", "address": "fe80::2"},
         {"mac": "aa.bb.cc.dd.ee.ff", "address": "192.0.2.55"},
     ]
-    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
-
     data = asyncio.run(coordinator._async_update_data())
 
     assert set(data["clients_by_mac"]) == {"aa:bb:cc:dd:ee:ff"}
     assert data["new_clients"] == {"aa:bb:cc:dd:ee:ff"}
 
 
-def test_coordinator_new_client_detection_normalizes_previous_index_keys() -> None:
-    """A stale uppercase/index format must not emit a duplicate new-device event."""
+def test_coordinator_new_client_detection_uses_history_beyond_the_previous_snapshot() -> None:
+    """A missing previous index entry must not cause a duplicate event."""
     client = FakeKeeneticClient()
     coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
     first = asyncio.run(coordinator._async_update_data())
-    first["clients_by_mac"] = {"AA-BB-CC-DD-EE-FF": first["clients"][0]}
+    first["clients_by_mac"] = {}
+    first["clients"] = []
     coordinator.data = first
 
     client.clients = [{"mac": "aa:bb:cc:dd:ee:ff", "active": True}]

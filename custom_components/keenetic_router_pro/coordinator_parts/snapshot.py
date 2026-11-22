@@ -6,8 +6,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from ..utils import is_client_online, normalize_mac
-from .derived import build_clients_by_mac, mesh_associations, real_client_macs
+from ..utils import is_client_online
+from .derived import build_clients_by_mac, mesh_associations
 from .enrichment import carry_wan_samples, enrich_crypto_maps, enrich_wan_interfaces
 from .refresh import Source
 
@@ -147,17 +147,6 @@ def _assemble_snapshot(
 
     clients_by_mac = build_clients_by_mac(primary.clients)
     hotspot_fresh = Source.HOSTS in due and not primary.clients_stale
-    new_macs: set[str] = set()
-    if hotspot_fresh:
-        # Neighbour-only rows can enrich the index before the hotspot first
-        # reports a client. Exclude them from both sides of the event diff.
-        previous_by_mac = previous.get("clients_by_mac")
-        if not isinstance(previous_by_mac, dict) or not previous_by_mac:
-            previous_by_mac = build_clients_by_mac(previous.get("clients", []))
-        previous_macs = {
-            mac for key in real_client_macs(previous_by_mac) if (mac := normalize_mac(key))
-        }
-        new_macs = real_client_macs(clients_by_mac) - previous_macs
 
     # ---------- Connect / disconnect / failover events ----------
     # Automations otherwise have to trigger on entity state and poll
@@ -232,7 +221,6 @@ def _assemble_snapshot(
         "_iface_fingerprint": links.fingerprint,
         "crypto_maps": primary.crypto_maps,
         "crypto_maps_fresh": primary.crypto_maps_fresh,
-        "new_clients": new_macs,
         "online_clients": online_macs,
         "connected_clients": connected_macs,
         "disconnected_clients": disconnected_macs,

@@ -15,11 +15,12 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import KeeneticClient
 from .api.helpers import _is_endpoint_missing, _normalize_interfaces
-from .const import DOMAIN, FAST_SCAN_INTERVAL
+from .const import DOMAIN, FAST_SCAN_INTERVAL, RCI_HOTSPOT_HOST_PATHS
 from .coordinator_parts.derived import (
     carry_firmware_available,
     counter_rate_bytes_per_second,
     mesh_associations,
+    real_client_macs,
 )
 from .coordinator_parts.fetching import (
     FetchFailure,
@@ -130,6 +131,8 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # user wants no client data at all, ``show/ip/hotspot`` — the largest
         # payload of the tick by a wide margin — is not worth fetching.
         self.needs_client_data = True
+        # None means the first fresh hotspot table has yet to seed the history.
+        self._seen_hotspot_macs: set[str] | None = None
         # Policy assignments and labels exist only for the policy selectors,
         # one per tracked client. Setup clears this for an entry without any.
         self.needs_policies = True
@@ -186,6 +189,21 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         streak = streaks.get(name, 0) + 1
         streaks[name] = streak
         return self.data is not None and streak <= OPTIONAL_FETCH_GRACE_ATTEMPTS
+
+    def _observe_hotspot_clients(self, clients_by_mac: dict[str, dict[str, Any]]) -> set[str]:
+        """Seed the entry's history once, then report newly observed MACs."""
+        # The API also returns an empty list when every endpoint is unsupported.
+        skipped = getattr(self.client, "_hotspot_subpath_skip", ())
+        if all(path in skipped for path in RCI_HOTSPOT_HOST_PATHS):
+            return set()
+        observed = real_client_macs(clients_by_mac)
+        seen = self._seen_hotspot_macs
+        if seen is None:
+            self._seen_hotspot_macs = observed
+            return set()
+        new_macs = observed - seen
+        seen.update(new_macs)
+        return new_macs
 
     def request_host_policies_refresh(self) -> None:
         """Force a live host_policies fetch on the next refresh tick."""
@@ -440,6 +458,11 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     if _SWITCH_READ_FAILURES[source].isdisjoint(failed)
                 }
 
+            snapshot["new_clients"] = (
+                self._observe_hotspot_clients(snapshot["clients_by_mac"])
+                if Source.HOSTS in due and not primary.clients_stale
+                else set()
+            )
             self._refresh_count += 1
             return snapshot
         finally:
@@ -524,6 +547,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if isinstance(clients, asyncio.CancelledError):
             raise clients
         if isinstance(clients, BaseException):
+            reads.clients_stale = True
             previous_clients = previous.get("clients", [])
             if previous_clients:
                 failed_fetches.append(FetchFailure("clients", clients))
@@ -532,7 +556,6 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     clients,
                 )
                 reads.clients = previous_clients
-                reads.clients_stale = True
                 return reads
         reads.clients = ok("clients", clients, [])
         return reads
