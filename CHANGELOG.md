@@ -10,6 +10,10 @@ git log.
 
 ## Unreleased
 
+### 🔧 Changed
+
+- **Wi-Fi, uplink, VPN and IPsec switches confirm a change with fewer router reads.** After a switch command the integration re-reads only what that switch shows (and, for Wi-Fi, connected clients and extenders) instead of every router section; a failed re-read is retried on the next refresh.
+
 ### 🐛 Fixed
 
 - **Firmware updates no longer report a false error while the router or extender installs.** A lost or late reply to the install command means the update has started; Home Assistant shows it as in progress until the device is back and reports success only when the installed version has changed, or a clear error if it returns with the old version or does not return within 15 minutes.

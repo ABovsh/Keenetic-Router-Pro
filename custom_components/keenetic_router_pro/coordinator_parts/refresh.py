@@ -15,6 +15,9 @@ class Source(StrEnum):
     NEIGHBOURS = "neighbours"
     HOSTS = "hosts"
     PING_CHECK = "ping_check"
+    WIFI = "wifi"
+    WAN_STATUS = "wan_status"
+    VPN = "vpn"
     INTERFACE_STATS = "interface_stats"
     SYSTEM_GAUGES = "system_gauges"
     HOST_POLICIES = "host_policies"
@@ -37,6 +40,7 @@ class PendingRefreshes:
     update_check_pending: bool = False
     update_check_token: int = 0
     update_check_retry_token: int | None = None
+    switches: tuple[tuple[Source, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -55,8 +59,11 @@ class RefreshPlan:
     due: frozenset[Source] = field(init=False)
 
     def __post_init__(self, needs_clients: bool, needs_policies: bool) -> None:
+        switches = {source for source, _generation in self.pending.switches}
         due = {Source.SYSTEM, Source.INTERFACES, Source.NEIGHBOURS, Source.PING_CHECK}
-        mesh_due = self.slow_refresh or self.pending.mesh is not None
+        due.update(switches)
+        # Changing an AP can disconnect both its clients and wireless backhaul.
+        mesh_due = self.slow_refresh or self.pending.mesh is not None or Source.WIFI in switches
         if mesh_due:
             due.add(Source.MESH_MEMBERS)
         # Mesh discovery and connect/disconnect events need the hotspot read
@@ -64,7 +71,13 @@ class RefreshPlan:
         if needs_clients or mesh_due:
             due.add(Source.HOSTS)
         if self.medium_refresh:
-            due.update((Source.INTERFACE_STATS, Source.SYSTEM_GAUGES))
+            due.update((
+                Source.INTERFACE_STATS, Source.SYSTEM_GAUGES,
+                Source.WIFI, Source.WAN_STATUS, Source.VPN,
+            ))
+        # A ranked VPN is controlled by a WAN switch, with the same interface payload.
+        if Source.WAN_STATUS in switches:
+            due.add(Source.VPN)
         if needs_policies and (self.slow_refresh or self.pending.host_policies is not None):
             due.add(Source.HOST_POLICIES)
         if self.very_slow_refresh:

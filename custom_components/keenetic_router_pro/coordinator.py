@@ -60,6 +60,15 @@ _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.coordinator")
 
 _Bounded = Callable[[Coroutine[Any, Any, Any]], Awaitable[Any]]
 
+_SWITCH_READ_FAILURES = {
+    Source.WIFI: {"wifi", "clients", "ip_neighbours", "mesh_nodes"},
+    Source.WAN_STATUS: {
+        "wan_interfaces", "wan_status", "ping_check_status", "wireguard", "vpn_tunnels",
+    },
+    Source.VPN: {"wireguard", "vpn_tunnels"},
+    Source.IPSEC: {"crypto_maps"},
+}
+
 
 @dataclass(slots=True)
 class _PrimaryReads:
@@ -125,14 +134,11 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # fetch was in flight (two rapid policy changes within one tick).
         self._host_policies_refresh_token = 0
         # One-shot request to run EVERY fetch tier on the next tick, armed by
-        # ``async_request_refresh`` — the confirming refresh each write entity
-        # fires after a router command. The medium/slow/very-slow tiers carry
-        # their previous snapshot forward on a fast tick, so without this the
-        # switch the user just flipped reads its old value back out of the
-        # cache and snaps back in the UI until the next tier tick (up to ~3
-        # min). Uses the same pending/token pair as the host-policies request.
+        # ``async_request_refresh`` by default. Uses the same pending/token
+        # pair as the host-policies request.
         self._full_refresh_pending = False
         self._full_refresh_token = 0
+        self._switch_refreshes: dict[Source, int] = {}
         # Post-install firmware checks, armed by ``request_update_check``.
         self._update_check_pending = False
         self._update_check_token = 0
@@ -198,15 +204,16 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._full_refresh_pending = True
         self._full_refresh_token += 1
 
+    async def async_request_switch_refresh(self, source: Source) -> None:
+        """Arm a confirmation after a switch command, then request a refresh."""
+        self._switch_refreshes[source] = self._switch_refreshes.get(source, 0) + 1
+        await self.async_request_refresh(full=False)
+
     async def async_request_refresh(self, *, full: bool = True) -> None:
         """Run HA's debounced refresh, by default with every tier armed.
 
-        Every caller in this integration is a write entity confirming a
-        command it just sent to the router, and the values most of them read
-        (Wi-Fi/VPN/WAN state, crypto maps, firmware version) live outside the
-        fast tier. A caller that already requested the sources it changed
-        (``request_host_policies_refresh``, ``request_mesh_refresh``) passes
-        ``full=False``; the tick then also runs whatever tiers are due.
+        Callers that already requested their confirmation sources pass
+        ``full=False``. The tick also runs whichever tiers are scheduled.
         """
         if full:
             self.request_full_refresh()
@@ -247,6 +254,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 update_check_pending=getattr(self, "_update_check_pending", False),
                 update_check_token=getattr(self, "_update_check_token", 0),
                 update_check_retry_token=getattr(self, "_update_check_retry_token", None),
+                switches=tuple(getattr(self, "_switch_refreshes", {}).items()),
             ),
         )
         due = plan.due
@@ -382,6 +390,20 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if pending.mesh is not None and self._mesh_refresh_token == pending.mesh:
                 self._mesh_refresh_pending = False
 
+            if pending.switches and critical_decision.action == "ok":
+                # These optional failures are silent in the fetch log.
+                failed = {failure.name for failure in failed_fetches}
+                if primary.crypto_maps_failed:
+                    failed.add("crypto_maps")
+                if isinstance(reads.ip_neighbours, BaseException):
+                    failed.add("ip_neighbours")
+                for source, generation in pending.switches:
+                    if (
+                        _SWITCH_READ_FAILURES[source].isdisjoint(failed)
+                        and self._switch_refreshes.get(source) == generation
+                    ):
+                        del self._switch_refreshes[source]
+
             self._refresh_count += 1
             return snapshot
         finally:
@@ -398,6 +420,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> _PrimaryReads:
         """Prefetch composite data, then read independent sources."""
         due = plan.due
+        switches = {source for source, _generation in plan.pending.switches}
+        # A successful crypto-map command supersedes a cached endpoint absence.
+        if Source.IPSEC in switches and self.client._crypto_map_supported is False:
+            self.client._crypto_map_supported = None
         if Source.VERSION not in due:
             cached_version = {
                 key: previous_system.get(key)
@@ -445,7 +471,11 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             bounded(self.client.async_get_ndns_info())
             if Source.NDNS in due
             else cached(previous.get("ndns", {})),
-            bounded(self.client.async_get_ping_check_status()),
+            bounded(
+                self.client.async_get_ping_check_status(raise_on_failure=True)
+                if Source.WAN_STATUS in switches
+                else self.client.async_get_ping_check_status()
+            ),
             bounded(self.client.async_get_ipsec_status())
             if Source.IPSEC in due
             else cached(previous.get("crypto_maps", {})),
@@ -621,55 +651,45 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise
         except Exception as err:  # noqa: BLE001
             wan_interfaces = err
-        if interface_stats_due:
-            (
-                wifi,
-                wireguard,
-                vpn_tunnels,
-                wan_status,
-                traffic_stats,
-                port_info,
-                interface_stats,
-            ) = await asyncio.gather(
-                bounded(
-                    self.client.async_get_wifi_networks(
-                        interfaces=interfaces, iface_list=iface_list
-                    )
-                ),
-                bounded(
-                    self.client.async_get_wireguard_status(
-                        interfaces=interfaces, iface_list=iface_list
-                    )
-                ),
-                bounded(
-                    self.client.async_get_vpn_tunnels(interfaces=interfaces, iface_list=iface_list)
-                ),
-                bounded(
-                    self.client.async_get_wan_status(interfaces=interfaces, iface_list=iface_list)
-                ),
-                bounded(
-                    self.client.async_get_traffic_stats(
-                        interfaces=interfaces, iface_list=iface_list
-                    )
-                ),
-                bounded(self.client.async_get_port_info(interfaces=interfaces)),
-                bounded(
-                    self.client.async_get_all_interface_stats(
-                        interfaces=interfaces,
-                        iface_list=iface_list,
-                        wan_interfaces=wan_interfaces if isinstance(wan_interfaces, list) else [],
-                    )
-                ),
-                return_exceptions=True,
+
+        reads: dict[str, Coroutine[Any, Any, Any]] = {}
+        if Source.WIFI in due:
+            reads["wifi"] = self.client.async_get_wifi_networks(
+                interfaces=interfaces, iface_list=iface_list
             )
-        else:
-            wifi = previous.get("wifi", [])
-            wireguard = previous.get("wireguard", [])
-            vpn_tunnels = previous.get("vpn_tunnels", [])
-            wan_status = previous.get("wan_status", {})
-            traffic_stats = previous.get("traffic_stats", {})
-            port_info = previous.get("port_info", [])
-            interface_stats = previous.get("interface_stats", {})
+        if Source.VPN in due:
+            reads["wireguard"] = self.client.async_get_wireguard_status(
+                interfaces=interfaces, iface_list=iface_list
+            )
+            reads["vpn_tunnels"] = self.client.async_get_vpn_tunnels(
+                interfaces=interfaces, iface_list=iface_list
+            )
+        if Source.WAN_STATUS in due:
+            reads["wan_status"] = self.client.async_get_wan_status(
+                interfaces=interfaces, iface_list=iface_list
+            )
+        if interface_stats_due:
+            reads["traffic_stats"] = self.client.async_get_traffic_stats(
+                interfaces=interfaces, iface_list=iface_list
+            )
+            reads["port_info"] = self.client.async_get_port_info(interfaces=interfaces)
+            reads["interface_stats"] = self.client.async_get_all_interface_stats(
+                interfaces=interfaces,
+                iface_list=iface_list,
+                wan_interfaces=wan_interfaces if isinstance(wan_interfaces, list) else [],
+            )
+        results = {}
+        if reads:
+            values = await asyncio.gather(
+                *(bounded(read) for read in reads.values()), return_exceptions=True
+            )
+            results = dict(zip(reads, values))
+
+        def resolve(key: str, default: Any) -> Any:
+            prior = previous.get(key, default)
+            return ok(key, results.get(key, prior), prior)
+
+        interface_stats = results.get("interface_stats", previous.get("interface_stats", {}))
 
         interface_stats_failed = isinstance(interface_stats, BaseException)
         interface_stats_fresh = self._source_is_fresh(
@@ -680,16 +700,14 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # On a stage-2 task exception keep the previous snapshot — an
         # empty default would make every existing entity of that family
         # unavailable for the tick (same policy as mesh/crypto_maps).
-        wifi = ok("wifi", wifi, previous.get("wifi", []))
-        wireguard = ok("wireguard", wireguard, previous.get("wireguard", []))
-        vpn_tunnels = ok("vpn_tunnels", vpn_tunnels, previous.get("vpn_tunnels", []))
-        wan_status = dict_or_empty(ok("wan_status", wan_status, previous.get("wan_status", {})))
+        wifi = resolve("wifi", [])
+        wireguard = resolve("wireguard", [])
+        vpn_tunnels = resolve("vpn_tunnels", [])
+        wan_status = dict_or_empty(resolve("wan_status", {}))
         wan_interfaces_failed = isinstance(wan_interfaces, BaseException)
         wan_interfaces = ok("wan_interfaces", wan_interfaces, previous.get("wan_interfaces", []))
-        traffic_stats = dict_or_empty(
-            ok("traffic_stats", traffic_stats, previous.get("traffic_stats", {}))
-        )
-        port_info = list_or_empty(ok("port_info", port_info, previous.get("port_info", [])))
+        traffic_stats = dict_or_empty(resolve("traffic_stats", {}))
+        port_info = list_or_empty(resolve("port_info", []))
         interface_stats = dict_or_empty(ok("interface_stats", interface_stats, {}))
         if interface_stats_failed:
             interface_stats = previous.get("interface_stats", {})

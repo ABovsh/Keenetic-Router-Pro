@@ -9,7 +9,7 @@ from custom_components.keenetic_router_pro.coordinator_parts.refresh import (
 )
 
 _EVERY_TICK = {Source.SYSTEM, Source.INTERFACES, Source.NEIGHBOURS, Source.PING_CHECK}
-_MEDIUM = {Source.INTERFACE_STATS, Source.SYSTEM_GAUGES}
+_MEDIUM = {Source.INTERFACE_STATS, Source.SYSTEM_GAUGES, Source.WIFI, Source.WAN_STATUS, Source.VPN}
 _SLOW = {Source.IPSEC, Source.MESH_MEMBERS, Source.HOSTS, Source.HOST_POLICIES}
 _VERY_SLOW = {Source.VERSION, Source.NDNS, Source.POLICIES}
 

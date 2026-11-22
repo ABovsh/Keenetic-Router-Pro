@@ -8,6 +8,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .api import KeeneticClient
 from .const import LINK_STATE_UP
 from .coordinator import KeeneticCoordinator
+from .coordinator_parts.refresh import Source
 from .entity import ControllerEntity, CryptoMapEntity, InterfaceEntity, WanEntity
 from .entity_setup import DynamicEntityTracker, register_dynamic_entities
 from .utils import iter_new_items
@@ -215,11 +216,11 @@ class KeeneticWifiSwitch(BaseKeeneticSwitch):
 
     async def async_turn_on(self, **_: Any) -> None:
         await self._client.async_set_wifi_enabled(self._interface_id, True)
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_request_switch_refresh(Source.WIFI)
 
     async def async_turn_off(self, **_: Any) -> None:
         await self._client.async_set_wifi_enabled(self._interface_id, False)
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_request_switch_refresh(Source.WIFI)
 
 
 class KeeneticWanEnabledSwitch(WanEntity, SwitchEntity):
@@ -255,11 +256,11 @@ class KeeneticWanEnabledSwitch(WanEntity, SwitchEntity):
 
     async def async_turn_on(self, **_: Any) -> None:
         await self._client.async_set_interface_enabled(self._wan_id, True)
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_request_switch_refresh(Source.WAN_STATUS)
 
     async def async_turn_off(self, **_: Any) -> None:
         await self._client.async_set_interface_enabled(self._wan_id, False)
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_request_switch_refresh(Source.WAN_STATUS)
 
 
 class KeeneticVpnSwitch(InterfaceEntity, SwitchEntity):
@@ -319,11 +320,11 @@ class KeeneticVpnSwitch(InterfaceEntity, SwitchEntity):
 
     async def async_turn_on(self, **_: Any) -> None:
         await self._client.async_set_interface_enabled(self._iface_id, True)
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_request_switch_refresh(Source.VPN)
 
     async def async_turn_off(self, **_: Any) -> None:
         await self._client.async_set_interface_enabled(self._iface_id, False)
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_request_switch_refresh(Source.VPN)
 
 class KeeneticCryptoMapEnabledSwitch(CryptoMapEntity, SwitchEntity):
     """Enable / disable a site-to-site IPsec `crypto map` tunnel.
@@ -375,10 +376,10 @@ class KeeneticCryptoMapEnabledSwitch(CryptoMapEntity, SwitchEntity):
         await self._client.async_set_crypto_map_enabled(
             self._cmap_name, True
         )
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_request_switch_refresh(Source.IPSEC)
 
     async def async_turn_off(self, **_: Any) -> None:
         await self._client.async_set_crypto_map_enabled(
             self._cmap_name, False
         )
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_request_switch_refresh(Source.IPSEC)
