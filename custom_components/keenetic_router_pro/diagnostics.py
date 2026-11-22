@@ -264,6 +264,13 @@ async def async_get_config_entry_diagnostics(
     }
 
     result = async_redact_data(payload, TO_REDACT)
+    snapshot = result["coordinator_data"]
+    if isinstance(snapshot, dict):
+        for key in ("vpn_tunnels", "wireguard"):
+            section = snapshot.get(key)
+            if isinstance(section, dict) and "profiles" in section:
+                section["profiles"] = async_redact_data(section["profiles"], {"label"})
+
     # "domain" in TO_REDACT scrubs router-network FQDN fields; the entry's
     # own ``.domain`` is the constant integration slug, not user data, and
     # is useful in diagnostics dumps.

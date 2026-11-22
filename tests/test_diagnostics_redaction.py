@@ -110,3 +110,37 @@ async def test_diagnostics_client_repr_does_not_expose_router_host() -> None:
     result = await async_get_config_entry_diagnostics(None, entry)
 
     assert private_host not in result["client"]["repr"]
+
+
+async def test_diagnostics_redacts_vpn_description_copied_into_label() -> None:
+    description = "private-vpn-description-sentinel"
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
+    iface_list = [
+        {"id": "Wireguard0", "type": "Wireguard", "description": description}
+    ]
+    coordinator_data = {
+        "vpn_tunnels": await client.async_get_vpn_tunnels(iface_list=iface_list),
+        "wireguard": await client.async_get_wireguard_status(iface_list=iface_list),
+        "port_info": [{"label": "1"}],
+        "mesh_nodes": [{"port": [{"label": "1"}]}],
+    }
+    entry = SimpleNamespace(
+        title="router",
+        version=1,
+        domain="keenetic_router_pro",
+        source="user",
+        data={},
+        options={},
+        runtime_data=SimpleNamespace(
+            coordinator=SimpleNamespace(data=coordinator_data),
+            client=client,
+        ),
+    )
+
+    result = await async_get_config_entry_diagnostics(None, entry)
+
+    assert description not in json.dumps(result)
+    assert result["coordinator_data"]["port_info"][0]["label"] == "1"
+    assert result["coordinator_data"]["mesh_nodes"][0]["port"][0]["label"] == "1"
+    for key in ("vpn_tunnels", "wireguard"):
+        assert coordinator_data[key]["profiles"]["Wireguard0"]["label"] == description
