@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
@@ -41,6 +40,8 @@ from .coordinator_parts.payloads import (
     merge_clients_with_neighbours,
 )
 from .coordinator_parts.refresh import (
+    PendingRefreshes,
+    Source,
     build_batch_tree,
     refresh_plan,
     unsupported_batch_paths,
@@ -228,6 +229,34 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         normalised to safe defaults of the same shape the downstream
         code expects, and the next tick simply retries them.
         """
+        plan = refresh_plan(
+            first_refresh=self.data is None,
+            refresh_count=self._refresh_count,
+            needs_clients=getattr(self, "needs_client_data", True),
+            needs_policies=getattr(self, "needs_policies", True),
+            pending=PendingRefreshes(
+                host_policies=(
+                    getattr(self, "_host_policies_refresh_token", 0)
+                    if getattr(self, "_host_policies_refresh_pending", False)
+                    else None
+                ),
+                full=(
+                    getattr(self, "_full_refresh_token", 0)
+                    if getattr(self, "_full_refresh_pending", False)
+                    else None
+                ),
+                mesh=(
+                    getattr(self, "_mesh_refresh_token", 0)
+                    if getattr(self, "_mesh_refresh_pending", False)
+                    else None
+                ),
+                update_check_pending=getattr(self, "_update_check_pending", False),
+                update_check_token=getattr(self, "_update_check_token", 0),
+                update_check_retry_token=getattr(self, "_update_check_retry_token", None),
+            ),
+        )
+        due = plan.due
+        pending = plan.pending
         sem = asyncio.Semaphore(4)
         # Start this refresh's tick scope: stage 0 below repopulates the
         # prefetch cache, and concurrent stage-1 reads of one endpoint share
@@ -274,69 +303,11 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 _LOGGER.debug("Coordinator fetch %s failed: %s", name, value)
             return result
 
-        plan = refresh_plan(
-            first_refresh=self.data is None,
-            refresh_count=self._refresh_count,
-        )
-        pending_update_check = getattr(self, "_update_check_pending", False)
-        pending_update_check_token = getattr(self, "_update_check_token", 0)
-        update_check_retry_token = getattr(self, "_update_check_retry_token", None)
-        # Use the scheduled tier before a full confirming refresh can force it.
-        update_check_refresh = (
-            plan.update_check_refresh
-            or (pending_update_check and pending_update_check_token != update_check_retry_token)
-            or (plan.very_slow_refresh and update_check_retry_token is not None)
-        )
-        # Skipping ``show/ip/hotspot`` in the batch tree only helps if the
-        # per-domain client fetch is skipped with it — otherwise it just
-        # becomes a separate round trip, which is strictly worse.
-        needs_clients = getattr(self, "needs_client_data", True)
-        # A confirming refresh after a router write must actually re-read the
-        # tier-gated data the write entity displays, not republish the cached
-        # snapshot. Consumed at the end of a successful tick (see below): a
-        # tick that raises keeps the request armed for the next one.
-        pending_full_refresh = getattr(self, "_full_refresh_pending", False)
-        pending_full_refresh_token = getattr(self, "_full_refresh_token", 0)
-        if pending_full_refresh:
-            plan = replace(
-                plan,
-                medium_refresh=True,
-                slow_refresh=True,
-                very_slow_refresh=True,
-                ipsec_status_refresh=True,
-            )
-        medium_refresh = plan.medium_refresh
-        slow_refresh = plan.slow_refresh
-        very_slow_refresh = plan.very_slow_refresh
-        # Mesh discovery finds extenders in the client list and the router's
-        # connect/disconnect events diff it, so an entry without client
-        # entities still reads it on the slow (mesh) tier and reuses that
-        # read in between.
-        pending_mesh_refresh = getattr(self, "_mesh_refresh_pending", False)
-        pending_mesh_refresh_token = getattr(self, "_mesh_refresh_token", 0)
-        mesh_refresh = slow_refresh or pending_mesh_refresh
-        if not needs_clients and mesh_refresh:
-            needs_clients = True
-        clients_reused = not needs_clients
-        # Site-to-site IPsec state now comes from ``show/ipsec`` (stroke
-        # path), which is OOM-safe — verified by burst-testing 90+
-        # rapid calls produce zero ``IpSec::Vici::Stats: out of memory``
-        # events. Polled on the same ``slow_refresh`` cadence as WAN
-        # traffic stats so throughput graphs have matching resolution.
-        ipsec_status_refresh = plan.ipsec_status_refresh
-        # Policy selects request a confirming read outside the slow tier.
-        # Failed reads stay pending for the next tick.
-        pending_host_policies = getattr(self, "_host_policies_refresh_pending", False)
-        pending_host_policies_token = getattr(self, "_host_policies_refresh_token", 0)
-        needs_policies = getattr(self, "needs_policies", True)
-        host_policies_refresh = needs_policies and (slow_refresh or pending_host_policies)
-
-        # Precompute the cached fallbacks for skipped slow-tick fetches
-        # outside the gather() call so the fast tick doesn't rebuild
-        # these dicts every time. On a non-slow tick the previous
-        # version info is reused verbatim; on a slow tick these are
-        # discarded and the live RCI fetch result is used instead.
-        if not very_slow_refresh:
+        clients_reused = Source.HOSTS not in due
+        mesh_due = Source.MESH_MEMBERS in due
+        ipsec_due = Source.IPSEC in due
+        interface_stats_due = Source.INTERFACE_STATS in due
+        if Source.VERSION not in due:
             _cached_version = {
                 k: _prev_sys.get(k) for k in _VERSION_CACHE_KEYS if k in _prev_sys
             }
@@ -352,12 +323,9 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if self.client._rci_batch_supported is not False:
                 batch_tree = build_batch_tree(
                     plan,
-                    needs_clients=needs_clients,
                     unsupported=unsupported_batch_paths(self.client),
                     include_mesh=getattr(self.client, "_mws_member_supported", None)
                     is True,
-                    mesh_refresh=mesh_refresh,
-                    update_check=update_check_refresh,
                 )
                 try:
                     await self.client.prefetch_tick(batch_tree)
@@ -372,12 +340,6 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # share the already-fetched ``clients`` list with the mesh
             # fallback path (avoids a duplicate ``show/ip/hotspot`` round-trip
             # on routers that have extenders).
-            # Ping check status is a configuration-shaped payload (which WAN
-            # has a ping profile attached) that changes only when the user
-            # edits the profile on the router. Moving it to the slow tier
-            # removes one round-trip per fast tick. The override of
-            # ``internet_access`` further below still applies — it just uses
-            # the cached snapshot until the next slow tick refreshes it.
             (
                 system,
                 version,
@@ -392,16 +354,23 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 crypto_maps,
             ) = await asyncio.gather(
                 _bounded(self.client.async_get_system_info()),
-                _bounded(self.client.async_get_current_version_info()) if very_slow_refresh else _resolve(_cached_version),
-                _bounded(self.client.async_get_available_version_info()) if update_check_refresh else _resolve(None),
+                _bounded(self.client.async_get_current_version_info())
+                if Source.VERSION in due else _resolve(_cached_version),
+                _bounded(self.client.async_get_available_version_info())
+                if Source.CHECK_UPDATE in due else _resolve(None),
                 _bounded(self.client.async_get_interfaces()),
-                _bounded(self.client.async_get_clients()) if needs_clients else _resolve(_prev.get("clients", [])),
+                _bounded(self.client.async_get_clients())
+                if not clients_reused else _resolve(_prev.get("clients", [])),
                 _bounded(self.client.async_get_ip_neighbours()),
-                _bounded(self.client.async_get_host_policies()) if host_policies_refresh else _resolve(_prev.get("host_policies", {})),
-                _bounded(self.client.async_get_policies()) if very_slow_refresh and needs_policies else _resolve(_prev.get("policies", {})),
-                _bounded(self.client.async_get_ndns_info()) if very_slow_refresh else _resolve(_prev.get("ndns", {})),
+                _bounded(self.client.async_get_host_policies())
+                if Source.HOST_POLICIES in due else _resolve(_prev.get("host_policies", {})),
+                _bounded(self.client.async_get_policies())
+                if Source.POLICIES in due else _resolve(_prev.get("policies", {})),
+                _bounded(self.client.async_get_ndns_info())
+                if Source.NDNS in due else _resolve(_prev.get("ndns", {})),
                 _bounded(self.client.async_get_ping_check_status()),
-                _bounded(self.client.async_get_ipsec_status()) if ipsec_status_refresh else _resolve(_prev.get("crypto_maps", {})),
+                _bounded(self.client.async_get_ipsec_status())
+                if ipsec_due else _resolve(_prev.get("crypto_maps", {})),
                 return_exceptions=True,
             )
 
@@ -425,7 +394,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             # Stage 1.5: mesh nodes — needs ``clients`` already fetched so
             # the fallback path can reuse it instead of re-fetching.
-            if mesh_refresh:
+            if mesh_due:
                 try:
                     mesh_nodes = await _bounded(
                         self.client.async_get_mesh_nodes(clients=clients)
@@ -436,7 +405,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     mesh_nodes = err
             else:
                 mesh_nodes = _prev.get("mesh_nodes", [])
-            mesh_nodes_failed = mesh_refresh and isinstance(mesh_nodes, BaseException)
+            mesh_nodes_failed = mesh_due and isinstance(mesh_nodes, BaseException)
 
             # Critical fetches default to the previous snapshot, not an empty
             # shape, so a tolerated transient failure (see the grace-window
@@ -457,13 +426,13 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # the API layer now raises instead of returning MAC-keyed
             # fallback nodes (which used to flip mesh unique_ids).
             mesh_nodes = _ok("mesh_nodes", mesh_nodes, _prev.get("mesh_nodes", []))
-            if mesh_refresh and not mesh_nodes_failed and isinstance(mesh_nodes, list):
+            if mesh_due and not mesh_nodes_failed and isinstance(mesh_nodes, list):
                 mesh_nodes = carry_firmware_available(
                     mesh_nodes, _prev.get("mesh_nodes")
                 )
             mesh_nodes_fresh = self._source_is_fresh(
                 "mesh_nodes",
-                attempted=mesh_refresh,
+                attempted=mesh_due,
                 failed=mesh_nodes_failed,
             )
             # On a transient fetch failure keep the previous snapshot — an
@@ -492,15 +461,13 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # so an absent endpoint doesn't produce a warning on every tick —
             # the api layer already debug-logs the reason. When the slow tier
             # is skipped, keep the previous snapshot instead of rebuilding it.
-            crypto_maps_failed = ipsec_status_refresh and isinstance(
-                crypto_maps, BaseException
-            )
+            crypto_maps_failed = ipsec_due and isinstance(crypto_maps, BaseException)
             crypto_maps_fresh = self._source_is_fresh(
                 "crypto_maps",
-                attempted=ipsec_status_refresh,
+                attempted=ipsec_due,
                 failed=crypto_maps_failed,
             )
-            if slow_refresh:
+            if ipsec_due:
                 # On a transient fetch failure keep the previous snapshot —
                 # an empty default would flap every IPsec entity unavailable
                 # and wipe tunnel state for one tick.
@@ -569,7 +536,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # tick and were the integration's top recorder writers. They ride
             # along in the fast ``show/system`` payload, so there is nothing to
             # save on the wire — publish them on the medium cadence instead.
-            if not medium_refresh and _prev_sys:
+            if Source.SYSTEM_GAUGES not in due and _prev_sys:
                 for gauge_key in _GAUGE_KEYS:
                     if gauge_key in _prev_sys:
                         merged_system[gauge_key] = _prev_sys[gauge_key]
@@ -621,7 +588,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 raise
             except Exception as err:  # noqa: BLE001
                 wan_interfaces = err
-            if medium_refresh:
+            if interface_stats_due:
                 (
                     wifi,
                     wireguard,
@@ -680,7 +647,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             interface_stats_failed = isinstance(interface_stats, BaseException)
             interface_stats_fresh = self._source_is_fresh(
                 "interface_stats",
-                attempted=medium_refresh,
+                attempted=interface_stats_due,
                 failed=interface_stats_failed,
             )
             # On a stage-2 task exception keep the previous snapshot — an
@@ -719,7 +686,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     ", ".join(failure.name for failure in failed_fetches),
                 )
 
-            wan_stats_fresh = medium_refresh and not interface_stats_failed
+            wan_stats_fresh = interface_stats_due and not interface_stats_failed
 
             # ---------- WAN enrichment (CPU-only, runs on already-fetched
             # data — logic unchanged from the sequential implementation) ----------
@@ -750,7 +717,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # zero whenever a phase2 SA rekeys or the tunnel bounces — the
             # negative-delta clamp keeps throughput sensors from spiking
             # to absurd negative values on those events.
-            if slow_refresh:
+            if ipsec_due:
                 now_ts = asyncio.get_running_loop().time()
                 # A failed read re-publishes the previous snapshot, which has
                 # no new sample: carry its rates over instead of computing 0.
@@ -758,10 +725,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     crypto_maps,
                     self.data.get("crypto_maps") if self.data else None,
                     now_ts,
-                    ipsec_status_refresh and not crypto_maps_failed,
+                    not crypto_maps_failed,
                 )
 
-            if mesh_refresh:
+            if mesh_due:
                 mesh_associations_data = mesh_associations(mesh_nodes)
                 mesh_nodes_by_cid = {
                     (n.get("cid") or n.get("id")): n
@@ -858,34 +825,34 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if host_policies_failed:
                 self._host_policies_refresh_pending = True
             elif (
-                host_policies_refresh
-                and pending_host_policies
-                and getattr(self, "_host_policies_refresh_token", 0) == pending_host_policies_token
+                Source.HOST_POLICIES in due
+                and pending.host_policies is not None
+                and getattr(self, "_host_policies_refresh_token", 0) == pending.host_policies
             ):
                 # A newer request that arrived mid-tick keeps the flag armed
                 # so its confirming fetch runs on the very next tick.
                 self._host_policies_refresh_pending = False
 
             if (
-                pending_full_refresh
-                and self._full_refresh_token == pending_full_refresh_token
+                pending.full is not None
+                and self._full_refresh_token == pending.full
             ):
                 self._full_refresh_pending = False
 
-            if update_check_refresh:
+            if Source.CHECK_UPDATE in due:
                 self._update_check_retry_token = (
-                    pending_update_check_token if available_version_failed else None
+                    pending.update_check_token if available_version_failed else None
                 )
                 if (
                     not available_version_failed
-                    and pending_update_check
-                    and self._update_check_token == pending_update_check_token
+                    and pending.update_check_pending
+                    and self._update_check_token == pending.update_check_token
                 ):
                     self._update_check_pending = False
 
             if (
-                pending_mesh_refresh
-                and self._mesh_refresh_token == pending_mesh_refresh_token
+                pending.mesh is not None
+                and self._mesh_refresh_token == pending.mesh
             ):
                 self._mesh_refresh_pending = False
 

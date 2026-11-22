@@ -2,13 +2,46 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import InitVar, dataclass, field
+from enum import StrEnum
 from typing import Any
+
+
+class Source(StrEnum):
+    """Sources and derived reads scheduled by the coordinator."""
+
+    SYSTEM = "system"
+    INTERFACES = "interfaces"
+    NEIGHBOURS = "neighbours"
+    HOSTS = "hosts"
+    PING_CHECK = "ping_check"
+    INTERFACE_STATS = "interface_stats"
+    SYSTEM_GAUGES = "system_gauges"
+    HOST_POLICIES = "host_policies"
+    POLICIES = "policies"
+    VERSION = "version"
+    NDNS = "ndns"
+    CHECK_UPDATE = "check_update"
+    IPSEC = "ipsec"
+    MESH_MEMBERS = "mesh_members"
+
+
+@dataclass(frozen=True)
+class PendingRefreshes:
+    """Request generations captured at the start of a tick."""
+
+    host_policies: int | None = None
+    full: int | None = None
+    mesh: int | None = None
+    # A scheduled firmware check can fail without an explicit request pending.
+    update_check_pending: bool = False
+    update_check_token: int = 0
+    update_check_retry_token: int | None = None
 
 
 @dataclass(frozen=True)
 class RefreshPlan:
-    """Coordinator cadence flags for one refresh tick."""
+    """Freeze the due sources and request generations for one tick."""
 
     first_refresh: bool
     medium_refresh: bool
@@ -16,6 +49,33 @@ class RefreshPlan:
     very_slow_refresh: bool
     ipsec_status_refresh: bool
     update_check_refresh: bool
+    pending: PendingRefreshes = field(default_factory=PendingRefreshes)
+    needs_clients: InitVar[bool] = True
+    needs_policies: InitVar[bool] = True
+    due: frozenset[Source] = field(init=False)
+
+    def __post_init__(self, needs_clients: bool, needs_policies: bool) -> None:
+        due = {Source.SYSTEM, Source.INTERFACES, Source.NEIGHBOURS, Source.PING_CHECK}
+        mesh_due = self.slow_refresh or self.pending.mesh is not None
+        if mesh_due:
+            due.add(Source.MESH_MEMBERS)
+        # Mesh discovery and connect/disconnect events need the hotspot read
+        # on mesh ticks even if no client entities consume it.
+        if needs_clients or mesh_due:
+            due.add(Source.HOSTS)
+        if self.medium_refresh:
+            due.update((Source.INTERFACE_STATS, Source.SYSTEM_GAUGES))
+        if needs_policies and (self.slow_refresh or self.pending.host_policies is not None):
+            due.add(Source.HOST_POLICIES)
+        if self.very_slow_refresh:
+            due.update((Source.VERSION, Source.NDNS))
+            if needs_policies:
+                due.add(Source.POLICIES)
+        if self.ipsec_status_refresh:
+            due.add(Source.IPSEC)
+        if self.update_check_refresh:
+            due.add(Source.CHECK_UPDATE)
+        object.__setattr__(self, "due", frozenset(due))
 
 
 # One firmware check per day. ``components/check-update`` asks Keenetic's
@@ -26,8 +86,15 @@ class RefreshPlan:
 _UPDATE_CHECK_EVERY = 1440  # ticks (24 h at FAST_SCAN_INTERVAL = 60 s)
 
 
-def refresh_plan(*, first_refresh: bool, refresh_count: int) -> RefreshPlan:
-    """Return explicit runtime-efficiency cadence flags for one tick.
+def refresh_plan(
+    *,
+    first_refresh: bool,
+    refresh_count: int,
+    needs_clients: bool = True,
+    needs_policies: bool = True,
+    pending: PendingRefreshes = PendingRefreshes(),
+) -> RefreshPlan:
+    """Plan all sources due for one tick from a snapshot of its inputs.
 
     The divisors are counted in ticks, which only means a fixed number of
     seconds because the tick itself is fixed at ``FAST_SCAN_INTERVAL``. That is
@@ -40,39 +107,61 @@ def refresh_plan(*, first_refresh: bool, refresh_count: int) -> RefreshPlan:
     coordinator stage 2 (Wi-Fi, WireGuard, VPN tunnels, WAN status, interface
     stats, port info) plus the CPU/RAM/conntrack gauges.
     """
-    medium_refresh = first_refresh or refresh_count % 2 == 0
-    slow_refresh = first_refresh or refresh_count % 3 == 0
-    very_slow_refresh = first_refresh or refresh_count % 15 == 0
+    full_refresh = first_refresh or pending.full is not None
+    medium_refresh = full_refresh or refresh_count % 2 == 0
+    slow_refresh = full_refresh or refresh_count % 3 == 0
+    scheduled_very_slow = first_refresh or refresh_count % 15 == 0
+    # A full confirming refresh does not advance the firmware retry cadence.
+    retry_token = pending.update_check_retry_token
+    update_check_refresh = (
+        first_refresh
+        or refresh_count % _UPDATE_CHECK_EVERY == 0
+        or (pending.update_check_pending and pending.update_check_token != retry_token)
+        or (scheduled_very_slow and retry_token is not None)
+    )
     return RefreshPlan(
         first_refresh=first_refresh,
         medium_refresh=medium_refresh,
         slow_refresh=slow_refresh,
-        very_slow_refresh=very_slow_refresh,
+        very_slow_refresh=full_refresh or scheduled_very_slow,
         ipsec_status_refresh=slow_refresh,
-        update_check_refresh=first_refresh or refresh_count % _UPDATE_CHECK_EVERY == 0,
+        update_check_refresh=update_check_refresh,
+        pending=pending,
+        needs_clients=needs_clients,
+        needs_policies=needs_policies,
     )
 
 
-# Batch paths guarded by a capability latch, keyed by the client attribute
-# that holds it. A path the router does not have is answered in place inside
-# the batch, but the router still writes a "not found" line to its system log
-# for it — the very line each latch exists to stop.
-_LATCHED_BATCH_PATHS: dict[str, str] = {
-    "_ping_check_supported": "show/ping-check",
-    "_crypto_map_supported": "show/ipsec",
-    "_ndns_supported": "show/ndns",
+_BATCH_PATHS = {
+    Source.SYSTEM: "show/system",
+    Source.INTERFACES: "show/interface",
+    Source.NEIGHBOURS: "show/ip/neighbour",
+    Source.HOSTS: "show/ip/hotspot",
+    Source.PING_CHECK: "show/ping-check",
+    Source.IPSEC: "show/ipsec",
+    Source.MESH_MEMBERS: "show/mws/member",
+    Source.VERSION: "show/version",
+    Source.NDNS: "show/ndns",
+    Source.CHECK_UPDATE: "components/check-update",
+}
+
+# Prefetch skips latched paths to avoid "not found" entries in the router log.
+_BATCH_LATCHES = {
+    Source.PING_CHECK: "_ping_check_supported",
+    Source.IPSEC: "_crypto_map_supported",
+    Source.NDNS: "_ndns_supported",
 }
 
 
 def unsupported_batch_paths(client: Any) -> frozenset[str]:
     """Return batch paths the router has already answered "not found" for."""
     paths = {
-        path
-        for attr, path in _LATCHED_BATCH_PATHS.items()
+        _BATCH_PATHS[source]
+        for source, attr in _BATCH_LATCHES.items()
         if getattr(client, attr, None) is False
     }
     if "show/ip/hotspot/host" in (getattr(client, "_hotspot_subpath_skip", None) or ()):
-        paths.add("show/ip/hotspot")
+        paths.add(_BATCH_PATHS[Source.HOSTS])
     return frozenset(paths)
 
 
@@ -85,48 +174,25 @@ def build_batch_tree(
     mesh_refresh: bool | None = None,
     update_check: bool | None = None,
 ) -> dict[str, Any]:
-    """Build the composite RCI tree requested at the start of a tick.
+    """Build the composite RCI tree from due sources and capability latches."""
+    due = plan.due
+    # Keep explicit overrides for callers constructing a batch directly.
+    for source, override in (
+        (Source.MESH_MEMBERS, mesh_refresh),
+        (Source.CHECK_UPDATE, update_check),
+    ):
+        if override is not None:
+            due = due | {source} if override else due - {source}
+    if not needs_clients:
+        due -= {Source.HOSTS}
+    if not include_mesh:
+        due -= {Source.MESH_MEMBERS}
 
-    ``needs_clients`` drops ``show/ip/hotspot`` — by a wide margin the largest
-    payload of the tick — when every entity derived from it is disabled. There
-    is no point parsing a hundred hosts nothing will ever read.
-
-    ``unsupported`` names paths the router already refused (see
-    ``unsupported_batch_paths``). ``include_mesh`` adds ``show/mws/member`` on
-    the slow tier once the controller is known to serve it. ``mesh_refresh``
-    and ``update_check`` override the plan when a write requested that read
-    off schedule, so the batch carries it instead of a separate GET.
-    """
-    if mesh_refresh is None:
-        mesh_refresh = plan.slow_refresh
-    if update_check is None:
-        update_check = plan.update_check_refresh
     batch_tree: dict[str, Any] = {}
-
-    def add(path: str) -> None:
-        if path in unsupported:
-            return
+    for source, path in _BATCH_PATHS.items():
+        if source not in due or path in unsupported:
+            continue
         node = batch_tree
-        parts = path.strip("/").split("/")
-        for part in parts[:-1]:
+        for part in path.split("/"):
             node = node.setdefault(part, {})
-        node.setdefault(parts[-1], {})
-
-    add("show/system")
-    add("show/interface")
-    add("show/ip/neighbour")
-    if needs_clients:
-        add("show/ip/hotspot")
-    # WAN state is rebuilt every tick; the ping check decides whether a WAN
-    # has internet, so it rides along at no extra request.
-    add("show/ping-check")
-    if plan.ipsec_status_refresh:
-        add("show/ipsec")
-    if mesh_refresh and include_mesh:
-        add("show/mws/member")
-    if plan.very_slow_refresh:
-        add("show/version")
-        add("show/ndns")
-    if update_check:
-        add("components/check-update")
     return batch_tree
