@@ -75,9 +75,9 @@ class RefreshPlan:
                 Source.INTERFACE_STATS, Source.SYSTEM_GAUGES,
                 Source.WIFI, Source.WAN_STATUS, Source.VPN,
             ))
-        # A ranked VPN is controlled by a WAN switch, with the same interface payload.
-        if Source.WAN_STATUS in switches:
-            due.add(Source.VPN)
+        # A VPN can also be an uplink. Both projections use the same interfaces.
+        if switches.intersection((Source.WAN_STATUS, Source.VPN)):
+            due.update((Source.WAN_STATUS, Source.VPN))
         if needs_policies and (self.slow_refresh or self.pending.host_policies is not None):
             due.add(Source.HOST_POLICIES)
         if self.very_slow_refresh:

@@ -145,31 +145,19 @@ def _assemble_snapshot(
         mesh_associations_data = cached.get("mesh_associations", {})
         mesh_nodes_by_cid = cached.get("mesh_nodes_by_cid", {})
 
-    # ---------- New-client detection ----------
-    # Build the MAC->client index once and reuse it for both the
-    # new-MAC diff and the output dict. Previously this walked
-    # ``clients`` three times and called ``normalize_mac`` 2N+ times
-    # per tick; one walk now suffices and the index is the same
-    # object that ends up in the coordinator data dict.
     clients_by_mac = build_clients_by_mac(primary.clients)
-    # Neighbour-only ghosts (ARP/ND records with no hotspot client)
-    # stay in the index for enrichment but never count as "new
-    # devices" — a host that was merely pinged is not a connection.
-    current_macs = real_client_macs(clients_by_mac)
-
-    previous_by_mac = previous.get("clients_by_mac", {})
-    if isinstance(previous_by_mac, dict) and previous_by_mac:
+    hotspot_fresh = Source.HOSTS in due and not primary.clients_stale
+    new_macs: set[str] = set()
+    if hotspot_fresh:
+        # Neighbour-only rows can enrich the index before the hotspot first
+        # reports a client. Exclude them from both sides of the event diff.
+        previous_by_mac = previous.get("clients_by_mac")
+        if not isinstance(previous_by_mac, dict) or not previous_by_mac:
+            previous_by_mac = build_clients_by_mac(previous.get("clients", []))
         previous_macs = {
-            mac for mac in (normalize_mac(key) for key in previous_by_mac.keys()) if mac
+            mac for key in real_client_macs(previous_by_mac) if (mac := normalize_mac(key))
         }
-    else:
-        previous_macs = {
-            normalize_mac(c.get("mac"))
-            for c in previous.get("clients", [])
-            if isinstance(c, dict) and c.get("mac")
-        }
-        previous_macs.discard("")
-    new_macs = current_macs - previous_macs
+        new_macs = real_client_macs(clients_by_mac) - previous_macs
 
     # ---------- Connect / disconnect / failover events ----------
     # Automations otherwise have to trigger on entity state and poll
@@ -186,7 +174,7 @@ def _assemble_snapshot(
     # On the very first tick every client looks like an arrival; the
     # integration has simply never seen this network before.
     first_tick = not previous
-    if primary.clients_stale or Source.HOSTS not in due:
+    if not hotspot_fresh:
         # The hotspot table is the PREVIOUS tick's snapshot, re-merged
         # with this tick's neighbour data — diffing that invents
         # arrivals and departures the router never reported.

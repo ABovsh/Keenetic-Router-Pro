@@ -14,7 +14,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import KeeneticClient
-from .api.helpers import _normalize_interfaces
+from .api.helpers import _is_endpoint_missing, _normalize_interfaces
 from .const import DOMAIN, FAST_SCAN_INTERVAL
 from .coordinator_parts.derived import (
     carry_firmware_available,
@@ -63,11 +63,20 @@ _Bounded = Callable[[Coroutine[Any, Any, Any]], Awaitable[Any]]
 _SWITCH_READ_FAILURES = {
     Source.WIFI: {"wifi", "clients", "ip_neighbours", "mesh_nodes"},
     Source.WAN_STATUS: {
-        "wan_interfaces", "wan_status", "ping_check_status", "wireguard", "vpn_tunnels",
+        "wan_interfaces", "wan_status", "ping_check_status", "traffic_stats", "wireguard",
+        "vpn_tunnels",
     },
-    Source.VPN: {"wireguard", "vpn_tunnels"},
+    Source.VPN: {"wan_interfaces", "wan_status", "traffic_stats", "wireguard", "vpn_tunnels"},
     Source.IPSEC: {"crypto_maps"},
 }
+
+
+@dataclass(slots=True)
+class _SwitchConfirmation:
+    """A switch write awaiting a confirming read."""
+
+    generation: int
+    attempts: int = 0
 
 
 @dataclass(slots=True)
@@ -138,7 +147,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # pair as the host-policies request.
         self._full_refresh_pending = False
         self._full_refresh_token = 0
-        self._switch_refreshes: dict[Source, int] = {}
+        self._switch_refreshes: dict[Source, _SwitchConfirmation] = {}
         # Post-install firmware checks, armed by ``request_update_check``.
         self._update_check_pending = False
         self._update_check_token = 0
@@ -206,8 +215,31 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_request_switch_refresh(self, source: Source) -> None:
         """Arm a confirmation after a switch command, then request a refresh."""
-        self._switch_refreshes[source] = self._switch_refreshes.get(source, 0) + 1
+        previous = self._switch_refreshes.get(source)
+        self._switch_refreshes[source] = _SwitchConfirmation(
+            previous.generation + 1 if previous else 1
+        )
         await self.async_request_refresh(full=False)
+
+    def _finish_switch_confirmations(
+        self,
+        pending: tuple[tuple[Source, int], ...],
+        confirmed: set[Source],
+    ) -> None:
+        """Acknowledge matching generations or count a failed attempt."""
+        for source, generation in pending:
+            request = self._switch_refreshes.get(source)
+            if request is None or request.generation != generation:
+                continue
+            if source in confirmed:
+                del self._switch_refreshes[source]
+                continue
+            request.attempts += 1
+            if request.attempts >= OPTIONAL_FETCH_GRACE_ATTEMPTS:
+                del self._switch_refreshes[source]
+                _LOGGER.debug(
+                    "Switch confirmation for %s expired after %d attempts", source, request.attempts
+                )
 
     async def async_request_refresh(self, *, full: bool = True) -> None:
         """Run HA's debounced refresh, by default with every tier armed.
@@ -254,7 +286,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 update_check_pending=getattr(self, "_update_check_pending", False),
                 update_check_token=getattr(self, "_update_check_token", 0),
                 update_check_retry_token=getattr(self, "_update_check_retry_token", None),
-                switches=tuple(getattr(self, "_switch_refreshes", {}).items()),
+                switches=tuple(
+                    (source, request.generation)
+                    for source, request in getattr(self, "_switch_refreshes", {}).items()
+                ),
             ),
         )
         due = plan.due
@@ -275,6 +310,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Collected per-tick so we can emit a single warning instead of
         # silently defaulting every failing fetch at debug level.
         failed_fetches: list[FetchFailure] = []
+        confirmed_switches: set[Source] = set()
 
         def ok(name: str, value: Any, default: Any, *, silent: bool = False) -> Any:
             result = ok_or_default(
@@ -395,19 +431,20 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 failed = {failure.name for failure in failed_fetches}
                 if primary.crypto_maps_failed:
                     failed.add("crypto_maps")
-                if isinstance(reads.ip_neighbours, BaseException):
+                if isinstance(reads.ip_neighbours, BaseException) and not _is_endpoint_missing(
+                    reads.ip_neighbours
+                ):
                     failed.add("ip_neighbours")
-                for source, generation in pending.switches:
-                    if (
-                        _SWITCH_READ_FAILURES[source].isdisjoint(failed)
-                        and self._switch_refreshes.get(source) == generation
-                    ):
-                        del self._switch_refreshes[source]
+                confirmed_switches = {
+                    source for source, _generation in pending.switches
+                    if _SWITCH_READ_FAILURES[source].isdisjoint(failed)
+                }
 
             self._refresh_count += 1
             return snapshot
         finally:
             self.client.clear_tick_cache()
+            self._finish_switch_confirmations(pending.switches, confirmed_switches)
 
     async def _read_primary(
         self,
@@ -668,10 +705,10 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             reads["wan_status"] = self.client.async_get_wan_status(
                 interfaces=interfaces, iface_list=iface_list
             )
-        if interface_stats_due:
             reads["traffic_stats"] = self.client.async_get_traffic_stats(
                 interfaces=interfaces, iface_list=iface_list
             )
+        if interface_stats_due:
             reads["port_info"] = self.client.async_get_port_info(interfaces=interfaces)
             reads["interface_stats"] = self.client.async_get_all_interface_stats(
                 interfaces=interfaces,

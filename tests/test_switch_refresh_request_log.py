@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections import Counter
 from copy import deepcopy
 from typing import Any
@@ -288,3 +289,130 @@ async def test_ipsec_confirmation_reprobes_cached_component_absence(keenetic_ent
 
     assert await _tick(coordinator, session) == _confirming_reads(True, "ipsec")
     _assert_confirmed(coordinator, switch, "ipsec", False)
+
+
+@pytest.mark.parametrize("confirm_wan", [False, True], ids=["ordinary", "wan-confirmation"])
+async def test_neighbour_only_client_can_become_a_new_device(confirm_wan, keenetic_entry) -> None:
+    coordinator, session, switch = await _warm(False, "wan", keenetic_entry)
+    coordinator.needs_client_data = False
+    coordinator._refresh_count = 7
+    mac = "12:34:56:78:9a:bc"
+    session.payloads["show/ip/hotspot/host"]["host"].append({"mac": mac, "active": True})
+    session.payloads["show/ip/neighbour"]["neighbour"].append(
+        {"mac": mac, "address-family": "ipv4", "address": "192.0.2.90"}
+    )
+    if confirm_wan:
+        await _write(switch, session, False)
+
+    assert await _tick(coordinator, session) == _expected(False, "fast without clients")
+    assert coordinator.data["clients_by_mac"][mac]["neighbour-only"]
+    assert mac not in coordinator.data["new_clients"]
+    assert mac not in coordinator.data["connected_clients"]
+
+    coordinator._refresh_count = 9
+    assert await _tick(coordinator, session) == _expected(False, "slow")
+    assert mac in coordinator.data["connected_clients"]
+    assert mac in coordinator.data["new_clients"]
+
+    assert await _tick(coordinator, session) == _expected(False, "fast without clients", "stats")
+    assert mac not in coordinator.data["connected_clients"]
+    assert mac not in coordinator.data["new_clients"]
+
+
+@pytest.mark.parametrize("batch", [True, False], ids=["batch", "405-fallback"])
+async def test_active_vpn_switch_confirms_wan_status(batch, keenetic_entry) -> None:
+    coordinator, session, switch = await _warm(batch, "vpn", keenetic_entry)
+    interfaces = session.payloads["show/interface"]
+    interfaces[_WAN].update(state="down", defaultgw=False, address=None)
+    interfaces[_VPN].update({"global": True, "role": ["inet"], "priority": 50, "defaultgw": True})
+    coordinator._refresh_count = 8
+    assert await _tick(coordinator, session) == _expected(batch, "fast", "stats")
+    assert coordinator.data["wan_status"]["status"] == "connected"
+    assert coordinator.data["wan_status"]["ip"]
+    assert coordinator.data["active_wan"] == _VPN
+
+    await _write(switch, session, False)
+    interfaces[_VPN].update(defaultgw=False, address=None)
+    coordinator._refresh_count = 11
+
+    assert await _tick(coordinator, session) == _confirming_reads(batch, "vpn")
+    assert switch.available and not switch.is_on
+    assert coordinator.data["wan_status"]["status"] == "down"
+    assert coordinator.data["wan_status"]["ip"] is None
+    assert coordinator.data["wan_failover"] == {"from": _VPN, "to": None}
+
+
+@pytest.mark.parametrize("batch", [True, False], ids=["batch", "405-fallback"])
+@pytest.mark.parametrize("status", [404, 503], ids=["missing", "transient"])
+async def test_wifi_confirmation_distinguishes_neighbour_failures(batch, status, keenetic_entry):
+    coordinator, session, switch = await _warm(batch, "wifi", keenetic_entry)
+    coordinator._refresh_count = 7
+    session.status["show/ip/neighbour"] = status
+    await _write(switch, session, False)
+    extra_get = Counter([_get("show/ip/neighbour")]) if batch else Counter()
+
+    assert await _tick(coordinator, session) == _confirming_reads(batch, "wifi") + extra_get
+    assert switch.available and not switch.is_on
+
+    coordinator._refresh_count = 11
+    profile = "fast without clients" if status == 404 else "mesh request"
+    assert await _tick(coordinator, session) == _expected(batch, profile) + extra_get
+
+
+@pytest.mark.parametrize("failure", ["scope", "critical", "cancelled"])
+async def test_switch_confirmation_expires_after_three_attempts(failure, keenetic_entry, caplog):
+    coordinator, session, switch = await _warm(True, "ipsec", keenetic_entry)
+    caplog.set_level(logging.DEBUG, logger=KeeneticCoordinator.__module__)
+    await _write(switch, session, False)
+    for count in (7, 11, 13):
+        coordinator._refresh_count = count
+        if failure == "scope":
+            session.status["crypto/map"] = 503
+            assert await _tick(coordinator, session) == _confirming_reads(True, "ipsec")
+        elif failure == "critical":
+            session.payloads["show/system"] = {}
+            with pytest.raises(UpdateFailed, match="Critical router payload empty"):
+                await _tick(coordinator, session)
+            assert session.take_log() == _confirming_reads(True, "ipsec")
+        else:
+            session.hold_path = "/rci/"
+            session.entered.clear()
+            async with asyncio.timeout(2), asyncio.TaskGroup() as tasks:
+                running = tasks.create_task(_tick(coordinator, session))
+                await session.entered.wait()
+                running.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await running
+            assert session.take_log() == Counter([_batch(*_BATCH_PRIMARY, "show/ipsec")])
+
+    session.status.clear()
+    session.payloads["show/system"] = SYSTEM_INFO
+    session.hold_path = None
+    coordinator._refresh_count = 17
+    assert await _tick(coordinator, session) == _expected(True, "fast")
+    assert switch.is_on  # The next normally scheduled IPsec read will observe the change.
+    assert any(
+        record.levelno == logging.DEBUG
+        and "ipsec" in record.message
+        and "3 attempts" in record.message
+        for record in caplog.records
+    )
+
+
+@pytest.mark.parametrize("batch", [True, False], ids=["batch", "405-fallback"])
+async def test_wan_confirmation_projects_backup_traffic_totals(batch, keenetic_entry) -> None:
+    coordinator, session, switch = await _warm(batch, "wan", keenetic_entry)
+    interfaces = session.payloads["show/interface"]
+    interfaces[_WAN].update(rxbytes=1000, txbytes=2000)
+    interfaces[_VPN].update(description="Backup ISP", rxbytes=3000, txbytes=4000)
+    coordinator._refresh_count = 8
+    assert await _tick(coordinator, session) == _expected(batch, "fast", "stats")
+    assert coordinator.data["traffic_stats"]["total_rx"] == 1000
+    assert coordinator.data["traffic_stats"]["total_tx"] == 2000
+
+    await _write(switch, session, False)
+    coordinator._refresh_count = 11
+    assert await _tick(coordinator, session) == _confirming_reads(batch, "wan")
+    assert coordinator.data["active_wan"] == _VPN
+    assert coordinator.data["traffic_stats"]["total_rx"] == 3000
+    assert coordinator.data["traffic_stats"]["total_tx"] == 4000
