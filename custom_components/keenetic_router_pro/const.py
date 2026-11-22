@@ -28,11 +28,13 @@ CAPABILITY_BOOT_GRACE_S = 600
 COUNTER_DEADBAND_BYTES = 100_000_000
 CONF_TRACKED_CLIENTS = "tracked_clients"
 FIELD_CONNECTED = "connected"
+ZERO_MAC = "00:00:00:00:00:00"
 INTERFACE_CONF_DISABLED = "disabled"
 CONF_USE_CHALLENGE_AUTH = "use_challenge_auth"
 CONF_CONNECTION_MODE = "connection_mode"
 CONNECTION_MODE_DIRECT = "direct"
 CONNECTION_MODE_KEENDNS_PROTECTED = "keendns_protected"
+ABORT_WRONG_ROUTER = "wrong_router"
 EVENT_NEW_DEVICE = f"{DOMAIN}_new_device"
 # Fired for every client that joins or leaves, not only the first time a MAC is
 # ever seen. Automations can trigger on these directly instead of watching an

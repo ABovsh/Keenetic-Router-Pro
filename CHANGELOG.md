@@ -8,6 +8,17 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## Unreleased
+
+### 🐛 Fixed
+
+- **Reconfigure and reauthentication refuse a different router.** If the new address answers with another router's MAC addresses, the flow stops with "Connect to the same Keenetic router configured in this entry" instead of attaching that router's controls and history to the existing entry.
+
+### 🔒 Privacy
+
+- **Sign-in requests no longer follow redirects.** The router and extender sign-in requests stop at a redirect and report a connection error, so the login and its challenge response are never sent to another address.
+- **Diagnostics hide VPN and WireGuard profile names.** The profile label, copied from the router's interface description, is now redacted like the description itself.
+
 ## 1.21.0
 
 ### ⚠️ Breaking

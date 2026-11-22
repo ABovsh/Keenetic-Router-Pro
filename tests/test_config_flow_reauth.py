@@ -43,6 +43,7 @@ class ConfigEntries:
 def _entry() -> SimpleNamespace:
     return SimpleNamespace(
         entry_id="entry-1",
+        unique_id="Keenetic Router cc000001",
         data={
             CONF_CONNECTION_MODE: CONNECTION_MODE_DIRECT,
             CONF_HOST: TEST_HOST,
@@ -77,8 +78,69 @@ def _pin_flow_result_helpers(
     flow.async_update_reload_and_abort = update_reload_and_abort
 
 
-async def test_reauth_accepts_rotated_password_and_updates_entry() -> None:
+@pytest.mark.parametrize(
+    ("entry_unique_id", "system_info", "interfaces", "expected_reason"),
+    [
+        pytest.param(
+            "Keenetic Router CC000001",
+            {"vendor": "Updated Vendor", "device": "Updated Device"},
+            {"Bridge0": {"mac": "aa:bb:cc:00:00:01"}},
+            "reauth_successful",
+            id="firmware_strings_changed",
+        ),
+        pytest.param(
+            "Keenetic Router cc000001",
+            {},
+            {
+                "Bridge1": {"type": "Bridge", "mac": "aa:bb:cc:00:00:02"},
+                "Bridge0": {"type": "Bridge", "mac": "AA-BB-CC-00-00-01"},
+            },
+            "reauth_successful",
+            id="matching_mac_after_other_bridge",
+        ),
+        pytest.param(
+            "Keenetic Router old-router-hostname",
+            {},
+            {"Bridge0": {"mac": "aa:bb:cc:00:00:01"}},
+            "reauth_successful",
+            id="hostname_style_id",
+        ),
+        pytest.param(
+            "Keenetic Router cc000001",
+            {"hostname": "router"},
+            {
+                "Bridge0": {"mac": "00-00-00-00-00-00"},
+                "Ethernet0": {"mac": "unknown"},
+                "Ethernet1": None,
+            },
+            "reauth_successful",
+            id="no_valid_probe_mac",
+        ),
+        pytest.param(
+            None,
+            {},
+            {"Bridge0": {"mac": "aa:bb:cc:00:00:01"}},
+            "reauth_successful",
+            id="no_entry_id",
+        ),
+        pytest.param(
+            "Keenetic Router cc000001",
+            {},
+            {"Bridge0": {"mac": "aa:bb:cc:00:00:02"}},
+            "wrong_router",
+            id="different_router",
+        ),
+    ],
+)
+async def test_reauth_checks_router_identity_before_updating_password(
+    entry_unique_id: str | None,
+    system_info: dict,
+    interfaces: dict,
+    expected_reason: str,
+) -> None:
     entry = _entry()
+    entry.unique_id = entry_unique_id
+    original_data = entry.data.copy()
     config_entries = ConfigEntries(entry)
     flow = KeeneticRouterProConfigFlow()
     flow.hass = SimpleNamespace(config_entries=config_entries)
@@ -88,7 +150,7 @@ async def test_reauth_accepts_rotated_password_and_updates_entry() -> None:
 
     async def connect(data):
         seen_passwords.append(data[CONF_PASSWORD])
-        return None, {"hostname": "router"}, {}
+        return None, system_info, interfaces
 
     flow._async_connect = connect
 
@@ -104,8 +166,13 @@ async def test_reauth_accepts_rotated_password_and_updates_entry() -> None:
     assert shown["step_id"] == "reauth_confirm"
     assert shown["errors"] == {}
     assert result["type"] == "abort"
-    assert result["reason"] == "reauth_successful"
+    assert result["reason"] == expected_reason
     assert seen_passwords == ["new-password"]
+    if expected_reason == "wrong_router":
+        assert config_entries.updated == []
+        assert entry.data == original_data
+        return
+
     assert config_entries.updated == [
         {
             CONF_CONNECTION_MODE: CONNECTION_MODE_DIRECT,
