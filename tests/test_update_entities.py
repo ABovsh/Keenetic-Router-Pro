@@ -53,10 +53,10 @@ async def _no_sleep(_seconds: float) -> None:
     return None
 
 
-def test_router_firmware_install_handles_reboot_without_progress_endpoint(
+def test_router_firmware_install_checks_version_without_progress_endpoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Routers without progress support still move through reboot detection and refresh."""
+    """Routers without progress support still verify the new version."""
     writes: list[bool | int] = []
 
     class Client:
@@ -69,9 +69,11 @@ def test_router_firmware_install_handles_reboot_without_progress_endpoint(
         async def async_get_update_progress(self) -> dict[str, Any]:
             return {"in_progress": False}
 
-        async def async_get_system_info(self) -> dict[str, Any]:
+        async def async_get_current_version_info(self) -> dict[str, Any]:
             self.system_checks += 1
-            raise KeeneticApiError("router rebooting")
+            if self.system_checks == 1:
+                raise KeeneticApiError("router rebooting")
+            return {"title": "4.3.0"}
 
     monkeypatch.setattr(update_module.asyncio, "sleep", _no_sleep)
 
@@ -81,7 +83,7 @@ def test_router_firmware_install_handles_reboot_without_progress_endpoint(
 
     asyncio.run(entity.async_install(version=None, backup=False))
 
-    assert writes == [0, 50, 90, False]
+    assert writes == [0, False]
     assert coordinator.refreshes == 1
 
 
@@ -122,16 +124,19 @@ def test_mesh_firmware_install_requires_online_node_ip() -> None:
         asyncio.run(entity.async_install(version=None, backup=False))
 
 
-def test_mesh_firmware_install_refreshes_until_target_version(
+def test_mesh_firmware_install_refreshes_after_changed_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A direct mesh update should refresh until the node reports the new firmware."""
+    """A direct mesh update accepts a changed version even on another channel."""
     calls: list[dict[str, Any]] = []
 
     class Client:
         async def async_start_node_firmware_update(self, **kwargs: Any) -> bool:
             calls.append(kwargs)
             return True
+
+        async def async_get_mesh_nodes(self) -> list[dict[str, Any]]:
+            return [{"cid": "node-1", "connected": True, "firmware": "4.1.9"}]
 
     coordinator = _Coordinator(
         {
@@ -147,10 +152,6 @@ def test_mesh_firmware_install_refreshes_until_target_version(
         }
     )
 
-    def mark_updated(coord: _Coordinator) -> None:
-        coord.data["mesh_nodes"][0]["firmware"] = "4.3.0"
-
-    coordinator.on_refresh = mark_updated
     entity = KeeneticMeshFirmwareUpdate(coordinator, _entry(), "node-1", Client())
     monkeypatch.setattr(update_module.asyncio, "sleep", _no_sleep)
 
@@ -163,7 +164,7 @@ def test_mesh_firmware_install_refreshes_until_target_version(
             "node_cid": "node-1",
         }
     ]
-    assert coordinator.refreshes == 2
+    assert coordinator.refreshes == coordinator.update_checks == 1
 
 
 def test_router_firmware_install_polls_progress_until_complete(
@@ -186,6 +187,9 @@ def test_router_firmware_install_polls_progress_until_complete(
 
         async def async_get_update_progress(self) -> dict[str, Any]:
             return self.progress.pop(0)
+
+        async def async_get_current_version_info(self) -> dict[str, Any]:
+            return {"release": "4.2.0" if self.progress else "4.3.0"}
 
     monkeypatch.setattr(update_module.asyncio, "sleep", _no_sleep)
 
@@ -254,14 +258,22 @@ def test_mesh_firmware_install_rejects_unaccepted_update(
     assert coordinator.refreshes == 0
 
 
-def test_mesh_firmware_install_retries_transient_refresh_failures(
+def test_mesh_firmware_install_retries_transient_version_read_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A rebooting mesh node may make refresh fail before the final successful check."""
+    """A rebooting mesh node can fail a version read before it returns."""
 
     class Client:
+        reads = 0
+
         async def async_start_node_firmware_update(self, **kwargs: Any) -> bool:
             return True
+
+        async def async_get_mesh_nodes(self) -> list[dict[str, Any]]:
+            self.reads += 1
+            if self.reads == 1:
+                raise KeeneticApiError("node rebooting")
+            return [{"cid": "node-1", "connected": True, "firmware": "4.3.0"}]
 
     coordinator = _Coordinator(
         {
@@ -276,22 +288,14 @@ def test_mesh_firmware_install_retries_transient_refresh_failures(
             ]
         }
     )
-    attempts = {"count": 0}
-
-    async def flaky_refresh(**_kwargs) -> None:
-        coordinator.refreshes += 1
-        attempts["count"] += 1
-        if attempts["count"] == 1:
-            raise KeeneticApiError("node rebooting")
-        coordinator.data["mesh_nodes"][0]["firmware"] = "4.3.0"
-
-    coordinator.async_request_refresh = flaky_refresh
-    entity = KeeneticMeshFirmwareUpdate(coordinator, _entry(), "node-1", Client())
+    client = Client()
+    entity = KeeneticMeshFirmwareUpdate(coordinator, _entry(), "node-1", client)
     monkeypatch.setattr(update_module.asyncio, "sleep", _no_sleep)
 
     asyncio.run(entity.async_install(version=None, backup=False))
 
-    assert coordinator.refreshes == 3
+    assert client.reads == 2
+    assert coordinator.refreshes == 1
 
 
 # ---------- per-model release-notes deep links ----------

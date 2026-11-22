@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
+from time import monotonic
 from typing import Any
 
 import aiohttp
@@ -17,27 +19,19 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .api import KeeneticApiError, KeeneticAuthError, KeeneticClient
+from .api import KeeneticApiError, KeeneticClient
+from .const import FIELD_CONNECTED, FIRMWARE_UPDATE_POLL_S, FIRMWARE_UPDATE_WINDOW_S
 from .coordinator import KeeneticCoordinator
 from .entity import ControllerEntity, MeshEntity
-from .release_notes import KEENETIC_SUPPORT_URL, async_resolve_release_url
-from .utils import mask_identifier
 from .entity_setup import DynamicEntityTracker, register_dynamic_entities
-from .utils import iter_new_items
+from .release_notes import KEENETIC_SUPPORT_URL, async_resolve_release_url
+from .utils import find_mesh_node, iter_new_items, mask_identifier
 
 _LOGGER = logging.getLogger(__name__)
 
 # Serialize update-platform writes (install/reboot) to protect the router CPU.
 PARALLEL_UPDATES = 1
 
-_UPDATE_PROGRESS_FALLBACK_ERRORS = (
-    KeeneticApiError,
-    aiohttp.ClientError,
-    asyncio.TimeoutError,
-    TypeError,
-    ValueError,
-    KeyError,
-)
 _REBOOT_WAIT_ERRORS = (
     KeeneticApiError,
     aiohttp.ClientError,
@@ -117,8 +111,8 @@ def _add_mesh_update_entities(
         entities.append(KeeneticMeshFirmwareUpdate(coordinator, entry, node_id, client))
 
 
-class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
-    """Firmware update entity for the main Keenetic router."""
+class _FirmwareUpdate(UpdateEntity):
+    """Shared progress and outcome confirmation for router and mesh updates."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "firmware_update"
@@ -128,6 +122,82 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
         | UpdateEntityFeature.PROGRESS
         | UpdateEntityFeature.RELEASE_NOTES
     )
+    _update_progress: int | None = None
+
+    @property
+    def in_progress(self) -> bool | int:
+        """Return the last reported progress until the installed version is verified."""
+        return self._update_progress if self._update_progress is not None else False
+
+    async def _async_read_installed_version(self) -> str | None:
+        raise NotImplementedError
+
+    async def _async_read_update_progress(self) -> int | None:
+        return None
+
+    async def _async_install_and_confirm(
+        self, start_update: Callable[[], Awaitable[bool]], device: str
+    ) -> None:
+        if self._update_progress is not None:
+            raise HomeAssistantError(f"{device} already has a firmware update in progress")
+
+        self._update_progress = 0
+        try:
+            self.async_write_ha_state()
+            before = self.installed_version or await self._async_read_installed_version()
+            if not before:
+                raise HomeAssistantError(f"Cannot read the installed firmware version from {device}")
+            if not await start_update():
+                raise HomeAssistantError(f"{device} did not accept the update command")
+
+            installed = await self._async_wait_for_version(before)
+            if installed:
+                self.coordinator.request_update_check()
+                await self.coordinator.async_request_refresh()
+            minutes = FIRMWARE_UPDATE_WINDOW_S // 60
+            if installed == before:
+                raise HomeAssistantError(
+                    f"{device} still reports firmware {before} after {minutes} minutes"
+                )
+            if not installed:
+                raise HomeAssistantError(
+                    f"{device} did not return with a readable firmware version within "
+                    f"{minutes} minutes"
+                )
+        finally:
+            self._update_progress = None
+            self.async_write_ha_state()
+
+    async def _async_wait_for_version(self, before: str) -> str | None:
+        """Return the changed version or the last observation at the deadline."""
+        deadline = monotonic() + FIRMWARE_UPDATE_WINDOW_S
+        installed = None
+        while (remaining := deadline - monotonic()) > 0:
+            await asyncio.sleep(min(FIRMWARE_UPDATE_POLL_S, remaining))
+            if (remaining := deadline - monotonic()) <= 0:
+                break
+
+            progress = installed = None
+            try:
+                async with asyncio.timeout(remaining):
+                    progress = await self._async_read_update_progress()
+                    installed = await self._async_read_installed_version()
+            except _REBOOT_WAIT_ERRORS as err:
+                _LOGGER.debug("Firmware reboot poll failed: %s", type(err).__name__)
+            if installed and installed != before:
+                break
+            if (
+                progress is not None
+                and progress != self._update_progress
+                and deadline - monotonic() >= FIRMWARE_UPDATE_POLL_S
+            ):
+                self._update_progress = progress
+                self.async_write_ha_state()
+        return installed
+
+
+class KeeneticFirmwareUpdate(ControllerEntity, _FirmwareUpdate):
+    """Firmware update entity for the main Keenetic router."""
 
     def __init__(
         self,
@@ -137,7 +207,6 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
     ) -> None:
         ControllerEntity.__init__(self, coordinator, entry.entry_id, entry.title)
         self._client = client
-        self._update_progress: int | None = None
         self._resolved_release_url: str | None = None
 
     @property
@@ -162,13 +231,6 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
 
         # No update available → return current so HA shows "up to date"
         return current
-
-    @property
-    def in_progress(self) -> bool | int:
-        """Return update progress."""
-        if self._update_progress is not None:
-            return self._update_progress
-        return False
 
     @property
     def release_url(self) -> str | None:
@@ -216,111 +278,40 @@ class KeeneticFirmwareUpdate(ControllerEntity, UpdateEntity):
             return notes
         return None
 
+    async def _async_read_installed_version(self) -> str | None:
+        version = await self._client.async_get_current_version_info()
+        return version.get("title") or version.get("release")
+
+    async def _async_read_update_progress(self) -> int | None:
+        progress = await self._client.async_get_update_progress()
+        percent = progress.get("progress_percent")
+        if progress.get("in_progress") and isinstance(percent, (int, float)) and 0 <= percent <= 100:
+            return int(percent)
+        return None
+
     async def async_install(
         self,
         version: str | None,
         backup: bool,
         **kwargs: Any,
     ) -> None:
-        """Install the firmware update."""
+        """Install firmware and confirm the router reports a different version."""
         _LOGGER.info("Starting firmware update for Keenetic router")
-
         try:
-            self._update_progress = 0
-            self.async_write_ha_state()
-
-            result = await self._client.async_start_firmware_update()
-
-            if not result:
-                self._update_progress = None
-                self.async_write_ha_state()
-                raise HomeAssistantError("Router did not accept the update command")
-
-            # Try to get initial progress to detect if endpoint is available
-            progress_supported = False
-            try:
-                initial = await self._client.async_get_update_progress()
-                progress_supported = bool(initial and initial.get("in_progress"))
-            except asyncio.CancelledError:
-                raise
-            except KeeneticAuthError:
-                raise
-            except _UPDATE_PROGRESS_FALLBACK_ERRORS as err:
-                _LOGGER.debug("Update progress endpoint not available: %s", err)
-
-            if progress_supported:
-                # Poll progress until complete or timeout
-                for _ in range(120):  # ~4 min max polling
-                    await asyncio.sleep(2)
-                    try:
-                        progress = await self._client.async_get_update_progress()
-                    except asyncio.CancelledError:
-                        raise
-                    except KeeneticAuthError:
-                        raise
-                    except _REBOOT_WAIT_ERRORS:
-                        self._update_progress = 95
-                        self.async_write_ha_state()
-                        break
-
-                    if not progress.get("in_progress", False):
-                        break
-
-                    percent = progress.get("progress_percent", 0)
-                    if isinstance(percent, (int, float)) and 0 <= percent <= 100:
-                        self._update_progress = int(percent)
-                        self.async_write_ha_state()
-            else:
-                # No progress endpoint — wait for router to reboot
-                _LOGGER.info(
-                    "Update progress not available on this router, "
-                    "waiting for reboot"
-                )
-                self._update_progress = 50
-                self.async_write_ha_state()
-
-                # Wait until connection is lost (router rebooting)
-                for _ in range(60):  # ~2 min to start reboot
-                    await asyncio.sleep(2)
-                    try:
-                        await self._client.async_get_system_info()
-                    except asyncio.CancelledError:
-                        raise
-                    except KeeneticAuthError:
-                        raise
-                    except _REBOOT_WAIT_ERRORS:
-                        self._update_progress = 90
-                        self.async_write_ha_state()
-                        break
-
-        except HomeAssistantError:
+            await self._async_install_and_confirm(
+                self._client.async_start_firmware_update, "Router"
+            )
+        except (asyncio.CancelledError, HomeAssistantError):
             raise
-        except asyncio.CancelledError:
-            raise
-        except Exception as err:  # noqa: BLE001  # surface any unexpected failure as HA error to the user
+        except Exception as err:  # noqa: BLE001  # surface unexpected failures to the user
             _LOGGER.exception("Firmware update failed: %s", err)
             raise HomeAssistantError(f"Firmware update failed: {err}") from err
-        finally:
-            self._update_progress = None
-            self.async_write_ha_state()
-
-        # Refresh coordinator to pick up new version, including one fresh
-        # firmware check (the routine daily cadence would otherwise keep
-        # advertising the version we just installed as available).
-        self.coordinator.request_update_check()
-        await self.coordinator.async_request_refresh()
 
 
-class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
+class KeeneticMeshFirmwareUpdate(MeshEntity, _FirmwareUpdate):
     """Firmware update entity for a Keenetic mesh node."""
 
-    _attr_has_entity_name = True
-    _attr_translation_key = "firmware_update"
-    _attr_device_class = UpdateDeviceClass.FIRMWARE
-    _attr_supported_features = (
-        UpdateEntityFeature.INSTALL
-        | UpdateEntityFeature.RELEASE_NOTES
-    )
+    _attr_supported_features = UpdateEntityFeature.INSTALL | UpdateEntityFeature.RELEASE_NOTES
 
     def __init__(
         self,
@@ -336,6 +327,11 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
     @property
     def unique_id(self) -> str:
         return self._mesh_unique_id("firmware_update_v2")
+
+    @property
+    def in_progress(self) -> bool:
+        """Report whether the node is updating without a numeric estimate."""
+        return self._update_progress is not None
 
     @property
     def installed_version(self) -> str | None:
@@ -398,94 +394,43 @@ class KeeneticMeshFirmwareUpdate(MeshEntity, UpdateEntity):
             )
         return None
 
+    async def _async_read_installed_version(self) -> str | None:
+        nodes = await self._client.async_get_mesh_nodes()
+        node = find_mesh_node({"mesh_nodes": nodes}, self._node_cid)
+        if node and node.get(FIELD_CONNECTED):
+            return node.get("firmware")
+        return None
+
     async def async_install(
         self,
         version: str | None,
         backup: bool,
         **kwargs: Any,
     ) -> None:
-        """Install firmware update for this mesh node via direct connection."""
-        node = self._node
-        node_name = (node.get("name") or self._node_cid) if node else self._node_cid
-        node_ip = node.get("ip") if node else None
-
+        """Install firmware and confirm the mesh node reports a different version."""
+        node = self._node or {}
+        node_name = node.get("name") or self._node_cid
+        node_ip = node.get("ip")
+        label = mask_identifier(node_name)
         if not node_ip:
             raise HomeAssistantError(
-                f"Cannot update {mask_identifier(node_name)}: node IP address "
-                f"not available. Is the node online?"
+                f"Cannot update {label}: node IP address not available. Is the node online?"
             )
 
-        _LOGGER.info(
-            "Starting firmware update for mesh node %s (%s)",
-            mask_identifier(node_name),
-            mask_identifier(node_ip),
-        )
-
-        try:
-            result = await self._client.async_start_node_firmware_update(
+        async def start_update() -> bool:
+            return await self._client.async_start_node_firmware_update(
                 node_ip=node_ip,
                 node_name=node_name,
                 node_cid=node.get("cid") or node.get("mac") or self._node_cid,
             )
 
-            if not result:
-                raise HomeAssistantError(
-                    f"Node {mask_identifier(node_name)} did not accept the "
-                    f"update command"
-                )
-
-            _LOGGER.info(
-                "Update started on %s, waiting for node to reboot",
-                mask_identifier(node_name),
-            )
-            await asyncio.sleep(10)
-
-            # Wait until node reports updated firmware or timeout. Poll every
-            # ~10s (not 2s) so a node update doesn't hammer the controller
-            # with refreshes for the whole reboot window.
-            for _ in range(18):  # ~3 min
-                await asyncio.sleep(10)
-                try:
-                    self.coordinator.request_mesh_refresh()
-                    await self.coordinator.async_request_refresh(full=False)
-                    updated_node = self._node
-                    if updated_node:
-                        new_fw = updated_node.get("firmware")
-                        avail = updated_node.get("firmware_available")
-                        if new_fw and avail and new_fw == avail:
-                            _LOGGER.info(
-                                "Mesh node %s updated to %s",
-                                mask_identifier(node_name),
-                                new_fw,
-                            )
-                            break
-                except asyncio.CancelledError:
-                    raise
-                except KeeneticAuthError:
-                    raise
-                except _REBOOT_WAIT_ERRORS as err:
-                    _LOGGER.debug(
-                        "Mesh node %s firmware re-check failed: %s",
-                        mask_identifier(node_name),
-                        err,
-                    )
-
-        except HomeAssistantError:
+        _LOGGER.info("Starting firmware update for mesh node %s", label)
+        try:
+            await self._async_install_and_confirm(start_update, f"Node {label}")
+        except (asyncio.CancelledError, HomeAssistantError):
             raise
-        except asyncio.CancelledError:
-            raise
-        except Exception as err:  # noqa: BLE001  # surface any unexpected failure as HA error to the user
-            _LOGGER.exception(
-                "Mesh firmware update failed for %s: %s",
-                mask_identifier(node_name),
-                err,
-            )
-            # Frontend-visible message: mask the node name and avoid raw
-            # exception text (ClientConnectionError embeds the node IP).
+        except Exception as err:  # noqa: BLE001  # surface unexpected failures to the user
+            _LOGGER.debug("Mesh firmware update failed for %s: %s", label, type(err).__name__)
             raise HomeAssistantError(
-                f"Mesh firmware update failed for {mask_identifier(node_name)}: "
-                f"{type(err).__name__}"
+                f"Mesh firmware update failed for {label}: {type(err).__name__}"
             ) from err
-
-        self.coordinator.request_update_check()
-        await self.coordinator.async_request_refresh()

@@ -4,6 +4,8 @@ DOMAIN = "keenetic_router_pro"
 DEFAULT_PORT = 100
 DEFAULT_SSL = False
 FAST_SCAN_INTERVAL = 60
+FIRMWARE_UPDATE_POLL_S = 10
+FIRMWARE_UPDATE_WINDOW_S = 15 * 60
 
 # While KeeneticOS boots, runtime endpoints can briefly answer "not found".
 # Endpoint-capability latches recorded within this many seconds of router

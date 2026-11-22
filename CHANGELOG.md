@@ -12,6 +12,8 @@ git log.
 
 ### 🐛 Fixed
 
+- **Firmware updates no longer report a false error while the router or extender installs.** A lost or late reply to the install command means the update has started; Home Assistant shows it as in progress until the device is back and reports success only when the installed version has changed, or a clear error if it returns with the old version or does not return within 15 minutes.
+- **An extender update is never started twice.** When the controller's reply to the extender update command is lost, the integration waits for the result instead of sending the command again directly to the extender.
 - **Reconfigure and reauthentication refuse a different router.** If the new address answers with another router's MAC addresses, the flow stops with "Connect to the same Keenetic router configured in this entry" instead of attaching that router's controls and history to the existing entry.
 
 ### 🔒 Privacy

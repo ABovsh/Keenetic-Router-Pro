@@ -169,6 +169,9 @@ def test_controller_update_progress_endpoint_writes_reported_percent(
         async def async_get_update_progress(self) -> dict[str, Any]:
             return self.progress.pop(0)
 
+        async def async_get_current_version_info(self) -> dict[str, Any]:
+            return {"title": "4.2.0" if self.progress else "4.3.0"}
+
     async def refresh() -> None:
         return None
 
@@ -187,13 +190,13 @@ def test_controller_update_progress_endpoint_writes_reported_percent(
 
     asyncio.run(entity.async_install(version=None, backup=False))
 
-    assert writes == [0, 55, False]
+    assert writes == [0, 25, 55, False]
 
 
-def test_controller_update_progress_failure_marks_rebooting(
+def test_controller_update_progress_failure_waits_for_new_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Progress polling errors during an active update surface reboot progress."""
+    """A progress failure leaves the last percentage visible during reboot."""
     writes: list[bool | int] = []
 
     class Client:
@@ -206,7 +209,16 @@ def test_controller_update_progress_failure_marks_rebooting(
         async def async_get_update_progress(self) -> dict[str, Any]:
             self.calls += 1
             if self.calls == 1:
-                return {"in_progress": True}
+                return {"in_progress": True, "progress_percent": 25}
+            if self.calls == 2:
+                raise KeeneticApiError("rebooting")
+            return {}
+
+        async def async_get_current_version_info(self) -> dict[str, Any]:
+            if self.calls == 1:
+                return {"title": "4.2.0"}
+            if self.calls == 3:
+                return {"title": "4.3.0"}
             raise KeeneticApiError("rebooting")
 
     async def refresh() -> None:
@@ -214,7 +226,7 @@ def test_controller_update_progress_failure_marks_rebooting(
 
     monkeypatch.setattr(update_module.asyncio, "sleep", _no_sleep)
     entity = KeeneticFirmwareUpdate(
-        SimpleNamespace(request_update_check=lambda: None, data={"system": {}}, async_request_refresh=refresh),
+        SimpleNamespace(request_update_check=lambda: None, data={"system": {"title": "4.2.0"}}, async_request_refresh=refresh),
         SimpleNamespace(entry_id="entry_123", title="Router"),
         Client(),
     )
@@ -222,7 +234,7 @@ def test_controller_update_progress_failure_marks_rebooting(
 
     asyncio.run(entity.async_install(version=None, backup=False))
 
-    assert writes == [0, 95, False]
+    assert writes == [0, 25, False]
 
 
 def test_controller_update_progress_cancel_is_propagated(
@@ -242,6 +254,9 @@ def test_controller_update_progress_cancel_is_propagated(
             if self.calls == 1:
                 return {"in_progress": True}
             raise asyncio.CancelledError
+
+        async def async_get_current_version_info(self) -> dict[str, Any]:
+            return {"title": "4.2.0"}
 
     monkeypatch.setattr(update_module.asyncio, "sleep", _no_sleep)
     entity = KeeneticFirmwareUpdate(
@@ -267,12 +282,12 @@ def test_controller_update_reboot_wait_cancel_is_propagated(
         async def async_get_update_progress(self) -> dict[str, Any]:
             return {"in_progress": False}
 
-        async def async_get_system_info(self) -> dict[str, Any]:
+        async def async_get_current_version_info(self) -> dict[str, Any]:
             raise asyncio.CancelledError
 
     monkeypatch.setattr(update_module.asyncio, "sleep", _no_sleep)
     entity = KeeneticFirmwareUpdate(
-        SimpleNamespace(request_update_check=lambda: None, data={"system": {}}, async_request_refresh=lambda: None),
+        SimpleNamespace(request_update_check=lambda: None, data={"system": {"title": "4.2.0"}}, async_request_refresh=lambda: None),
         SimpleNamespace(entry_id="entry_123", title="Router"),
         Client(),
     )
@@ -289,7 +304,7 @@ def test_controller_update_client_error_is_home_assistant_error() -> None:
         async def async_start_firmware_update(self) -> bool:
             raise RuntimeError("boom")
 
-    coordinator = SimpleNamespace(request_update_check=lambda: None, data={"system": {}}, async_request_refresh=lambda: None)
+    coordinator = SimpleNamespace(request_update_check=lambda: None, data={"system": {"title": "4.2.0"}}, async_request_refresh=lambda: None)
     entity = KeeneticFirmwareUpdate(
         coordinator,
         SimpleNamespace(entry_id="entry_123", title="Router"),
@@ -359,10 +374,10 @@ def test_mesh_update_rejects_unaccepted_direct_fallback() -> None:
         asyncio.run(entity.async_install(version=None, backup=False))
 
 
-def test_mesh_update_refresh_failure_is_ignored_during_direct_fallback(
+def test_mesh_update_version_failure_is_ignored_during_direct_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Transient refresh failures do not fail a started mesh update."""
+    """Transient version read failures do not fail a started mesh update."""
 
     class Coordinator:
         def __init__(self) -> None:
@@ -377,13 +392,18 @@ def test_mesh_update_refresh_failure_is_ignored_during_direct_fallback(
 
         async def async_request_refresh(self, **_kwargs) -> None:
             self.calls += 1
-            if self.calls == 1:
-                raise KeeneticApiError("temporary")
-            self.data["mesh_nodes"][0]["firmware"] = "4.3.0"
 
     class Client:
+        reads = 0
+
         async def async_start_node_firmware_update(self, **kwargs: Any) -> bool:
             return True
+
+        async def async_get_mesh_nodes(self) -> list[dict[str, Any]]:
+            self.reads += 1
+            if self.reads == 1:
+                raise KeeneticApiError("temporary")
+            return [dict(FALLBACK_MESH_NODE, firmware="4.3.0")]
 
     monkeypatch.setattr(update_module.asyncio, "sleep", _no_sleep)
     coordinator = Coordinator()
@@ -396,13 +416,13 @@ def test_mesh_update_refresh_failure_is_ignored_during_direct_fallback(
 
     asyncio.run(entity.async_install(version=None, backup=False))
 
-    assert coordinator.calls == 3
+    assert coordinator.calls == 1
 
 
-def test_mesh_update_cancel_during_refresh_is_propagated(
+def test_mesh_update_cancel_during_version_read_is_propagated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Cancellation during mesh refresh polling is never swallowed."""
+    """Cancellation during mesh version polling is never swallowed."""
 
     class Coordinator:
         data = {"mesh_nodes": [FALLBACK_MESH_NODE]}
@@ -413,12 +433,12 @@ def test_mesh_update_cancel_during_refresh_is_propagated(
         def request_mesh_refresh(self) -> None:
             pass
 
-        async def async_request_refresh(self, **_kwargs) -> None:
-            raise asyncio.CancelledError
-
     class Client:
         async def async_start_node_firmware_update(self, **kwargs: Any) -> bool:
             return True
+
+        async def async_get_mesh_nodes(self) -> list[dict[str, Any]]:
+            raise asyncio.CancelledError
 
     monkeypatch.setattr(update_module.asyncio, "sleep", _no_sleep)
     entity = KeeneticMeshFirmwareUpdate(
@@ -460,6 +480,9 @@ def test_mesh_firmware_update_fallback_node_uses_mac_for_mws_then_direct(
         async def async_start_node_firmware_update(self, **kwargs: Any) -> bool:
             calls.append(kwargs)
             return True
+
+        async def async_get_mesh_nodes(self) -> list[dict[str, Any]]:
+            return [dict(FALLBACK_MESH_NODE, firmware="4.3.0")]
 
     monkeypatch.setattr(update_module.asyncio, "sleep", _no_sleep)
     entry = SimpleNamespace(entry_id="entry_123", title="Router")

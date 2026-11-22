@@ -131,7 +131,7 @@ def test_policy_select_confirms_with_a_scoped_refresh() -> None:
     assert requests == ["assignment", {"full": False}]
 
 
-def test_mesh_install_progress_uses_mesh_scoped_refreshes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mesh_install_reads_mesh_before_requesting_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     requests: list[Any] = []
 
     class _Coordinator:
@@ -146,20 +146,19 @@ def test_mesh_install_progress_uses_mesh_scoped_refreshes(monkeypatch: pytest.Mo
         def async_add_listener(self, *_a, **_k):
             return lambda: None
 
-        def request_mesh_refresh(self) -> None:
-            requests.append("mesh")
-
         def request_update_check(self) -> None:
             requests.append("update_check")
 
         async def async_request_refresh(self, **kwargs) -> None:
             requests.append(kwargs)
-            if kwargs == {"full": False}:
-                self.data["mesh_nodes"][0]["firmware"] = "4.3.0"
 
     class _Client:
         async def async_start_node_firmware_update(self, **_kwargs) -> bool:
             return True
+
+        async def async_get_mesh_nodes(self) -> list[dict[str, Any]]:
+            requests.append("mesh")
+            return [{"cid": "node-1", "connected": True, "firmware": "4.3.0"}]
 
     async def _no_sleep(_seconds: float) -> None:
         return None
@@ -170,4 +169,4 @@ def test_mesh_install_progress_uses_mesh_scoped_refreshes(monkeypatch: pytest.Mo
     )
     asyncio.run(entity.async_install(version=None, backup=False))
 
-    assert requests == ["mesh", {"full": False}, "update_check", {}]
+    assert requests == ["mesh", "update_check", {}]
