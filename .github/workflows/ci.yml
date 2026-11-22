@@ -61,6 +61,30 @@ jobs:
           path: coverage.xml
           retention-days: 1
 
+  lint:
+    runs-on: ubuntu-latest
+    name: Ruff and Bandit
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      # Same versions and options as .pre-commit-config.yaml; check only, no --fix.
+      - name: Install linters
+        run: python -m pip install ruff==0.15.18 bandit==1.9.4
+
+      - name: Ruff
+        run: ruff check custom_components tests
+
+      - name: Bandit
+        run: bandit -q -c .github/bandit.yaml -r custom_components
+
   sonar:
     name: SonarCloud
     needs: test
