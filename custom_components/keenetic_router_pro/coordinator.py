@@ -15,7 +15,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 
 from .api import KeeneticClient
 from .api.helpers import _is_endpoint_missing, _normalize_interfaces
-from .const import DOMAIN, FAST_SCAN_INTERVAL, RCI_HOTSPOT_HOST_PATHS
+from .const import DOMAIN, FAST_SCAN_INTERVAL
 from .coordinator_parts.derived import (
     carry_firmware_available,
     counter_rate_bytes_per_second,
@@ -193,8 +193,7 @@ class KeeneticCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _observe_hotspot_clients(self, clients_by_mac: dict[str, dict[str, Any]]) -> set[str]:
         """Seed the entry's history once, then report newly observed MACs."""
         # The API also returns an empty list when every endpoint is unsupported.
-        skipped = getattr(self.client, "_hotspot_subpath_skip", ())
-        if all(path in skipped for path in RCI_HOTSPOT_HOST_PATHS):
+        if getattr(self.client, "_hotspot_read_unsupported", False):
             return set()
         observed = real_client_macs(clients_by_mac)
         seen = self._seen_hotspot_macs

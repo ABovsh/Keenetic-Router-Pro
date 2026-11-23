@@ -1,5 +1,6 @@
 """First-seen client events from fresh hotspot observations."""
 
+import asyncio
 from collections import Counter
 from copy import deepcopy
 
@@ -10,6 +11,7 @@ from tests.test_refresh_request_log import _expected, _get, _router, _tick
 _PHONE = "aa:bb:cc:dd:ee:ff"
 _HOSTS = "show/ip/hotspot/host"
 _FALLBACK_HOSTS = "ip/hotspot/host"
+_NEW_MAC = "02:00:00:00:00:01"
 
 
 @pytest.fixture(params=[True, False], ids=["batch", "405-fallback"])
@@ -38,6 +40,8 @@ async def test_startup_without_hotspot_waits_for_first_fresh_observation(
     )
     if batch:
         startup_reads[_get(_HOSTS)] += 1
+    if status == 503:
+        del startup_reads[_get(_FALLBACK_HOSTS)]
 
     assert await _tick(coordinator, session) == startup_reads
     data = coordinator.data
@@ -54,6 +58,71 @@ async def test_startup_without_hotspot_waits_for_first_fresh_observation(
     assert coordinator.data["clients_stale"] is False
     assert coordinator.data["new_clients"] == set()
     assert _PHONE in coordinator.data["connected_clients"]
+
+
+async def test_partial_startup_must_not_seed() -> None:
+    coordinator, session = await _router(False)
+    coordinator.needs_policies = False
+    session.status[_HOSTS] = 503
+    session.payloads[_FALLBACK_HOSTS] = {"host": []}
+    await _tick(coordinator, session)
+    assert coordinator.data["new_clients"] == set()
+
+    del session.status[_HOSTS]
+    await _tick(coordinator, session)
+    assert _PHONE in coordinator.data["online_clients"]
+    assert coordinator.data["new_clients"] == set()
+
+
+async def test_partial_hotspot_must_not_publish_false_departure() -> None:
+    coordinator, session = await _router(False)
+    await _tick(coordinator, session)
+    assert _PHONE in coordinator.data["online_clients"]
+
+    session.status[_HOSTS] = 503
+    session.payloads[_FALLBACK_HOSTS] = {"host": []}
+    await _tick(coordinator, session)
+    assert _PHONE not in coordinator.data["disconnected_clients"]
+    assert _PHONE in coordinator.data["online_clients"]
+    assert coordinator.data["clients_stale"] is True
+
+
+async def test_partial_nonempty_config_must_not_emit_new_device() -> None:
+    coordinator, session = await _router(False)
+    coordinator.needs_policies = False
+    await _tick(coordinator, session)
+    session.status[_HOSTS] = 503
+    session.payloads[_FALLBACK_HOSTS] = {"host": [{"mac": _NEW_MAC, "policy": "Guest"}]}
+    await _tick(coordinator, session)
+
+    assert _NEW_MAC not in coordinator.data["new_clients"]
+    assert _NEW_MAC not in coordinator._seen_hotspot_macs
+
+
+async def test_hotspot_absence_latch_reset_must_not_seed_from_skipped_read() -> None:
+    coordinator, session = await _router(False)
+    coordinator.needs_policies = False
+    session.status.update({_HOSTS: 404, _FALLBACK_HOSTS: 404})
+    await _tick(coordinator, session)
+    assert coordinator._seen_hotspot_macs is None
+    assert coordinator.client._hotspot_subpath_skip == {_HOSTS, _FALLBACK_HOSTS}
+
+    session.pause_system = True
+    session.payloads["show/system"] = dict(session.payloads["show/system"], uptime=30)
+    session.status.clear()
+    async with asyncio.timeout(2):
+        running = asyncio.create_task(_tick(coordinator, session))
+        await session.entered.wait()
+        # The hosts read skips both endpoints before the system read resets the latches.
+        await session.wait_for_log(Counter([_get("show/ip/neighbour")]))
+        session.resume.set()
+        requests = await running
+    assert _get(_HOSTS) not in requests
+    assert _get(_FALLBACK_HOSTS) not in requests
+    assert not coordinator.client._hotspot_subpath_skip
+
+    await _tick(coordinator, session)
+    assert coordinator.data["new_clients"] == set()
 
 
 async def test_seen_client_can_leave_and_rejoin_without_second_new_device(batch: bool) -> None:
