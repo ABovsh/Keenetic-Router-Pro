@@ -562,10 +562,14 @@ def keenetic_coordinator_factory():
         async def async_request_refresh() -> None:
             refresh_calls.append("refresh")
 
+        async def async_request_switch_refresh(_source) -> None:
+            await async_request_refresh()
+
         return SimpleNamespace(
             data=data or {},
             last_update_success=True,
             async_request_refresh=async_request_refresh,
+            async_request_switch_refresh=async_request_switch_refresh,
             refresh_calls=refresh_calls,
         )
 

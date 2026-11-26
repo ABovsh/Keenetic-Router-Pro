@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 import asyncio
 import logging
+import re
 import voluptuous as vol
 import aiohttp
 
@@ -35,6 +36,7 @@ from .api import (
 )
 from .http_session import async_get_keenetic_session
 from .const import (
+    ABORT_WRONG_ROUTER,
     DOMAIN,
     DEFAULT_PORT,
     DEFAULT_SSL,
@@ -43,6 +45,7 @@ from .const import (
     CONNECTION_MODE_KEENDNS_PROTECTED,
     CONF_TRACKED_CLIENTS,
     CONF_USE_CHALLENGE_AUTH,
+    ZERO_MAC,
 )
 from .const import (
     CLIENT_SENSORS_BASIC,
@@ -373,7 +376,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         background reload triggered by an update listener) is deprecated.
         """
         try:
-            await self._async_connect(new_data)
+            _, _, interfaces = await self._async_connect(new_data)
         except KeeneticRciBlockedError:
             return {"base": "rci_blocked"}
         except KeeneticAuthError:
@@ -385,6 +388,9 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Unexpected error during %s", log_context)
             return {"base": "unknown"}
+
+        if self._router_mac_mismatch(entry.unique_id, interfaces):
+            return {"base": ABORT_WRONG_ROUTER}
 
         return None
 
@@ -412,7 +418,7 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # would create unstable/colliding unique IDs or crash
                 # format_mac below.
                 normalized = normalize_mac(candidate)
-                if normalized and normalized != "00:00:00:00:00:00":
+                if normalized and normalized != ZERO_MAC:
                     mac = normalized
                     break
 
@@ -425,6 +431,27 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         hostname = system_info.get("hostname", host)
         return f"{vendor} {device} {hostname}", f"{vendor} {device}"
+
+    @staticmethod
+    def _router_mac_mismatch(
+        unique_id: str | None, interfaces: dict[str, Any]
+    ) -> bool:
+        """Report a mismatch only when both the entry and probe have MAC evidence."""
+        suffix = (unique_id or "").strip().rpartition(" ")[2].lower()
+        if not re.fullmatch(r"[0-9a-f]{8}", suffix) or not isinstance(interfaces, dict):
+            return False
+
+        has_mac = False
+        for iface in interfaces.values():
+            if not isinstance(iface, dict):
+                continue
+            mac = normalize_mac(iface.get("mac"))
+            if not mac or mac == ZERO_MAC:
+                continue
+            if mac.replace(":", "").endswith(suffix):
+                return False
+            has_mac = True
+        return has_mac
 
     async def async_step_ssdp(self, discovery_info: SsdpServiceInfo) -> FlowResult:
         """Handle a discovered Keenetic router via SSDP."""
@@ -640,6 +667,8 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             new_data = {**entry_data, **user_input}
             errors = await self._async_validate_and_update(entry, new_data, "reauth") or {}
+            if errors.get("base") == ABORT_WRONG_ROUTER:
+                return self.async_abort(reason=ABORT_WRONG_ROUTER)
             if not errors:
                 return self.async_update_reload_and_abort(
                     entry,
@@ -712,6 +741,8 @@ class KeeneticRouterProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors = await self._async_validate_and_update(
                     entry, new_data, "reconfigure"
                 ) or {}
+                if errors.get("base") == ABORT_WRONG_ROUTER:
+                    return self.async_abort(reason=ABORT_WRONG_ROUTER)
                 if not errors:
                     return self.async_update_reload_and_abort(
                         entry,

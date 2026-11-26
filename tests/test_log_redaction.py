@@ -38,7 +38,8 @@ async def test_mac_taking_actions_do_not_log_raw_mac(
     args: tuple[object, ...],
 ) -> None:
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
-    client._session = object()
+    client._session = _Session([_Response({"message": "ok"})])
+    client._authenticated = True
     client._rci_parse = AsyncMock(return_value={"message": "ok"})
     client._authenticate_to_node = AsyncMock(return_value=None)
 

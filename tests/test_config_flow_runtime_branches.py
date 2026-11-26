@@ -56,6 +56,7 @@ class ConfigEntries:
 def _entry() -> SimpleNamespace:
     return SimpleNamespace(
         entry_id="entry-1",
+        unique_id="Keenetic Router cc000001",
         data={
             CONF_CONNECTION_MODE: CONNECTION_MODE_DIRECT,
             CONF_HOST: TEST_HOST,
@@ -264,12 +265,25 @@ async def test_async_validate_and_update_cancelled_error_reraises() -> None:
         await flow._async_validate_and_update(_entry(), {}, "test")
 
 
-async def test_reconfigure_mode_and_connection_success_updates_entry() -> None:
+@pytest.mark.parametrize(
+    ("router_mac", "expected_reason"),
+    [
+        ("aa:bb:cc:00:00:01", "reconfigure_successful"),
+        ("aa:bb:cc:00:00:02", "wrong_router"),
+    ],
+    ids=["same_router", "different_router"],
+)
+async def test_reconfigure_mode_and_connection_checks_router_identity(
+    router_mac: str, expected_reason: str
+) -> None:
     entry = _entry()
+    original_data = entry.data.copy()
     entries = ConfigEntries(entry)
     flow = KeeneticRouterProConfigFlow()
     _pin_flow(flow, entries)
-    flow._async_connect = AsyncMock(return_value=(None, {}, {}))
+    flow._async_connect = AsyncMock(
+        return_value=(None, {}, {"Bridge0": {"mac": router_mac}})
+    )
 
     first = await flow.async_step_reconfigure(
         {CONF_CONNECTION_MODE: CONNECTION_MODE_KEENDNS_PROTECTED}
@@ -283,9 +297,16 @@ async def test_reconfigure_mode_and_connection_success_updates_entry() -> None:
     )
 
     assert first["step_id"] == "reconfigure_connection"
-    assert result["reason"] == "reconfigure_successful"
+    assert result["type"] == "abort"
+    assert result["reason"] == expected_reason
+    if expected_reason == "wrong_router":
+        assert entries.updated == []
+        assert entry.data == original_data
+        return
+
     assert result["data"][CONF_CONNECTION_MODE] == CONNECTION_MODE_KEENDNS_PROTECTED
     assert result["data"][CONF_SSL] is True
+    assert entries.updated == [result["data"]]
 
 
 async def test_reconfigure_connection_validation_error_reshows_form() -> None:

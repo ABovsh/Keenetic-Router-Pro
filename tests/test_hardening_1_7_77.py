@@ -15,11 +15,11 @@ import pytest
 from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.keenetic_router_pro.api.client import KeeneticClient
-from custom_components.keenetic_router_pro.api.errors import KeeneticApiError
 from custom_components.keenetic_router_pro.api.target import (
     normalize_connection_target,
 )
 from custom_components.keenetic_router_pro.entity import ClientEntity
+from tests.test_api_lifecycle import FakeResponse, FakeSession
 
 
 class _DummyCoordinator:
@@ -92,26 +92,28 @@ async def test_update_start_5xx_mentioning_404_is_not_treated_as_missing() -> No
     """A 502 whose body text contains "404" must surface, not fall through."""
     client = KeeneticClient("192.168.1.1", "user", "pass")
     client._rci_get = AsyncMock(return_value={"ndw": {"components": "base,wifi"}})
-    client._request = AsyncMock(
-        side_effect=KeeneticApiError("502 Bad Gateway: /404.html", status=502)
-    )
-    client._rci_post = AsyncMock(return_value={"status": "accepted"})
+    client._session = FakeSession([FakeResponse(502, text="Bad Gateway: /404.html")])
+    client._authenticated = True
 
     with pytest.raises(HomeAssistantError):
         await client.async_start_firmware_update()
-    client._rci_post.assert_not_awaited()
+    assert [(method, url.rsplit("/rci/", 1)[1]) for method, url, _ in client._session.calls] == [
+        ("POST", "")
+    ]
 
 
 async def test_update_start_404_without_literal_404_text_falls_back() -> None:
     """A real 404 with an empty body must still fall back to system/update."""
     client = KeeneticClient("192.168.1.1", "user", "pass")
     client._rci_get = AsyncMock(return_value={"ndw": {"components": "base,wifi"}})
-    client._request = AsyncMock(side_effect=KeeneticApiError("HTTP error", status=404))
-    client._rci_post = AsyncMock(return_value={"status": "accepted"})
+    client._session = FakeSession([FakeResponse(404), FakeResponse(204)])
+    client._authenticated = True
 
     assert await client.async_start_firmware_update() is True
-    client._rci_post.assert_awaited_once_with(
-        "system/update", {"confirm": True}, allow_text=True
+    assert len(client._session.calls) == 2
+    method, url, kwargs = client._session.calls[-1]
+    assert (method, url.rsplit("/rci/", 1)[1], kwargs["json"]) == (
+        "POST", "system/update", {"confirm": True}
     )
 
 

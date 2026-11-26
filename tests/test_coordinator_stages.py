@@ -206,11 +206,7 @@ async def _updated_data(coordinator: KeeneticCoordinator) -> dict[str, Any]:
 
 
 def _coordinator(client: StageFixtureClient) -> KeeneticCoordinator:
-    coordinator = object.__new__(KeeneticCoordinator)
-    coordinator.client = client
-    coordinator.data = None
-    coordinator._refresh_count = 0
-    return coordinator
+    return KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
 
 
 async def test_coordinator_pipeline_fixtures_publishes_expected_data_keys() -> None:

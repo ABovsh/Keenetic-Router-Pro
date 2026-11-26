@@ -5,7 +5,7 @@
 <p align="center">Know when your internet switches providers, when a device comes home,<br>and when a mesh extender goes offline. All from Home Assistant.</p>
 
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-orange.svg?style=for-the-badge)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ABovsh&repository=Keenetic-Router-Pro&category=integration)
-![Version](https://img.shields.io/badge/version-1.21.0-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-2.0.0-blue?style=for-the-badge)
 ![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2024.5%2B-41BDF5?style=for-the-badge&logo=home-assistant)
 
 [![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=ABovsh_Keenetic-Router-Pro&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=ABovsh_Keenetic-Router-Pro)
@@ -67,9 +67,9 @@ there is no cloud dependency and no extra Python package to install.
 
 ### 🔄 Firmware and maintenance
 
-- **Firmware updates** for the router and extenders through Home Assistant's update entities, with the model's release notes and, on the router, install progress.
+- **Firmware updates** for the router and extenders through Home Assistant's update entities, with the model's release notes and, on the router, install progress. An install stays in progress until the device is back, and succeeds only when it reports the new version.
 - **Reboot** the router or any extender with a button.
-- **Daily update check:** the integration asks the router once a day whether new firmware is out.
+- **Daily update check:** the integration asks the router once a day whether new firmware is out, and retries every 15 minutes after a failed check.
 
 ### 🩺 Problems explained
 
@@ -222,7 +222,7 @@ Some entities start disabled because most users don't need them: WAN RX/TX, PPPo
 | 2 minutes | Traffic and throughput, CPU, memory, connections, Wi-Fi, VPN tunnels, ports |
 | 3 minutes | Mesh extenders, IPsec tunnels, client connection policies |
 | 15 minutes | Firmware version, KeenDNS, the list of connection policies |
-| 1 day | Firmware update check |
+| 1 day | Firmware update check (every 15 minutes after a failed check) |
 
 A change you make from Home Assistant, such as a new policy or an extender update, is read back right away.
 

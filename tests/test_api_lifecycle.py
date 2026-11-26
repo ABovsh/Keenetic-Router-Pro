@@ -70,6 +70,49 @@ class FakeSession:
         return self.responses.pop(0)
 
 
+@pytest.mark.parametrize("target", ["controller", "mesh_node"])
+async def test_challenge_auth_does_not_follow_post_redirects(
+    target: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A challenge POST redirect must fail without making another request."""
+    challenge = FakeResponse(
+        401, headers={"X-NDM-Challenge": "challenge", "Set-Cookie": "session=abc"}
+    )
+    redirect_body = "private-redirect-body-sentinel"
+    redirect = FakeResponse(
+        307, headers={"Location": "/redirected-auth"}, text=redirect_body
+    )
+    destination = FakeResponse(200)
+
+    class RedirectingSession(FakeSession):
+        async def post(self, url: str, **kwargs: Any) -> FakeResponse:
+            response = await super().post(url, **kwargs)
+            if response is redirect and kwargs.get("allow_redirects", True):
+                return await super().post(response.headers["Location"], **kwargs)
+            return response
+
+    session = RedirectingSession([challenge, redirect, destination])
+    client = KeeneticClient(
+        TEST_HOST, TEST_USERNAME, TEST_PASSWORD, use_challenge_auth=True
+    )
+    client._session = session
+
+    with caplog.at_level("DEBUG"):
+        if target == "controller":
+            with pytest.raises(KeeneticApiError, match=r"status=307") as exc:
+                await client._ensure_auth()
+            assert redirect_body not in str(exc.value)
+            assert not client._authenticated
+        else:
+            assert await client._authenticate_to_node("192.0.2.2") is None
+
+    assert [method for method, _, _ in session.calls] == ["GET", "POST"]
+    assert challenge.closed
+    assert redirect.closed
+    assert "307" in caplog.text
+    assert redirect_body not in caplog.text
+
+
 def test_challenge_auth_closes_get_and_post_responses() -> None:
     """NDW2 auth releases both raw /auth responses."""
     get_resp = FakeResponse(
@@ -366,18 +409,48 @@ def test_direct_mesh_firmware_update_closes_all_responses() -> None:
     assert all(response.closed for response in responses)
 
 
-def test_direct_mesh_firmware_update_clears_stale_cached_node_cookie() -> None:
-    """A 401 during direct node update invalidates the cached node cookie."""
+@pytest.mark.parametrize("endpoint", ["staging", "commit", "legacy"])
+@pytest.mark.parametrize("retry_status", [204, 401])
+def test_direct_mesh_firmware_update_clears_stale_cached_node_cookie(
+    endpoint: str, retry_status: int,
+) -> None:
+    """A direct firmware write can be retried once with a new node cookie."""
+    install_components = endpoint != "legacy"
     responses = [
-        FakeResponse(200, json_data={"ndw": {"components": ""}}),
-        FakeResponse(401, text="auth expired"),
+        FakeResponse(200, json_data={"ndw": {"components": "base" if install_components else ""}}),
     ]
+    if endpoint == "commit":
+        responses.append(FakeResponse(204))
+    responses.extend([
+        FakeResponse(401),
+        FakeResponse(401, headers={"X-NDM-Challenge": "challenge"}),
+        FakeResponse(200, headers={"Set-Cookie": "session=fresh"}),
+        FakeResponse(retry_status),
+    ])
+    if endpoint == "staging" and retry_status == 204:
+        responses.append(FakeResponse(204))
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD, port=80)
     client._session = FakeSession(responses.copy())
-    client._node_auth_headers[("192.0.2.2", 80)] = {"Cookie": "session=stale"}
+    auth_key = ("192.0.2.2", 80)
+    client._node_auth_headers[auth_key] = {"Cookie": "session=stale"}
 
-    with pytest.raises(HomeAssistantError):
-        asyncio.run(client.async_start_node_firmware_update("192.0.2.2"))
+    if retry_status == 204:
+        assert asyncio.run(client.async_start_node_firmware_update(auth_key[0])) is True
+        assert client._node_auth_headers[auth_key] == {"Cookie": "session=fresh"}
+    else:
+        with pytest.raises(HomeAssistantError, match="authentication rejected"):
+            asyncio.run(client.async_start_node_firmware_update(auth_key[0]))
+        assert auth_key not in client._node_auth_headers
 
-    assert ("192.0.2.2", 80) not in client._node_auth_headers
+    urls = {"staging": "/rci/", "commit": "/rci/components/commit", "legacy": "/rci/system/update"}
+    assert [
+        kwargs["headers"].get("Cookie")
+        for method, url, kwargs in client._session.calls
+        if method == "POST" and url.endswith(urls[endpoint])
+    ] == ["session=stale", "session=fresh"]
+    if endpoint == "staging" and retry_status == 204:
+        _, url, kwargs = client._session.calls[-1]
+        assert url.endswith(urls["commit"])
+        assert kwargs["headers"]["Cookie"] == "session=fresh"
+    assert not client._session.responses
     assert all(response.closed for response in responses)

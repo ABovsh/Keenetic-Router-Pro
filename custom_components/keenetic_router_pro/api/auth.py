@@ -189,6 +189,7 @@ class _AuthMixin:
                     auth_url,
                     json=payload,
                     headers=post_headers,
+                    allow_redirects=False,
                 )
         except asyncio.TimeoutError as err:
             raise KeeneticApiError("Challenge POST timed out") from err
@@ -202,6 +203,13 @@ class _AuthMixin:
         # TimeoutError/ClientError, so they propagate unchanged.
         try:
             async with asyncio.timeout(self._request_timeout), post_resp:
+                if 300 <= post_resp.status < 400:
+                    _LOGGER.debug(
+                        "NDW2 challenge POST response: status=%s", post_resp.status
+                    )
+                    raise KeeneticApiError(
+                        f"Challenge auth failed (status={post_resp.status})"
+                    )
                 post_text = await post_resp.text()
                 _LOGGER.debug(
                     "NDW2 challenge POST response: status=%s body_length=%s",

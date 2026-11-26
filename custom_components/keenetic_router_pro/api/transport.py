@@ -75,6 +75,8 @@ class _Transport:
         self._hotspot_subpath_skip: set[str] = set()
         # Latched "winner" hotspot subpath for fast path on the next poll.
         self._hotspot_subpath_winner: str | None = None
+        # Read result survives capability reset during the same refresh tick.
+        self._hotspot_read_unsupported: bool = False
         # Latched per-interface stat fetch mode. None -> probe both, True ->
         # GET path works (skip the parse-mode attempt on every call),
         # False -> parse-mode needed.

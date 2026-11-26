@@ -11,17 +11,22 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
 import custom_components.keenetic_router_pro.update as update_module
 from custom_components.keenetic_router_pro.coordinator import KeeneticCoordinator
 from custom_components.keenetic_router_pro.coordinator_parts.refresh import (
+    PendingRefreshes,
     build_batch_tree,
     refresh_plan,
 )
 from custom_components.keenetic_router_pro.select import KeeneticClientPolicySelect
-from custom_components.keenetic_router_pro.update import KeeneticMeshFirmwareUpdate
+from custom_components.keenetic_router_pro.update import (
+    KeeneticFirmwareUpdate,
+    KeeneticMeshFirmwareUpdate,
+)
 from tests.test_coordinator_stages import StageFixtureClient, _coordinator, _updated_data
 from tests.test_coordinator_update_flow import FakeKeeneticClient
 
@@ -55,6 +60,159 @@ async def test_policy_confirmation_reads_only_the_assignment() -> None:
     assert {name: client.calls.get(name, 0) for name in (*_INCIDENTAL, "mesh_nodes")} == dict.fromkeys(
         (*_INCIDENTAL, "mesh_nodes"), 0
     )
+
+
+async def test_failed_host_policy_read_retries_only_that_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = StageFixtureClient()
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+    coordinator.data = await _updated_data(coordinator)
+    previous = coordinator.data["host_policies"]
+    assert previous
+    coordinator._refresh_count = 7
+
+    read = AsyncMock(side_effect=[TimeoutError(), {}])
+    monkeypatch.setattr(client, "async_get_host_policies", read)
+    coordinator.request_host_policies_refresh()
+    coordinator.data = await _updated_data(coordinator)
+    assert coordinator.data["host_policies"] == previous
+
+    client.calls.clear()
+    coordinator.data = await _updated_data(coordinator)
+    assert read.await_count == 2
+    assert coordinator.data["host_policies"] == {}
+    for name in ("policies", "ndns", "current_version"):
+        assert name not in client.calls
+
+    coordinator._refresh_count = 11
+    await _updated_data(coordinator)
+    assert read.await_count == 2
+
+
+async def test_failed_policy_list_waits_for_its_regular_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = StageFixtureClient()
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+    coordinator.data = await _updated_data(coordinator)
+    previous = coordinator.data["policies"]
+    coordinator._refresh_count = 15
+
+    read = AsyncMock(side_effect=[TimeoutError(), {}])
+    monkeypatch.setattr(client, "async_get_policies", read)
+    coordinator.data = await _updated_data(coordinator)
+    assert coordinator.data["policies"] == previous
+
+    while coordinator._refresh_count < 30:
+        coordinator.data = await _updated_data(coordinator)
+        assert read.await_count == 1
+        assert coordinator.data["policies"] == previous
+
+    coordinator.data = await _updated_data(coordinator)
+    assert read.await_count == 2
+    assert coordinator.data["policies"] == {}
+
+
+@pytest.mark.parametrize("requested", [False, True], ids=["daily", "requested"])
+async def test_failed_update_check_retries_on_very_slow_tier(
+    monkeypatch: pytest.MonkeyPatch, requested: bool
+) -> None:
+    client = StageFixtureClient()
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+    coordinator.data = await _updated_data(coordinator)
+    keys = ("release-available", "fw-update-sandbox", "fw-update-available")
+    previous = tuple(coordinator.data["system"][key] for key in keys)
+    assert previous == ("4.3.0", "stable", True)
+
+    failed_tick, retry_tick = (7, 15) if requested else (1440, 1455)
+    coordinator._refresh_count = failed_tick
+    if requested:
+        coordinator.request_update_check()
+    recovery = {"release": "4.4.0", "sandbox": "preview", "update-available": True}
+    read = AsyncMock(side_effect=[TimeoutError(), TimeoutError(), recovery])
+    monkeypatch.setattr(client, "async_get_available_version_info", read)
+    coordinator.data = await _updated_data(coordinator)
+
+    # A full confirming refresh also runs the very-slow reads, off cadence.
+    coordinator.request_full_refresh()
+    for expected_calls, next_tick in [(1, retry_tick), (2, retry_tick + 15)]:
+        while coordinator._refresh_count < next_tick:
+            assert tuple(coordinator.data["system"][key] for key in keys) == previous
+            coordinator.data = await _updated_data(coordinator)
+            assert read.await_count == expected_calls
+        coordinator.data = await _updated_data(coordinator)
+        assert read.await_count == expected_calls + 1
+
+    assert tuple(coordinator.data["system"][key] for key in keys) == ("4.4.0", "preview", True)
+    coordinator._refresh_count = retry_tick + 30
+    coordinator.data = await _updated_data(coordinator)
+    assert read.await_count == 3
+
+
+async def test_first_failed_update_check_leaves_latest_version_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = StageFixtureClient()
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+    monkeypatch.setattr(
+        client,
+        "async_get_available_version_info",
+        AsyncMock(side_effect=TimeoutError()),
+    )
+    coordinator.data = await _updated_data(coordinator)
+
+    entry = SimpleNamespace(entry_id="e1", title="Router")
+    entity = KeeneticFirmwareUpdate(coordinator, entry, client)
+    assert entity.installed_version == "4.2.1"
+    assert entity.latest_version is None
+
+
+@pytest.mark.parametrize(
+    ("method", "request_method", "fails"),
+    [
+        ("async_get_host_policies", "request_host_policies_refresh", False),
+        ("async_get_available_version_info", "request_update_check", False),
+        ("async_get_available_version_info", "request_update_check", True),
+    ],
+)
+async def test_newer_request_during_read_gets_its_own_read(
+    monkeypatch: pytest.MonkeyPatch, method: str, request_method: str, fails: bool
+) -> None:
+    client = StageFixtureClient()
+    coordinator = KeeneticCoordinator(object(), client)  # type: ignore[arg-type]
+    coordinator.data = await _updated_data(coordinator)
+    coordinator._refresh_count = 7
+    request_refresh = getattr(coordinator, request_method)
+    original = getattr(client, method)
+    entered = asyncio.Event()
+    resume = asyncio.Event()
+
+    async def read() -> dict:
+        if not entered.is_set():
+            entered.set()
+            async with asyncio.timeout(1):
+                await resume.wait()
+            if fails:
+                raise TimeoutError
+        return await original()
+
+    read_mock = AsyncMock(side_effect=read)
+    monkeypatch.setattr(client, method, read_mock)
+    request_refresh()
+    async with asyncio.TaskGroup() as tasks:
+        pending_tick = tasks.create_task(_updated_data(coordinator))
+        async with asyncio.timeout(1):
+            await entered.wait()
+        request_refresh()
+        resume.set()
+    coordinator.data = pending_tick.result()
+
+    coordinator.data = await _updated_data(coordinator)
+    assert read_mock.await_count == 2
+    coordinator._refresh_count = 11
+    await _updated_data(coordinator)
+    assert read_mock.await_count == 2
 
 
 async def test_mesh_progress_check_reads_the_mesh_once() -> None:
@@ -93,7 +251,12 @@ def test_batch_tree_carries_the_requested_mesh_and_update_check_paths() -> None:
     assert "mws" not in plain.get("show", {})
     assert "components" not in plain
 
-    scoped = build_batch_tree(fast, include_mesh=True, mesh_refresh=True, update_check=True)
+    scoped_plan = refresh_plan(
+        first_refresh=False,
+        refresh_count=1,
+        pending=PendingRefreshes(mesh=1, update_check_pending=True, update_check_token=1),
+    )
+    scoped = build_batch_tree(scoped_plan, include_mesh=True)
     assert "member" in scoped["show"]["mws"]
     assert "check-update" in scoped["components"]
 
@@ -131,7 +294,7 @@ def test_policy_select_confirms_with_a_scoped_refresh() -> None:
     assert requests == ["assignment", {"full": False}]
 
 
-def test_mesh_install_progress_uses_mesh_scoped_refreshes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mesh_install_reads_mesh_before_requesting_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
     requests: list[Any] = []
 
     class _Coordinator:
@@ -146,20 +309,19 @@ def test_mesh_install_progress_uses_mesh_scoped_refreshes(monkeypatch: pytest.Mo
         def async_add_listener(self, *_a, **_k):
             return lambda: None
 
-        def request_mesh_refresh(self) -> None:
-            requests.append("mesh")
-
         def request_update_check(self) -> None:
             requests.append("update_check")
 
         async def async_request_refresh(self, **kwargs) -> None:
             requests.append(kwargs)
-            if kwargs == {"full": False}:
-                self.data["mesh_nodes"][0]["firmware"] = "4.3.0"
 
     class _Client:
         async def async_start_node_firmware_update(self, **_kwargs) -> bool:
             return True
+
+        async def async_get_mesh_nodes(self) -> list[dict[str, Any]]:
+            requests.append("mesh")
+            return [{"cid": "node-1", "connected": True, "firmware": "4.3.0"}]
 
     async def _no_sleep(_seconds: float) -> None:
         return None
@@ -170,4 +332,4 @@ def test_mesh_install_progress_uses_mesh_scoped_refreshes(monkeypatch: pytest.Mo
     )
     asyncio.run(entity.async_install(version=None, backup=False))
 
-    assert requests == ["mesh", {"full": False}, "update_check", {}]
+    assert requests == ["mesh", "update_check", {}]

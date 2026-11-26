@@ -54,19 +54,18 @@ async def test_async_check_firmware_update_release_available_nonstable_no_update
 async def test_async_start_firmware_update_components_404_uses_system_update() -> None:
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
     client._rci_get = AsyncMock(return_value={"ndw": {"components": "base,wifi"}})
-    client._request = AsyncMock(side_effect=KeeneticApiError("404 not found"))
-    client._rci_post = AsyncMock(return_value={"status": "accepted"})
+    client._session = FakeSession([FakeResponse(404), FakeResponse(204)])
+    client._authenticated = True
 
     assert await client.async_start_firmware_update() is True
-    client._rci_post.assert_awaited_once_with(
-        "system/update", {"confirm": True}, allow_text=True
-    )
+    assert [url.split("/rci/")[1] for _, url, _ in client._session.calls] == ["", "system/update"]
 
 
 async def test_async_start_firmware_update_system_update_text_result_succeeds() -> None:
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
     client._rci_get = AsyncMock(return_value={})
-    client._rci_post = AsyncMock(return_value="started")
+    client._session = FakeSession([FakeResponse(text="started")])
+    client._authenticated = True
 
     assert await client.async_start_firmware_update() is True
 
@@ -82,37 +81,36 @@ async def test_async_start_firmware_update_system_update_text_result_succeeds() 
 async def test_async_start_firmware_update_rejects_failure_results(result: object) -> None:
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
     client._rci_get = AsyncMock(return_value={})
-    client._rci_post = AsyncMock(return_value=result)
+    response = FakeResponse(headers={"Content-Type": "application/json"}, json_data=result)
+    client._session = FakeSession([response])
+    client._authenticated = True
 
-    with pytest.raises(HomeAssistantError):
+    with pytest.raises(HomeAssistantError, match="did not accept"):
         await client.async_start_firmware_update()
+    assert response.closed
 
 
 @pytest.mark.parametrize(
-    ("request_error", "post_error"),
-    [
-        (KeeneticApiError("500 failed"), None),
-        (None, KeeneticApiError("500 failed")),
-    ],
+    "statuses", [[500], [204, 400]],
 )
-async def test_async_start_firmware_update_non404_error_raises(
-    request_error: Exception | None, post_error: Exception | None
-) -> None:
+async def test_async_start_firmware_update_non404_error_raises(statuses: list[int]) -> None:
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
     client._rci_get = AsyncMock(return_value={"ndw": {"components": "base"}})
-    client._request = AsyncMock(side_effect=request_error)
-    client._rci_post = AsyncMock(side_effect=post_error or KeeneticApiError("404"))
+    client._session = FakeSession([FakeResponse(status, text="failed") for status in statuses])
+    client._authenticated = True
 
-    with pytest.raises(HomeAssistantError):
+    with pytest.raises(HomeAssistantError, match="did not accept"):
         await client.async_start_firmware_update()
+    assert len(client._session.calls) == len(statuses)
 
 
 async def test_async_start_firmware_update_no_endpoint_raises() -> None:
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD)
     client._rci_get = AsyncMock(return_value={})
-    client._rci_post = AsyncMock(side_effect=KeeneticApiError("404 not found"))
+    client._session = FakeSession([FakeResponse(404)])
+    client._authenticated = True
 
-    with pytest.raises(HomeAssistantError):
+    with pytest.raises(HomeAssistantError, match="No compatible firmware update endpoint"):
         await client.async_start_firmware_update()
 
 
@@ -125,24 +123,29 @@ async def test_async_start_node_firmware_update_missing_session_or_ip_raises() -
 
 async def test_async_start_node_firmware_update_mws_error_uses_direct_system_update() -> None:
     responses = [
+        FakeResponse(
+            headers={"Content-Type": "application/json"},
+            json_data=[{"message": "error: busy"}],
+        ),
         FakeResponse(200, json_data={"ndw": {"components": ""}}),
         FakeResponse(204),
     ]
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD, port=80)
     client._session = FakeSession(responses.copy())
-    client._rci_parse = AsyncMock(return_value=[{"message": "error: busy"}])
+    client._authenticated = True
     client._authenticate_to_node = AsyncMock(return_value={"Cookie": "session=node"})
 
     assert await client.async_start_node_firmware_update(
         "192.0.2.2", "Extender", "AA:BB:CC:DD:EE:FF"
     ) is True
+    assert all(response.closed for response in responses)
 
 
 async def test_async_start_node_firmware_update_component_failures_try_fallback() -> None:
     responses = [
         FakeResponse(200, json_data={"ndw": {"components": "base"}}),
-        FakeResponse(500, text="stage failed"),
-        FakeResponse(500, text="legacy failed"),
+        FakeResponse(400, text="stage failed"),
+        FakeResponse(400, text="legacy failed"),
     ]
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD, port=80)
     client._session = FakeSession(responses.copy())
@@ -151,7 +154,24 @@ async def test_async_start_node_firmware_update_component_failures_try_fallback(
     with pytest.raises(HomeAssistantError):
         await client.async_start_node_firmware_update("192.0.2.2")
 
-    assert [response.closed for response in responses] == [True, True, False]
+    assert all(response.closed for response in responses)
+
+
+async def test_async_start_node_firmware_update_staging_502_stops_before_commit() -> None:
+    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD, port=8080)
+    client._session = FakeSession([
+        FakeResponse(200, json_data={"ndw": {"components": "base"}}),
+        FakeResponse(502, text="<html>Proxy error, /404.html</html>"),
+    ])
+    client._authenticate_to_node = AsyncMock(return_value={"Cookie": "session=node"})
+
+    with pytest.raises(HomeAssistantError, match="stage"):
+        await client.async_start_node_firmware_update("192.0.2.2")
+
+    assert [
+        (method, url.split("/rci/")[1]) for method, url, _ in client._session.calls
+    ] == [("GET", "show/version"), ("POST", "")]
+    client._authenticate_to_node.assert_awaited_once_with("192.0.2.2", 8080)
 
 
 async def test_async_start_node_firmware_update_auth_fail_tries_next_port() -> None:
@@ -181,24 +201,7 @@ async def test_async_start_node_firmware_update_version_401_clears_cache() -> No
     assert ("192.0.2.2", 80) not in client._node_auth_headers
 
 
-async def test_async_start_node_firmware_update_commit_401_clears_cache() -> None:
-    responses = [
-        FakeResponse(200, json_data={"ndw": {"components": "base"}}),
-        FakeResponse(204),
-        FakeResponse(401),
-    ]
-    client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD, port=80)
-    client._session = FakeSession(responses.copy())
-    client._node_auth_headers[("192.0.2.2", 80)] = {"Cookie": "stale"}
-    client._authenticate_to_node = AsyncMock(return_value={"Cookie": "stale"})
-
-    with pytest.raises(HomeAssistantError):
-        await client.async_start_node_firmware_update("192.0.2.2")
-
-    assert ("192.0.2.2", 80) not in client._node_auth_headers
-
-
-async def test_async_start_node_firmware_update_component_exception_uses_legacy() -> None:
+async def test_async_start_node_firmware_update_invalid_version_does_not_dispatch() -> None:
     class FailingJsonResponse(FakeResponse):
         async def json(self) -> object:
             raise ValueError("bad json")
@@ -208,11 +211,13 @@ async def test_async_start_node_firmware_update_component_exception_uses_legacy(
     client._session = FakeSession(responses.copy())
     client._authenticate_to_node = AsyncMock(return_value={"Cookie": "session=node"})
 
-    assert await client.async_start_node_firmware_update("192.0.2.2") is True
+    with pytest.raises(HomeAssistantError):
+        await client.async_start_node_firmware_update("192.0.2.2")
+    assert [method for method, _, _ in client._session.calls] == ["GET"]
 
 
 async def test_async_start_node_firmware_update_legacy_non404_failure_raises() -> None:
-    responses = [FakeResponse(500, text="version failed"), FakeResponse(500, text="legacy")]
+    responses = [FakeResponse(200, json_data={}), FakeResponse(400, text="legacy refused")]
     client = KeeneticClient(TEST_HOST, TEST_USERNAME, TEST_PASSWORD, port=80)
     client._session = FakeSession(responses.copy())
     client._authenticate_to_node = AsyncMock(return_value={"Cookie": "session=node"})

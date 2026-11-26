@@ -217,7 +217,9 @@ class WanMixin:
 
         return wans
 
-    async def async_get_ping_check_status(self) -> Dict[str, Any]:
+    async def async_get_ping_check_status(
+        self, *, raise_on_failure: bool = False
+    ) -> Dict[str, Any]:
         """Return the router's ping-check results per interface.
 
         This is the authoritative "is the internet actually reachable
@@ -299,6 +301,8 @@ class WanMixin:
         except (KeeneticApiError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError) as err:
             if _is_endpoint_missing(err):
                 self._ping_check_supported = False
+            elif raise_on_failure:
+                raise
             _LOGGER.debug("show/ping-check unavailable: %s", err)
             return {}
         self._ping_check_supported = True

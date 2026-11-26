@@ -74,6 +74,7 @@
       "no_host": "No host found in discovery data",
       "reauth_successful": "Reauthentication was successful",
       "reconfigure_successful": "Reconfiguration was successful",
+      "wrong_router": "Connect to the same Keenetic router configured in this entry.",
       "unknown": "Unexpected error — the router's config entry no longer exists or could not be loaded."
     }
   },

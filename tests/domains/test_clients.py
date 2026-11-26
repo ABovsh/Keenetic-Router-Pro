@@ -11,6 +11,7 @@ import aiohttp
 import pytest
 
 from custom_components.keenetic_router_pro.api import KeeneticApiError, KeeneticClient
+from custom_components.keenetic_router_pro.const import RCI_HOTSPOT_HOST_PATHS
 
 
 def _client() -> KeeneticClient:
@@ -115,3 +116,33 @@ async def test_async_get_clients_raises_after_all_transient_subpath_failures() -
 
     with pytest.raises(KeeneticApiError, match="503"):
         await client.async_get_clients()
+
+
+@pytest.mark.parametrize("has_winner", [False, True], ids=["no-winner", "winner"])
+async def test_async_get_clients_stops_on_transient_error(has_winner: bool) -> None:
+    client = _client()
+    first, fallback = RCI_HOTSPOT_HOST_PATHS
+    if has_winner:
+        client._hotspot_subpath_winner = fallback
+    error = KeeneticApiError("HTTP 503")
+    client._rci_get = AsyncMock(side_effect=[error, {"host": []}])
+
+    with pytest.raises(KeeneticApiError, match="503") as raised:
+        await client.async_get_clients()
+
+    assert raised.value is error
+    client._rci_get.assert_awaited_once_with(fallback if has_winner else first)
+
+
+@pytest.mark.parametrize(
+    "first_response", [KeeneticApiError("HTTP 404"), {"host": []}], ids=["404", "empty-200"]
+)
+async def test_async_get_clients_uses_fallback_after_missing_or_empty(first_response: object) -> None:
+    client = _client()
+    first, fallback = RCI_HOTSPOT_HOST_PATHS
+    item = {"mac": "AA:BB:CC:00:00:01"}
+    client._rci_get = AsyncMock(side_effect=[first_response, {"host": [item]}])
+
+    assert await client.async_get_clients() == [item]
+    assert [call.args for call in client._rci_get.await_args_list] == [(first,), (fallback,)]
+    assert (first in client._hotspot_subpath_skip) == isinstance(first_response, KeeneticApiError)

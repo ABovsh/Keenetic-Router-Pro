@@ -4,6 +4,8 @@ DOMAIN = "keenetic_router_pro"
 DEFAULT_PORT = 100
 DEFAULT_SSL = False
 FAST_SCAN_INTERVAL = 60
+FIRMWARE_UPDATE_POLL_S = 10
+FIRMWARE_UPDATE_WINDOW_S = 15 * 60
 
 # While KeeneticOS boots, runtime endpoints can briefly answer "not found".
 # Endpoint-capability latches recorded within this many seconds of router
@@ -28,15 +30,17 @@ CAPABILITY_BOOT_GRACE_S = 600
 COUNTER_DEADBAND_BYTES = 100_000_000
 CONF_TRACKED_CLIENTS = "tracked_clients"
 FIELD_CONNECTED = "connected"
+ZERO_MAC = "00:00:00:00:00:00"
 INTERFACE_CONF_DISABLED = "disabled"
 CONF_USE_CHALLENGE_AUTH = "use_challenge_auth"
 CONF_CONNECTION_MODE = "connection_mode"
 CONNECTION_MODE_DIRECT = "direct"
 CONNECTION_MODE_KEENDNS_PROTECTED = "keendns_protected"
+ABORT_WRONG_ROUTER = "wrong_router"
+# The first fresh hotspot observation seeds the entry's MAC history silently.
+# Fire once per MAC first observed after that, until the entry reloads.
 EVENT_NEW_DEVICE = f"{DOMAIN}_new_device"
-# Fired for every client that joins or leaves, not only the first time a MAC is
-# ever seen. Automations can trigger on these directly instead of watching an
-# entity's state and working out what changed.
+# Fire for every client that joins or leaves.
 EVENT_CLIENT_CONNECTED = f"{DOMAIN}_client_connected"
 EVENT_CLIENT_DISCONNECTED = f"{DOMAIN}_client_disconnected"
 EVENT_WAN_FAILOVER = f"{DOMAIN}_wan_failover"

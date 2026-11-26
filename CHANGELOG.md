@@ -8,6 +8,27 @@ Entries are written for end users (HACS installs); each release is grouped by
 what you actually notice on your dashboard. For per-commit detail, see the
 git log.
 
+## 2.0.0
+
+### 🔧 Changed
+
+- **Wi-Fi, uplink, VPN and IPsec switches confirm a change with fewer router reads.** After a switch command the integration re-reads only what that switch shows (and, for Wi-Fi, connected clients and extenders) instead of every router section; a failed re-read is retried on the next refresh.
+
+### 🐛 Fixed
+
+- **Firmware updates no longer report a false error while the router or extender installs.** A lost or late reply to the install command means the update has started; Home Assistant shows it as in progress until the device is back and reports success only when the installed version has changed, or a clear error if it returns with the old version or does not return within 15 minutes.
+- **A failed firmware check no longer shows "up to date".** The update entity keeps the last known available version, or stays unknown until the first successful check, and the check is retried every 15 minutes until it succeeds.
+- **"New device" fires once per device, as documented.** It fires the first time a client appears in the router's client list after Home Assistant starts or the integration reloads, including when per-client sensors are off and the client was first seen in the neighbour table; a client that leaves and comes back fires only "client connected".
+- **A brief client-list error no longer marks clients as away or new.** When the router's client list does not answer, the integration keeps the last list instead of using the router's saved-hosts list, so trackers do not switch to away and "new device" does not fire for known clients.
+- **Connection policy changes are confirmed even if the first re-read fails.** The confirming read is retried on the next refresh instead of being dropped.
+- **An extender update is never started twice.** When the controller's reply to the extender update command is lost, the integration waits for the result instead of sending the command again directly to the extender.
+- **Reconfigure and reauthentication refuse a different router.** If the new address answers with another router's MAC addresses, the flow stops with "Connect to the same Keenetic router configured in this entry" instead of attaching that router's controls and history to the existing entry.
+
+### 🔒 Privacy
+
+- **Sign-in requests no longer follow redirects.** The router and extender sign-in requests stop at a redirect and report a connection error, so the login and its challenge response are never sent to another address.
+- **Diagnostics hide VPN and WireGuard profile names.** The profile label, copied from the router's interface description, is now redacted like the description itself.
+
 ## 1.21.0
 
 ### ⚠️ Breaking

@@ -23,6 +23,7 @@ _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.api.clients")
 
 class ClientsMixin:
     async def async_get_clients(self) -> List[Dict[str, Any]]:
+        self._hotspot_read_unsupported = False
         # Fast path: once we've found a hotspot subpath that returns real
         # data, latch it and try it first on every subsequent call. This
         # skips up to 2 wasted round-trips per coordinator tick on routers
@@ -37,7 +38,6 @@ class ClientsMixin:
             ordered_paths = list(RCI_HOTSPOT_HOST_PATHS)
 
         last_data: Any = None
-        last_transient_error: KeeneticApiError | None = None
         successful_fetch = False
 
         for subpath in ordered_paths:
@@ -47,13 +47,12 @@ class ClientsMixin:
                 data = await self._rci_get(subpath)
                 last_data = data
             except KeeneticApiError as err:
-                if _is_endpoint_missing(err):
-                    # Latch this subpath off so we stop hitting an endpoint
-                    # the firmware does not expose every coordinator tick.
-                    self._hotspot_subpath_skip.add(subpath)
-                else:
-                    last_transient_error = err
                 _LOGGER.debug("hotspot subpath %s failed: %s", subpath, err)
+                if not _is_endpoint_missing(err):
+                    raise
+                # Latch this subpath off so we stop hitting an endpoint
+                # the firmware does not expose every coordinator tick.
+                self._hotspot_subpath_skip.add(subpath)
                 continue
 
             successful_fetch = True
@@ -63,9 +62,7 @@ class ClientsMixin:
                 self._hotspot_subpath_winner = subpath
                 return items
 
-        if not successful_fetch and last_transient_error is not None:
-            raise last_transient_error
-
+        self._hotspot_read_unsupported = not successful_fetch
         _LOGGER.debug(
             "No clients parsed from hotspot host response type=%s",
             type(last_data).__name__,
