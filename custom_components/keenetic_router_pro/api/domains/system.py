@@ -29,6 +29,7 @@ from ..helpers import (
 )
 
 _LOGGER = logging.getLogger(f"custom_components.{DOMAIN}.api.system")
+_FIRMWARE_AUTH_REJECTED = "Firmware update authentication rejected"
 
 
 class _FirmwareUpdateRejected(KeeneticApiError):
@@ -176,7 +177,7 @@ class SystemMixin:
                 await self._dispatch_firmware_update("components/commit", {"reason": "manual"})
                 return True
         except KeeneticAuthError as err:
-            raise HomeAssistantError("Firmware update authentication rejected") from err
+            raise HomeAssistantError(_FIRMWARE_AUTH_REJECTED) from err
         except KeeneticApiError as err:
             if not _firmware_endpoint_missing(err):
                 raise HomeAssistantError("Router did not accept the firmware update command") from err
@@ -264,17 +265,17 @@ class SystemMixin:
         self, base: str, headers: dict[str, str], auth_key: tuple[str, int]
     ) -> list[dict[str, Any]]:
         """Read the direct node's component list before dispatching an update."""
-        async with asyncio.timeout(self._request_timeout):
-            async with await self._session.get(
-                f"{base}{RCI_ROOT}/{RCI_SHOW_VERSION}", headers=headers, allow_redirects=False
-            ) as response:
-                if response.status == 401:
-                    self._node_auth_headers.pop(auth_key, None)
-                    raise KeeneticAuthError("Node firmware version authentication rejected")
-                if response.status != 200:
-                    await self._check_firmware_response(response)
-                    raise KeeneticApiError("Node firmware version unavailable")
-                return _firmware_staging_payload(await response.json())
+        async with (
+            asyncio.timeout(self._request_timeout),
+            await self._session.get(f"{base}{RCI_ROOT}/{RCI_SHOW_VERSION}", headers=headers, allow_redirects=False) as response,
+        ):
+            if response.status == 401:
+                self._node_auth_headers.pop(auth_key, None)
+                raise KeeneticAuthError("Node firmware version authentication rejected")
+            if response.status != 200:
+                await self._check_firmware_response(response)
+                raise KeeneticApiError("Node firmware version unavailable")
+            return _firmware_staging_payload(await response.json())
 
     async def _dispatch_firmware_update(
         self,
@@ -317,20 +318,20 @@ class SystemMixin:
 
         url = f"{base}{RCI_ROOT}/{endpoint}"
         for retry in (False, True):
-            async with asyncio.timeout(self._request_timeout):
-                async with await self._session.post(
-                    url, json=payload, headers=headers, allow_redirects=False
-                ) as response:
-                    if response.status != 401:
-                        await self._check_firmware_response(response)
-                        return
-                    if auth_key is None:
-                        self._authenticated = False
-                    else:
-                        self._node_auth_headers.pop(auth_key, None)
+            async with (
+                asyncio.timeout(self._request_timeout),
+                await self._session.post(url, json=payload, headers=headers, allow_redirects=False) as response,
+            ):
+                if response.status != 401:
+                    await self._check_firmware_response(response)
+                    return
+                if auth_key is None:
+                    self._authenticated = False
+                else:
+                    self._node_auth_headers.pop(auth_key, None)
 
             if retry:
-                raise HomeAssistantError("Firmware update authentication rejected")
+                raise HomeAssistantError(_FIRMWARE_AUTH_REJECTED)
             headers = await self._firmware_auth_headers(auth_key)
 
     async def _firmware_auth_headers(self, auth_key: tuple[str, int] | None) -> dict[str, str]:
@@ -341,9 +342,9 @@ class SystemMixin:
                 return dict(self._auth_header or {})
             headers = await self._authenticate_to_node(*auth_key)
         except (KeeneticApiError, aiohttp.ClientError, TimeoutError) as err:
-            raise HomeAssistantError("Firmware update authentication rejected") from err
+            raise HomeAssistantError(_FIRMWARE_AUTH_REJECTED) from err
         if not headers:
-            raise HomeAssistantError("Firmware update authentication rejected")
+            raise HomeAssistantError(_FIRMWARE_AUTH_REJECTED)
         return headers
 
     async def _check_firmware_response(self, response: aiohttp.ClientResponse) -> None:

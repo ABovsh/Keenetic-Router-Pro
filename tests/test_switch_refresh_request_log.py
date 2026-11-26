@@ -124,7 +124,8 @@ async def _warm(batch: bool, family: str, entry):
         "vpn": lambda: KeeneticVpnSwitch(coordinator, entry, client, _VPN, {}),
         "ipsec": lambda: KeeneticCryptoMapEnabledSwitch(coordinator, entry, client, "Site"),
     }[family]()
-    assert switch.available and switch.is_on
+    assert switch.available
+    assert switch.is_on
     return coordinator, session, switch
 
 
@@ -149,7 +150,8 @@ async def _write(switch, session: SwitchingSession, enabled: bool) -> None:
 
 
 def _assert_confirmed(coordinator: KeeneticCoordinator, switch, family: str, enabled: bool) -> None:
-    assert switch.available and switch.is_on is enabled
+    assert switch.available
+    assert switch.is_on is enabled
     data = coordinator.data
     if family == "wifi":
         assert data["mesh_nodes_by_cid"]["extender-1"]["connected"] is enabled
@@ -233,7 +235,8 @@ async def test_switch_confirmation_retries_failed_evidence(family, keenetic_entr
     del session.status[read]
     coordinator._refresh_count = 11
     assert await _tick(coordinator, session) == _confirming_reads(False, family)
-    assert switch.available and switch.is_on is False
+    assert switch.available
+    assert switch.is_on is False
     if family == "wan":
         assert coordinator.data["wan_by_id"][_WAN]["internet_access"] is False
         assert coordinator.data["wan_observation_fresh"]
@@ -276,7 +279,8 @@ async def test_ranked_wireguard_wan_switch_updates_wireguard_availability(keenet
     await _write(switch, session, False)
 
     assert await _tick(coordinator, session) == _confirming_reads(True, "wan")
-    assert switch.available and not switch.is_on
+    assert switch.available
+    assert not switch.is_on
     assert not uptime.available
 
 
@@ -336,7 +340,8 @@ async def test_active_vpn_switch_confirms_wan_status(batch, keenetic_entry) -> N
     coordinator._refresh_count = 11
 
     assert await _tick(coordinator, session) == _confirming_reads(batch, "vpn")
-    assert switch.available and not switch.is_on
+    assert switch.available
+    assert not switch.is_on
     assert coordinator.data["wan_status"]["status"] == "down"
     assert coordinator.data["wan_status"]["ip"] is None
     assert coordinator.data["wan_failover"] == {"from": _VPN, "to": None}
@@ -352,7 +357,8 @@ async def test_wifi_confirmation_distinguishes_neighbour_failures(batch, status,
     extra_get = Counter([_get("show/ip/neighbour")]) if batch else Counter()
 
     assert await _tick(coordinator, session) == _confirming_reads(batch, "wifi") + extra_get
-    assert switch.available and not switch.is_on
+    assert switch.available
+    assert not switch.is_on
 
     coordinator._refresh_count = 11
     profile = "fast without clients" if status == 404 else "mesh request"

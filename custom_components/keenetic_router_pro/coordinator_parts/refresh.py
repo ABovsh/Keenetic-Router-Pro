@@ -54,8 +54,8 @@ class RefreshPlan:
     ipsec_status_refresh: bool
     update_check_refresh: bool
     pending: PendingRefreshes = field(default_factory=PendingRefreshes)
-    needs_clients: InitVar[bool] = True
-    needs_policies: InitVar[bool] = True
+    needs_clients: InitVar[bool] = field(default=True)
+    needs_policies: InitVar[bool] = field(default=True)
     due: frozenset[Source] = field(init=False)
 
     def __post_init__(self, needs_clients: bool, needs_policies: bool) -> None:
